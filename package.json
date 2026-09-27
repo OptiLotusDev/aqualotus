@@ -10,6 +10,7 @@
     "build:wasm": "npm --prefix apps/aqualotus-ui run build:wasm",
     "lint": "npm --prefix apps/aqualotus-ui run lint",
     "test:rust": "cargo test --workspace",
+    "test:ui": "npm --prefix apps/aqualotus-ui run test:ui",
     "tauri:dev": "npm --prefix apps/aqualotus-ui run tauri:dev",
     "tauri:build": "npm --prefix apps/aqualotus-ui run tauri:build",
     "mobile:sync": "npm --prefix apps/aqualotus-ui run mobile:sync",

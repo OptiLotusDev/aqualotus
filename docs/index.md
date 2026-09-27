@@ -6,6 +6,7 @@ This file tells human teammates and AI agents what each document in `docs/` is f
 
 - **`roadmap.md`** — Living engineering specification. Phases, milestones, and build order. Read this first when planning work or deciding what to implement next.
 - **`design-principles.md`** — Normative design rules (e.g. honest functions, invariants). Constraints that all implementation must satisfy. Read before writing language, runtime, or UI logic.
+- **`api.md`** — Optilotus bridge API reference (Rust core, WASM exports, TS bridge, UI state owners). Read before touching the UI ↔ runtime boundary.
 - **`proposal.md`** — Project presentation / graduation proposal. Background, motivation, and scope for stakeholders. Context only; not a build spec.
 
 ## Reading order for agents
@@ -13,7 +14,8 @@ This file tells human teammates and AI agents what each document in `docs/` is f
 1. `index.md` (this file) — orientation
 2. `roadmap.md` — what to build and in what order
 3. `design-principles.md` — rules the build must follow
-4. `proposal.md` — background context if needed
+4. `api.md` — current interface contracts
+5. `proposal.md` — background context if needed
 
 ## Notes
 

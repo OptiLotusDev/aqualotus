@@ -1,62 +1,35 @@
-import { useEffect, useState } from 'react'
-import {
-  add,
-  ensureOptilotus,
-  getEmptyProgram,
-  getHealth,
-  getVersion,
-  runEmpty,
-} from '../lib/optilotus'
+import type { ReactElement } from 'react'
+import { useOptilotus } from '../hooks/useOptilotus'
 
 /**
- * Shared Optilotus status panel. Rendered by both DesktopLayout and
- * MobileLayout so the WASM bridge stays visible on every target
- * (Web, Tauri desktop, Capacitor mobile).
+ * Shared Optilotus status panel (presentational only; state lives in
+ * `useOptilotus`). Rendered by both DesktopLayout and MobileLayout so
+ * the WASM bridge stays visible on every target.
  */
-export default function OptilotusPanel() {
-  const [wasmStatus, setWasmStatus] = useState('loading Optilotus WASM…')
-  const [version, setVersion] = useState('')
-  const [health, setHealth] = useState('')
-  const [emptyProgram, setEmptyProgram] = useState('')
-  const [runResult, setRunResult] = useState('')
-  const [addResult, setAddResult] = useState('')
-
-  useEffect(() => {
-    ensureOptilotus()
-      .then(() => {
-        setVersion(getVersion());
-        setHealth(getHealth());
-        setEmptyProgram(getEmptyProgram());
-        setRunResult(runEmpty());
-        setAddResult(String(add(2, 3)));
-        setWasmStatus('connected');
-      })
-      .catch((e) => {
-        setWasmStatus(`failed: ${String(e)}`);
-      });
-  }, [])
+export default function OptilotusPanel(): ReactElement {
+  const status = useOptilotus()
 
   return (
     <section id="optilotus" style={{ padding: '2rem', textAlign: 'left' }}>
       <h2>Optilotus (WASM)</h2>
       <p>
-        Status: <code>{wasmStatus}</code>
+        Status: <code>{status.wasmStatus}</code>
       </p>
       <ul>
         <li>
-          version: <code>{version || '…'}</code>
+          version: <code>{status.version || '…'}</code>
         </li>
         <li>
-          health: <code>{health || '…'}</code>
+          health: <code>{status.health || '…'}</code>
         </li>
         <li>
-          add(2, 3): <code>{addResult || '…'}</code>
+          add(2, 3): <code>{status.addResult || '…'}</code>
         </li>
         <li>
-          empty program: <code>{emptyProgram || '…'}</code>
+          empty program: <code>{status.emptyProgram || '…'}</code>
         </li>
         <li>
-          run empty: <code>{runResult || '…'}</code>
+          run empty: <code>{status.runResult || '…'}</code>
         </li>
       </ul>
     </section>

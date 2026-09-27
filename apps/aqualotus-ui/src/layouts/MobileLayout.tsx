@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react'
 import OptilotusPanel from '../components/OptilotusPanel'
 
 /**
@@ -5,7 +6,7 @@ import OptilotusPanel from '../components/OptilotusPanel'
  * Optilotus bridge panel. Loaded for narrow viewports and inside the
  * Capacitor native shell.
  */
-export default function MobileLayout() {
+export default function MobileLayout(): ReactElement {
   return (
     <main
       style={{

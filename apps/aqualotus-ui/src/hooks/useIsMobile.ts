@@ -1,25 +1,7 @@
 import { useEffect, useState } from 'react'
+import { isNativeMobile } from './capacitorBridge'
 
 const MOBILE_QUERY = '(max-width: 767px)'
-
-interface CapacitorWindow {
-  Capacitor?: {
-    isNativePlatform?: () => boolean
-  }
-}
-
-/** True when running inside a Capacitor native shell. */
-function isNativeMobile(): boolean {
-  if (typeof window === 'undefined') return false
-  try {
-    return (
-      (window as unknown as CapacitorWindow).Capacitor?.isNativePlatform?.() ??
-      false
-    )
-  } catch {
-    return false
-  }
-}
 
 /**
  * Layout selection hook: mobile when the viewport is narrow or the app
@@ -28,13 +10,14 @@ function isNativeMobile(): boolean {
 export function useIsMobile(): boolean {
   const [mobile, setMobile] = useState<boolean>(() =>
     typeof window !== 'undefined'
-      ? window.matchMedia(MOBILE_QUERY).matches || isNativeMobile()
+      ? window.matchMedia(MOBILE_QUERY).matches ||
+        isNativeMobile(window)
       : false,
   )
 
   useEffect(() => {
     const mql = window.matchMedia(MOBILE_QUERY)
-    const onChange = () => setMobile(mql.matches || isNativeMobile())
+    const onChange = () => setMobile(mql.matches || isNativeMobile(window))
     mql.addEventListener('change', onChange)
     onChange()
     return () => mql.removeEventListener('change', onChange)

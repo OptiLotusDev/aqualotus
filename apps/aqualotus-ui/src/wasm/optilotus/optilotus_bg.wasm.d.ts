@@ -2,9 +2,9 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const optilotus_add: (a: bigint, b: bigint) => bigint;
-export const optilotus_empty_program: () => [number, number];
+export const optilotus_emptyProgram: () => [number, number];
 export const optilotus_health: () => [number, number];
-export const optilotus_run_empty: () => [number, number];
+export const optilotus_runEmpty: () => [number, number];
 export const optilotus_version: () => [number, number];
 export const __wbindgen_free: (a: number, b: number, c: number) => void;
 export const __wbindgen_malloc: (a: number, b: number) => number;

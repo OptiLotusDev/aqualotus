@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { ReactElement } from 'react'
 import heroImg from '../assets/hero.png'
 import reactLogo from '../assets/react.svg'
 import viteLogo from '../assets/vite.svg'
@@ -9,7 +10,7 @@ import OptilotusPanel from '../components/OptilotusPanel'
  * Big-screen shell: Web + Tauri desktop. Full starter content plus the
  * shared Optilotus bridge panel.
  */
-export default function DesktopLayout() {
+export default function DesktopLayout(): ReactElement {
   const [count, setCount] = useState(0)
 
   return (

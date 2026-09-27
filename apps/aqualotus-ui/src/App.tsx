@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react'
 import { useIsMobile } from './hooks/useIsMobile'
 import DesktopLayout from './layouts/DesktopLayout'
 import MobileLayout from './layouts/MobileLayout'
@@ -7,7 +8,7 @@ import MobileLayout from './layouts/MobileLayout'
  * narrow viewport or Capacitor native shell → MobileLayout,
  * otherwise → DesktopLayout. Both share the Optilotus WASM bridge.
  */
-function App() {
+function App(): ReactElement {
   const isMobile = useIsMobile()
   return isMobile ? <MobileLayout /> : <DesktopLayout />
 }

@@ -1,7 +1,7 @@
 /* @ts-self-types="./optilotus.d.ts" */
 
 /**
- * JS: `optilotus_add(a, b) -> number`
+ * JS: `optilotus_add(a, b) -> bigint`
  * @param {bigint} a
  * @param {bigint} b
  * @returns {bigint}
@@ -12,14 +12,14 @@ export function optilotus_add(a, b) {
 }
 
 /**
- * JS: `optilotus_empty_program() -> string` (JSON)
+ * JS: `optilotus_emptyProgram() -> string` (JSON)
  * @returns {string}
  */
-export function optilotus_empty_program() {
+export function optilotus_emptyProgram() {
     let deferred1_0;
     let deferred1_1;
     try {
-        const ret = wasm.optilotus_empty_program();
+        const ret = wasm.optilotus_emptyProgram();
         deferred1_0 = ret[0];
         deferred1_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);
@@ -46,14 +46,14 @@ export function optilotus_health() {
 }
 
 /**
- * JS: `optilotus_run_empty() -> string` (JSON result)
+ * JS: `optilotus_runEmpty() -> string` (JSON result)
  * @returns {string}
  */
-export function optilotus_run_empty() {
+export function optilotus_runEmpty() {
     let deferred1_0;
     let deferred1_1;
     try {
-        const ret = wasm.optilotus_run_empty();
+        const ret = wasm.optilotus_runEmpty();
         deferred1_0 = ret[0];
         deferred1_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);

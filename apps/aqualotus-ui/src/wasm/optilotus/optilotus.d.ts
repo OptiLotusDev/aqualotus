@@ -2,14 +2,14 @@
 /* eslint-disable */
 
 /**
- * JS: `optilotus_add(a, b) -> number`
+ * JS: `optilotus_add(a, b) -> bigint`
  */
 export function optilotus_add(a: bigint, b: bigint): bigint;
 
 /**
- * JS: `optilotus_empty_program() -> string` (JSON)
+ * JS: `optilotus_emptyProgram() -> string` (JSON)
  */
-export function optilotus_empty_program(): string;
+export function optilotus_emptyProgram(): string;
 
 /**
  * JS: `optilotus_health() -> string` ("ok")
@@ -17,9 +17,9 @@ export function optilotus_empty_program(): string;
 export function optilotus_health(): string;
 
 /**
- * JS: `optilotus_run_empty() -> string` (JSON result)
+ * JS: `optilotus_runEmpty() -> string` (JSON result)
  */
-export function optilotus_run_empty(): string;
+export function optilotus_runEmpty(): string;
 
 /**
  * JS: `optilotus_version() -> string`
@@ -31,9 +31,9 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly optilotus_add: (a: bigint, b: bigint) => bigint;
-    readonly optilotus_empty_program: () => [number, number];
+    readonly optilotus_emptyProgram: () => [number, number];
     readonly optilotus_health: () => [number, number];
-    readonly optilotus_run_empty: () => [number, number];
+    readonly optilotus_runEmpty: () => [number, number];
     readonly optilotus_version: () => [number, number];
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
