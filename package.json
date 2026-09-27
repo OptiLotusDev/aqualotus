@@ -1,0 +1,19 @@
+{
+  "name": "aqualotus",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm --prefix apps/aqualotus-ui run dev",
+    "dev:ui": "npm --prefix apps/aqualotus-ui run dev:ui",
+    "build": "npm --prefix apps/aqualotus-ui run build",
+    "build:wasm": "npm --prefix apps/aqualotus-ui run build:wasm",
+    "lint": "npm --prefix apps/aqualotus-ui run lint",
+    "test:rust": "cargo test --workspace",
+    "tauri:dev": "npm --prefix apps/aqualotus-ui run tauri:dev",
+    "tauri:build": "npm --prefix apps/aqualotus-ui run tauri:build",
+    "mobile:sync": "npm --prefix apps/aqualotus-ui run mobile:sync",
+    "mobile:android": "npm --prefix apps/aqualotus-ui run mobile:android",
+    "mobile:ios": "npm --prefix apps/aqualotus-ui run mobile:ios"
+  }
+}

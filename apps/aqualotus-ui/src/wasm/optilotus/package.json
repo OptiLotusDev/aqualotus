@@ -1,0 +1,15 @@
+{
+  "name": "optilotus",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "optilotus_bg.wasm",
+    "optilotus.js",
+    "optilotus.d.ts"
+  ],
+  "main": "optilotus.js",
+  "types": "optilotus.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

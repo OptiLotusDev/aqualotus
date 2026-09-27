@@ -1,19 +1,32 @@
 {
-  "name": "aqualotus-web",
+  "name": "aqualotus-ui",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "oxlint",
-    "preview": "vite preview"
+    "build:wasm": "wasm-pack build ../../crates/optilotus --target web --out-dir ../../apps/aqualotus-ui/src/wasm/optilotus --out-name optilotus && rm -f ./src/wasm/optilotus/.gitignore",
+    "dev": "npm run build:wasm && vite",
+    "dev:ui": "vite",
+    "build": "npm run build:wasm && tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "oxlint .",
+    "tauri": "tauri",
+    "tauri:dev": "npm run build:wasm && tauri dev",
+    "tauri:build": "npm run build:wasm && tauri build",
+    "mobile:sync": "npm run build && npx cap sync",
+    "mobile:android": "npm run mobile:sync && npx cap open android",
+    "mobile:ios": "npm run mobile:sync && npx cap open ios"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/ios": "^8.5.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
