@@ -1,5 +1,9 @@
 [workspace]
 members = ["crates/optilotus"]
+# The Tauri desktop shell manages its own build via the Tauri CLI.
+# Excluding it keeps plain `cargo test/build --workspace` (web + engine
+# workflows) from requiring Tauri's OS libraries.
+exclude = ["apps/aqualotus-ui/src-tauri"]
 resolver = "2"
 
 [workspace.package]

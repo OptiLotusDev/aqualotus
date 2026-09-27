@@ -121,6 +121,11 @@ executeMethod
 resultContext
 ```
 
+if a `prefix_` is used the convention should be `prefix_camelCase`
+
+should only be applied to typescript, rust can retain its function/variables naming conventions
+
+
 ### Accessors
 
 If a type has a field named `size`, its getter should simply be named `size()` rather than `get_size()` or `getSize()`.
@@ -191,6 +196,10 @@ The `try_` prefix should therefore communicate **recoverable fallibility**, not 
 ### Boolean queries
 
 `is_` and `has_` should be used for query methods that return a boolean.
+
+### `optilotus_` functions
+
+inside aqualotus, any functions inside of it that originate from optilotus' API layer should be prefixed with `optilotus_`
 
 Examples:
 

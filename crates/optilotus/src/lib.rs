@@ -59,10 +59,10 @@ pub fn add(left: u64, right: u64) -> u64 {
 // wasm-bindgen exports (browser entry points)
 // ---------------------------------------------------------------------------
 // Project rule: every function the UI calls that originates from the
-// Optilotus API layer carries the `optilotus_` prefix with a camelCase
-// remainder (e.g. `optilotus_emptyProgram`), so Optilotus origin is
-// visible at the call site. This deliberately takes precedence over the
-// generic camelCase rule (P9/P24) for this boundary.
+// Optilotus API layer carries the `optilotus_` prefix, in both Rust
+// (`js_name`) and TypeScript, so Optilotus origin is visible at the call
+// site. This deliberately takes precedence over the generic camelCase
+// rule (P9/P24) for this boundary.
 
 /// JS: `optilotus_version() -> string`
 #[wasm_bindgen(js_name = optilotus_version)]
