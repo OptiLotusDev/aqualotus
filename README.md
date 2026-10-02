@@ -67,8 +67,8 @@ Everything here must keep working headlessly (`cargo test` proves it).
 | `wasm/`                  | Generated bridge files (`.js`, `.wasm`, `.d.ts`)        | 🚫 Never by hand — rebuilt with `npm run build:wasm` which automatically runs upon running the frontend |
 
 **Bridge rule:** functions in the UI that come from the Optilotus API carry the
-`optilotus_` prefix with a camelCase remainder — e.g. `optilotus_emptyProgram`,
-`optilotus_runEmpty`, `optilotus_version`. If you expose a new engine function to
+`optilotus_` prefix with a camelCase remainder — e.g. `optilotus_execMath`,
+`optilotus_set`, `optilotus_version`. If you expose a new engine function to
 the UI, name it this way. UI-only helpers (hooks, components) keep normal names
 (`useIsMobile`, `OptilotusPanel`, …).
 
@@ -159,7 +159,8 @@ then drop nothing; the command names are the same.)
 | `npm run dev:ui` | Starts the web UI **without** rebuilding WASM | UI-only changes (faster startup) |
 | `npm run build` | Production web build (`dist/`) | Before deploying or syncing to mobile |
 | `npm run build:wasm` | Rebuilds the WASM bridge only | After changing the engine API |
-| `npm run test:rust` | Runs all Rust tests (`cargo test`) | After any engine change |
+| `npm run test:rust` | Runs all Rust tests (lib + `tests/`, every target) | After any engine change |
+| `npm run test:rust:all` | Full engine gate: `fmt --check` + `clippy -D warnings` + all Rust tests (mirrors CI `rust-core`) | Before pushing engine changes |
 | `npm run test:ui` | Runs all UI unit tests (vitest) | After changing hooks/utils |
 | `npm run lint` | Checks code style | Before committing |
 | `npm run preview` | Serves the production build locally | To check what deploy will look like |
@@ -178,7 +179,7 @@ then drop nothing; the command names are the same.)
 - Changed **the engine API the UI calls** → `npm run dev`, then check the WASM panel
 - Want to run on **desktop** → `npm run tauri:dev`
 - Want to run on a **phone/emulator** → `npm run build`, then `npm run mobile:android`
-- About to **commit** → `npm run lint`, `npm run test:rust`, `npm run test:ui`
+- About to **commit** → `npm run lint`, `npm run test:rust:all`, `npm run test:ui`
 
 ---
 
@@ -191,13 +192,14 @@ then drop nothing; the command names are the same.)
 3. **Respect the layers.** Language/runtime logic goes in `crates/optilotus` only.
    The UI calls it through `src/lib/optilotus.ts` — never copy engine logic into React.
 4. **Follow the naming rules.**
-   - Engine functions used by the UI: `optilotus_` prefix + camelCase rest
-     (`optilotus_emptyProgram`, `optilotus_runEmpty`).
+    - Engine functions used by the UI: `optilotus_` prefix + camelCase rest
+      (`optilotus_execMath`, `optilotus_set`).
    - Everything else: `camelCase` functions/variables, `PascalCase` types/components,
      `SCREAMING_SNAKE_CASE` constants. No `any` in TypeScript. Details in
      `design-principles.md` (Principle 9) and `docs/api.md`.
 5. **Test what you touch.**
-   - Rust: add/extend unit tests in `src/lib.rs`, run `npm run test:rust`.
+    - Rust: add/extend tests in `crates/optilotus/tests/` (one file per module,
+      shared helpers in `tests/common/`), run `npm run test:rust`.
    - UI logic (hooks, utils): add a `.test.ts` next to it, run `npm run test:ui`.
    - Run `npm run lint` before pushing.
 6. **Never hand-edit generated files**: `src/wasm/`, `android/`, `ios/`, `dist/`,

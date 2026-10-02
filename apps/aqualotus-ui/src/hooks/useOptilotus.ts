@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
-  optilotus_add,
-  optilotus_emptyProgram,
+  optilotus_execMath,
   optilotus_health,
-  optilotus_runEmpty,
   optilotus_tryEnsure,
   optilotus_version,
 } from '../lib/optilotus'
@@ -13,23 +11,22 @@ export interface OptilotusStatus {
   readonly wasmStatus: string;
   readonly version: string;
   readonly health: string;
-  readonly emptyProgram: string;
-  readonly runResult: string;
-  readonly addResult: string;
+  readonly mathDemo: string;
 }
 
 const LOADING: OptilotusStatus = {
   wasmStatus: 'loading Optilotus WASM…',
   version: '',
   health: '',
-  emptyProgram: '',
-  runResult: '',
-  addResult: '',
+  mathDemo: '',
 }
 
 /**
  * Data hook (P1/P10): owns async bridge state. Renders nothing;
  * `OptilotusPanel` presents the snapshot it returns.
+ *
+ * The demo expression uses literals only, so it never touches the
+ * shared session (no variables to leak into the user's flow).
  */
 export function useOptilotus(): OptilotusStatus {
   const [status, setStatus] = useState<OptilotusStatus>(LOADING)
@@ -41,9 +38,7 @@ export function useOptilotus(): OptilotusStatus {
           wasmStatus: 'connected',
           version: optilotus_version(),
           health: optilotus_health(),
-          emptyProgram: optilotus_emptyProgram(),
-          runResult: optilotus_runEmpty(),
-          addResult: String(optilotus_add(2, 3)),
+          mathDemo: optilotus_execMath('(3 + 4) % 2'),
         });
       })
       .catch((e: unknown) => {
