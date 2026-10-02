@@ -1,0 +1,185 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    branches: [main]
+    
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Optilotus engine: headless proof. The runtime must never depend on
+  # the UI, Tauri, React, or a browser (roadmap invariants 1/11, P11/P12).
+  # Plain `cargo test --workspace` excludes the Tauri shell by design
+  # (see root Cargo.toml `exclude`).
+  rust-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+
+  # Web: the one shared React app + WASM bridge (works today).
+  # Covers `lint`, `test:ui`, and the production `build`
+  # (which rebuilds WASM via `build:wasm`, then `tsc -b` + `vite build`).
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/aqualotus-ui/package-lock.json
+      - name: Install UI deps
+        working-directory: apps/aqualotus-ui
+        run: npm ci
+      - name: Lint
+        working-directory: apps/aqualotus-ui
+        run: npm run lint
+      - name: Test UI
+        working-directory: apps/aqualotus-ui
+        run: npm run test:ui
+      - name: Build web
+        working-directory: apps/aqualotus-ui
+        run: npm run build
+
+  # Desktop: same UI packed by Tauri 2 (Windows / macOS / Linux).
+  # Runs only after core + web are green to save native build minutes.
+  desktop:
+    needs: [rust-core, web]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/aqualotus-ui/package-lock.json
+      - name: Install Tauri OS libraries (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl wget file \
+            libwebkit2gtk-4.1-dev libxdo-dev \
+            libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev
+      - name: Install UI deps
+        working-directory: apps/aqualotus-ui
+        run: npm ci
+      - name: Build desktop bundle
+        working-directory: apps/aqualotus-ui
+        run: npm run tauri:build
+
+  # Mobile/Android: same frontend + Optilotus synced via Capacitor,
+  # then assembled with Gradle. Needs Android SDK + Java 17.
+  android:
+    needs: [rust-core, web]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/aqualotus-ui/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install UI deps
+        working-directory: apps/aqualotus-ui
+        run: npm ci
+      - name: Sync Capacitor assets
+        working-directory: apps/aqualotus-ui
+        run: npm run mobile:sync
+      - name: Assemble debug APK
+        working-directory: apps/aqualotus-ui/android
+        run: ./gradlew assembleDebug --no-daemon
+
+  # Mobile/iOS: same frontend + Optilotus synced via Capacitor,
+  # then compiled with Xcode (macOS only, no signing).
+  ios:
+    needs: [rust-core, web]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/aqualotus-ui/package-lock.json
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Install UI deps
+        working-directory: apps/aqualotus-ui
+        run: npm ci
+      - name: Sync Capacitor assets
+        working-directory: apps/aqualotus-ui
+        run: npm run mobile:sync
+      - name: Build iOS app (no signing)
+        working-directory: apps/aqualotus-ui
+        run: >
+          xcodebuild
+          -project ios/App/App.xcodeproj
+          -scheme App
+          -configuration Debug
+          -destination 'generic/platform=iOS'
+          build-for-testing
+          CODE_SIGNING_ALLOWED=NO
