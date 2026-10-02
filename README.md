@@ -111,7 +111,7 @@ If a shortcut violates a design principle, **do not take it**.
 | Tool | Why you need it | Get it |
 |------|-----------------|--------|
 | Rust (stable) | Builds and tests the Optilotus engine | [rustup.rs](https://rustup.rs/) |
-| Node.js 20+ | Runs the UI tooling (Vite, tests, builds) | [nodejs.org](https://nodejs.org/) |
+| Node.js 22+ | Runs the UI tooling (Vite, tests, builds) | [nodejs.org](https://nodejs.org/) |
 | `wasm-pack` | Compiles Rust → WASM for the browser | `cargo install wasm-pack` |
 | A browser | To see the web UI | Any modern browser |
 | Tauri OS libraries | **Desktop only** — native window support | [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) — e.g. Ubuntu: `sudo apt install libwebkit2gtk-4.1-dev librsvg2-dev` |
@@ -217,7 +217,7 @@ then drop nothing; the command names are the same.)
 | `tauri dev` fails on missing `webkit2gtk` / `rsvg2` | Tauri OS libraries not installed | Install per [prerequisites](https://v2.tauri.app/start/prerequisites/) (see table above) |
 | `cap open android` does nothing / Studio missing | No Android Studio or SDK not on `PATH` | Install Android Studio; set `ANDROID_HOME` to your SDK |
 | iOS build fails on Linux/Windows | Expected — Apple requires macOS + Xcode | Use Android/emulator, or a Mac for iOS |
-| `npm install` errors | Wrong Node version or partial install | Check `node --version` (need 20+), delete `node_modules`, reinstall |
+| `npm install` errors | Wrong Node version or partial install | Check `node --version` (need 22+), delete `node_modules`, reinstall |
 | `cargo` errors after pulling | New Rust dependency | Run `cargo test --workspace` once to fetch and compile it |
 
 Still stuck? Check `docs/roadmap.md` for context on the area you are working in,
