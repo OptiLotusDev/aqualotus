@@ -17,10 +17,6 @@ Pure, headless, unit-tested (`cargo test -p optilotus`):
 
 - `version() -> &str` — crate version (`VERSION`).
 - `health_check() -> &str` — `"ok"` when linked and running.
-- `empty_program_json() -> String` — versioned skeleton
-  `{"version": 1, "package": "main", "functions": []}` (P18).
-- `run_empty_program_json() -> String` — trivial run report JSON.
-- `add(left: u64, right: u64) -> u64` — arithmetic helper.
 - `run_function_json(input: &str) -> String` — execute one serialized
   `Function`, return the run-report JSON (never throws; see below).
 - Session API (no IR assembly required; one explicitly-owned session per
@@ -44,9 +40,6 @@ Built with `npm run build:wasm` into `src/wasm/optilotus/`:
 
 - `optilotus_version(): string`
 - `optilotus_health(): string`
-- `optilotus_emptyProgram(): string` (versioned JSON)
-- `optilotus_runEmpty(): string` (JSON)
-- `optilotus_add(a: bigint, b: bigint): bigint`
 - `optilotus_runFunction(functionJson: string): string` (JSON report)
 - `optilotus_set(name: string, ty: string, value: string): string` (JSON)
 - `optilotus_get(name: string): string` (JSON)
@@ -62,9 +55,6 @@ wrappers throw an explicit error before init (P22):
 - `optilotus_tryEnsure(): Promise<void>` — fallible load (`try_`, P9).
 - `optilotus_version(): string`
 - `optilotus_health(): string`
-- `optilotus_emptyProgram(): string`
-- `optilotus_runEmpty(): string`
-- `optilotus_add(a: number, b: number): number`
 - `optilotus_runFunction(functionJson: string): string` — run report JSON.
 - `optilotus_set(name: string, ty: string, value: string): string`
 - `optilotus_get(name: string): string`

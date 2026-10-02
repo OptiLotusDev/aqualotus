@@ -161,3 +161,94 @@ fn template_failures() {
         ExprFail::UnknownVariable("ghost".to_string())
     );
 }
+
+#[test]
+fn nesting_boundary() {
+    // 64 nested parens evaluate; the 65th trips the depth cap.
+    let ok = "(".repeat(64) + "1" + &")".repeat(64);
+    assert_eq!(eval(&ok).unwrap(), Value::Int32(1));
+    let deep = "(".repeat(65) + "1" + &")".repeat(65);
+    assert!(matches!(eval(&deep), Err(ExprFail::Parse(_))));
+}
+
+#[test]
+fn all_widths_compute() {
+    let v = vars(vec![
+        ("big".to_string(), Value::Int64(9_000_000_000)),
+        ("u".to_string(), Value::Uint64(7)),
+        ("f".to_string(), Value::Float32(1.5)),
+    ]);
+    assert_eq!(
+        eval_expr("{big} + 1", &v).unwrap(),
+        Value::Int64(9_000_000_001)
+    );
+    assert_eq!(eval_expr("{u} * 2", &v).unwrap(), Value::Uint64(14));
+    assert_eq!(eval_expr("{f} + 1", &v).unwrap(), Value::Float32(2.5));
+}
+
+#[test]
+fn int_division_truncates_toward_zero() {
+    assert_eq!(eval("-7 / 2").unwrap(), Value::Int32(-3));
+    assert_eq!(eval("7 / -2").unwrap(), Value::Int32(-3));
+}
+
+#[test]
+fn float_div_by_zero_is_infinity() {
+    // Floats keep IEEE semantics (ints would be DivByZero).
+    assert_eq!(eval("1.0 / 0.0").unwrap(), Value::Float64(f64::INFINITY));
+}
+
+#[test]
+fn whitespace_everywhere() {
+    assert_eq!(eval("(\n 2\t+\n 3\n)").unwrap(), Value::Int32(5));
+}
+
+#[test]
+fn unary_minus_chains() {
+    assert_eq!(eval("--5").unwrap(), Value::Int32(5));
+    assert_eq!(eval("- -5").unwrap(), Value::Int32(5));
+    assert_eq!(eval("-(2 * 3)").unwrap(), Value::Int32(-6));
+}
+
+#[test]
+fn plus_inside_quotes_is_literal() {
+    let v = vars(vec![]);
+    assert_eq!(render_template("\"+\"", &v).unwrap(), "+");
+    assert_eq!(render_template("\"a+b\"", &v).unwrap(), "a+b");
+}
+
+#[test]
+fn empty_ref_names_fail() {
+    let v = vars(vec![]);
+    assert!(matches!(
+        render_template("\"{ }\"", &v).unwrap_err(),
+        ExprFail::Parse(_)
+    ));
+    assert!(matches!(
+        render_template("\"{{x}}\"", &v).unwrap_err(),
+        ExprFail::Parse(_)
+    ));
+    assert!(matches!(eval("{} + 1"), Err(ExprFail::Parse(_))));
+}
+
+#[test]
+fn huge_literal_overflows() {
+    // 40 digits: too wide even for i128.
+    assert_eq!(
+        eval("9999999999999999999999999999999999999999 + 1").unwrap_err(),
+        ExprFail::Overflow
+    );
+    // i128::MAX itself parses; adding one overflows.
+    let max = i128::MAX.to_string();
+    assert_eq!(
+        eval(&format!("{max} + 0")).unwrap(),
+        Value::Int128(i128::MAX)
+    );
+    assert_eq!(eval(&format!("{max} + 1")).unwrap_err(), ExprFail::Overflow);
+}
+
+#[test]
+fn float_var_division() {
+    let v = vars(vec![("f".to_string(), Value::Float64(7.5))]);
+    assert_eq!(eval_expr("{f} / 2", &v).unwrap(), Value::Float64(3.75));
+}

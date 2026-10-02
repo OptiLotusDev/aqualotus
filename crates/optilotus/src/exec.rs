@@ -5,6 +5,7 @@ use crate::expr::{check_var_name, eval_expr, render_template, ExprFail};
 use crate::ir::{CommandId, Function, ValueId};
 use crate::ops::{print_text, Op};
 use crate::sink::PrintSink;
+use crate::types::Type;
 use crate::value::Value;
 
 /// Default step cap: cycles are allowed but bounded.
@@ -127,6 +128,12 @@ fn run_command(
                 });
             }
             let name = check_var_name(var).map_err(|e| map_expr_fail(e, command.id))?;
+            if *ty == Type::Void {
+                return Err(ExecError::TypeMismatch {
+                    command: command.id,
+                    detail: "cannot declare a variable of type void".to_string(),
+                });
+            }
             let value = read_input(command.id, values, command.inputs[0])?.clone();
             if value.ty() != *ty {
                 return Err(ExecError::TypeMismatch {

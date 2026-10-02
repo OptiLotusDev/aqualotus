@@ -2,19 +2,9 @@
 /* eslint-disable */
 
 /**
- * JS: `optilotus_add(a, b) -> bigint`
- */
-export function optilotus_add(a: bigint, b: bigint): bigint;
-
-/**
  * JS: `optilotus_clear() -> string` (JSON)
  */
 export function optilotus_clear(): string;
-
-/**
- * JS: `optilotus_emptyProgram() -> string` (JSON)
- */
-export function optilotus_emptyProgram(): string;
 
 /**
  * JS: `optilotus_execMath(expr) -> string` (JSON)
@@ -37,11 +27,6 @@ export function optilotus_health(): string;
 export function optilotus_print(template: string): string;
 
 /**
- * JS: `optilotus_runEmpty() -> string` (JSON result)
- */
-export function optilotus_runEmpty(): string;
-
-/**
  * JS: `optilotus_runFunction(functionJson) -> string` (JSON report)
  */
 export function optilotus_runFunction(input: string): string;
@@ -60,14 +45,11 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly optilotus_add: (a: bigint, b: bigint) => bigint;
     readonly optilotus_clear: () => [number, number];
-    readonly optilotus_emptyProgram: () => [number, number];
     readonly optilotus_execMath: (a: number, b: number) => [number, number];
     readonly optilotus_get: (a: number, b: number) => [number, number];
     readonly optilotus_health: () => [number, number];
     readonly optilotus_print: (a: number, b: number) => [number, number];
-    readonly optilotus_runEmpty: () => [number, number];
     readonly optilotus_runFunction: (a: number, b: number) => [number, number];
     readonly optilotus_set: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly optilotus_version: () => [number, number];

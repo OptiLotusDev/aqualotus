@@ -1,17 +1,6 @@
 /* @ts-self-types="./optilotus.d.ts" */
 
 /**
- * JS: `optilotus_add(a, b) -> bigint`
- * @param {bigint} a
- * @param {bigint} b
- * @returns {bigint}
- */
-export function optilotus_add(a, b) {
-    const ret = wasm.optilotus_add(a, b);
-    return BigInt.asUintN(64, ret);
-}
-
-/**
  * JS: `optilotus_clear() -> string` (JSON)
  * @returns {string}
  */
@@ -20,23 +9,6 @@ export function optilotus_clear() {
     let deferred1_1;
     try {
         const ret = wasm.optilotus_clear();
-        deferred1_0 = ret[0];
-        deferred1_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
-    }
-}
-
-/**
- * JS: `optilotus_emptyProgram() -> string` (JSON)
- * @returns {string}
- */
-export function optilotus_emptyProgram() {
-    let deferred1_0;
-    let deferred1_1;
-    try {
-        const ret = wasm.optilotus_emptyProgram();
         deferred1_0 = ret[0];
         deferred1_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);
@@ -119,23 +91,6 @@ export function optilotus_print(template) {
         return getStringFromWasm0(ret[0], ret[1]);
     } finally {
         wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
-    }
-}
-
-/**
- * JS: `optilotus_runEmpty() -> string` (JSON result)
- * @returns {string}
- */
-export function optilotus_runEmpty() {
-    let deferred1_0;
-    let deferred1_1;
-    try {
-        const ret = wasm.optilotus_runEmpty();
-        deferred1_0 = ret[0];
-        deferred1_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
     }
 }
 

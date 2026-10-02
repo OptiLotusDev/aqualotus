@@ -67,8 +67,8 @@ Everything here must keep working headlessly (`cargo test` proves it).
 | `wasm/`                  | Generated bridge files (`.js`, `.wasm`, `.d.ts`)        | 🚫 Never by hand — rebuilt with `npm run build:wasm` which automatically runs upon running the frontend |
 
 **Bridge rule:** functions in the UI that come from the Optilotus API carry the
-`optilotus_` prefix with a camelCase remainder — e.g. `optilotus_emptyProgram`,
-`optilotus_runEmpty`, `optilotus_version`. If you expose a new engine function to
+`optilotus_` prefix with a camelCase remainder — e.g. `optilotus_execMath`,
+`optilotus_set`, `optilotus_version`. If you expose a new engine function to
 the UI, name it this way. UI-only helpers (hooks, components) keep normal names
 (`useIsMobile`, `OptilotusPanel`, …).
 
@@ -192,8 +192,8 @@ then drop nothing; the command names are the same.)
 3. **Respect the layers.** Language/runtime logic goes in `crates/optilotus` only.
    The UI calls it through `src/lib/optilotus.ts` — never copy engine logic into React.
 4. **Follow the naming rules.**
-   - Engine functions used by the UI: `optilotus_` prefix + camelCase rest
-     (`optilotus_emptyProgram`, `optilotus_runEmpty`).
+    - Engine functions used by the UI: `optilotus_` prefix + camelCase rest
+      (`optilotus_execMath`, `optilotus_set`).
    - Everything else: `camelCase` functions/variables, `PascalCase` types/components,
      `SCREAMING_SNAKE_CASE` constants. No `any` in TypeScript. Details in
      `design-principles.md` (Principle 9) and `docs/api.md`.

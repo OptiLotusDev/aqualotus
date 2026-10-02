@@ -23,13 +23,7 @@ export default function OptilotusPanel(): ReactElement {
           health: <code>{status.health || '…'}</code>
         </li>
         <li>
-          add(2, 3): <code>{status.addResult || '…'}</code>
-        </li>
-        <li>
-          empty program: <code>{status.emptyProgram || '…'}</code>
-        </li>
-        <li>
-          run empty: <code>{status.runResult || '…'}</code>
+          execMath("(3 + 4) % 2"): <code>{status.mathDemo || '…'}</code>
         </li>
       </ul>
     </section>
