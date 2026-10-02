@@ -129,3 +129,48 @@ fn parse_value_covers_the_types() {
         ExprFail::TypeMismatch(_)
     ));
 }
+
+#[test]
+fn parse_value_widths_and_scripts() {
+    // Unsigned rejects negatives as out-of-range.
+    assert_eq!(
+        Session::parse_value(Type::Uint8, "-5").unwrap_err(),
+        ExprFail::Overflow
+    );
+    assert_eq!(
+        Session::parse_value(Type::Uint64, "18446744073709551615").unwrap(),
+        Value::Uint64(u64::MAX)
+    );
+    assert_eq!(
+        Session::parse_value(Type::Int64, "-9223372036854775808").unwrap(),
+        Value::Int64(i64::MIN)
+    );
+    // Single multi-byte char is one character.
+    assert_eq!(
+        Session::parse_value(Type::Char, "é").unwrap(),
+        Value::Char('é')
+    );
+    assert_eq!(
+        Session::parse_value(Type::Float32, "2.5").unwrap(),
+        Value::Float32(2.5)
+    );
+    // Bools are exact lowercase.
+    assert!(matches!(
+        Session::parse_value(Type::Bool, "True").unwrap_err(),
+        ExprFail::Parse(_)
+    ));
+    assert!(matches!(
+        Session::parse_value(Type::Bool, "1").unwrap_err(),
+        ExprFail::Parse(_)
+    ));
+}
+
+#[test]
+fn names_trim_to_the_same_variable() {
+    let mut session = Session::new();
+    session
+        .set("  padded  ", Type::Int32, Value::Int32(9))
+        .unwrap();
+    assert_eq!(session.get("padded").unwrap(), Value::Int32(9));
+    assert_eq!(session.get("  padded  ").unwrap(), Value::Int32(9));
+}

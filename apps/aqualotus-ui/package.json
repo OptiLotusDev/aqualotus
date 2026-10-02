@@ -1,7 +1,7 @@
 {
   "name": "aqualotus-ui",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "build:wasm": "wasm-pack build ../../crates/optilotus --target web --out-dir ../../apps/aqualotus-ui/src/wasm/optilotus --out-name optilotus && rm -f ./src/wasm/optilotus/.gitignore",

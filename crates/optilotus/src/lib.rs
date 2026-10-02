@@ -23,9 +23,8 @@ pub mod types;
 pub mod value;
 
 pub use bridge::{
-    add, empty_program_json, health_check, run_empty_program_json, run_function_json,
-    session_clear, session_exec_math, session_get, session_print, session_set, version,
-    PROGRAM_FORMAT_VERSION, VERSION,
+    health_check, run_function_json, session_clear, session_exec_math, session_get, session_print,
+    session_set, version, VERSION,
 };
 pub use error::ExecError;
 pub use exec::{run_function, run_function_with_limit, ExecReport, MAX_STEPS};

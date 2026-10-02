@@ -8,10 +8,6 @@ use crate::session::Session;
 /// Crate version, also exposed to JS.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Version of the serialized empty-program format (see P18:
-/// serialized formats carry an explicit version for migration).
-pub const PROGRAM_FORMAT_VERSION: u32 = 1;
-
 /// Install better panic messages in the browser console.
 /// No-op on native targets.
 fn init_panic_hook() {
@@ -27,33 +23,6 @@ pub fn health_check() -> &'static str {
 /// Crate version string.
 pub fn version() -> &'static str {
     VERSION
-}
-
-/// Minimal program skeleton as JSON: a package with no functions yet.
-/// The payload carries an explicit format version (P18).
-pub fn empty_program_json() -> String {
-    serde_json::json!({
-        "version": PROGRAM_FORMAT_VERSION,
-        "package": "main",
-        "functions": []
-    })
-    .to_string()
-}
-
-/// Trivial execution path: "runs" the empty program and reports success.
-/// Returns a JSON string so the TS side has something real to parse.
-pub fn run_empty_program_json() -> String {
-    serde_json::json!({
-        "status": "ok",
-        "functions_run": 0,
-        "message": "empty program ran successfully"
-    })
-    .to_string()
-}
-
-/// Template arithmetic helper (kept from bootstrap).
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
 }
 
 /// Execute one serialized `Function` and return a JSON run report.
@@ -165,27 +134,6 @@ pub fn js_version() -> String {
 pub fn js_health() -> String {
     init_panic_hook();
     health_check().to_string()
-}
-
-/// JS: `optilotus_emptyProgram() -> string` (JSON)
-#[wasm_bindgen(js_name = optilotus_emptyProgram)]
-pub fn js_empty_program() -> String {
-    init_panic_hook();
-    empty_program_json()
-}
-
-/// JS: `optilotus_runEmpty() -> string` (JSON result)
-#[wasm_bindgen(js_name = optilotus_runEmpty)]
-pub fn js_run_empty() -> String {
-    init_panic_hook();
-    run_empty_program_json()
-}
-
-/// JS: `optilotus_add(a, b) -> bigint`
-#[wasm_bindgen(js_name = optilotus_add)]
-pub fn js_add(a: u64, b: u64) -> u64 {
-    init_panic_hook();
-    add(a, b)
 }
 
 /// JS: `optilotus_runFunction(functionJson) -> string` (JSON report)

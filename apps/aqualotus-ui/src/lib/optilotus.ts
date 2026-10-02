@@ -1,12 +1,9 @@
 import init, {
-  optilotus_add as add_wasm,
   optilotus_clear as clear_wasm,
-  optilotus_emptyProgram as emptyProgram_wasm,
   optilotus_execMath as execMath_wasm,
   optilotus_get as get_wasm,
   optilotus_health as health_wasm,
   optilotus_print as print_wasm,
-  optilotus_runEmpty as runEmpty_wasm,
   optilotus_runFunction as runFunction_wasm,
   optilotus_set as set_wasm,
   optilotus_version as version_wasm,
@@ -14,7 +11,7 @@ import init, {
 
 // Project rule: every function in the UI that originates from the
 // Optilotus API layer carries the `optilotus_` prefix with a camelCase
-// remainder (e.g. `optilotus_emptyProgram`). This deliberately takes
+// remainder (e.g. `optilotus_execMath`). This deliberately takes
 // precedence over the generic camelCase rule (P9/P24) for this module.
 // The `_wasm` aliases keep the bridge exports exactly `optilotus_*`.
 
@@ -57,24 +54,6 @@ export function optilotus_version(): string {
 export function optilotus_health(): string {
   assertReady();
   return health_wasm();
-}
-
-/** Minimal program skeleton as versioned JSON. Requires init. */
-export function optilotus_emptyProgram(): string {
-  assertReady();
-  return emptyProgram_wasm();
-}
-
-/** Trivial execution result as JSON. Requires init. */
-export function optilotus_runEmpty(): string {
-  assertReady();
-  return runEmpty_wasm();
-}
-
-/** u64 add via WASM (bigint on the boundary, number for small values). */
-export function optilotus_add(a: number, b: number): number {
-  assertReady();
-  return Number(add_wasm(BigInt(a), BigInt(b)));
 }
 
 /**
