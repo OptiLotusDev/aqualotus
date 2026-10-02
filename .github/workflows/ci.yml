@@ -133,9 +133,15 @@ jobs:
           distribution: temurin
           java-version: 17
       - name: Set up Android SDK
+        # ubuntu-latest images ship an SDK (ANDROID_HOME pre-set) but
+        # sdkmanager is not on PATH, so resolve it explicitly, then
+        # install compileSdkVersion from android/variables.gradle.
+        # (The setup-android action is unusable: it installs the removed
+        # `tools` package and fails.)
         run: |
-            yes | sdkmanager --licenses > /dev/null || true
-            sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          SDKMANAGER="$(echo "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/cmdline-tools/*/bin/sdkmanager | awk '{print $1}')"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
       - name: Install UI deps
         working-directory: apps/aqualotus-ui
         run: npm ci
