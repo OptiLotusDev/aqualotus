@@ -133,7 +133,9 @@ jobs:
           distribution: temurin
           java-version: 17
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+            yes | sdkmanager --licenses > /dev/null || true
+            sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - name: Install UI deps
         working-directory: apps/aqualotus-ui
         run: npm ci
