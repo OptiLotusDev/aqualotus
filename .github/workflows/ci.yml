@@ -139,9 +139,23 @@ jobs:
         # (The setup-android action is unusable: it installs the removed
         # `tools` package and fails.)
         run: |
-          SDKMANAGER="$(echo "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/cmdline-tools/*/bin/sdkmanager | awk '{print $1}')"
+          SDKMANAGER=$(find "$ANDROID_HOME" -type f -name sdkmanager | head -n 1)
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager not found"
+            echo "ANDROID_HOME=$ANDROID_HOME"
+            find "$ANDROID_HOME" -maxdepth 4 -type f | head -n 100
+            exit 1
+          fi
+          
+          echo "Using sdkmanager: $SDKMANAGER"
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+
           yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
+
+          "$SDKMANAGER" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
       - name: Install UI deps
         working-directory: apps/aqualotus-ui
         run: npm ci
