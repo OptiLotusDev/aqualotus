@@ -1,0 +1,14 @@
+{
+  // Rust workspace roots. The root Cargo.toml is auto-discovered, but
+  // apps/aqualotus-ui/src-tauri is `exclude`d from the Cargo workspace
+  // (see root Cargo.toml), so it must be listed explicitly — otherwise
+  // rust-analyzer treats the Tauri shell as detached and its imports
+  // fail to resolve. Listing both keeps one IDE window working for the
+  // whole repo, including when VS Code is opened on a subfolder.
+  "rust-analyzer.linkedProjects": ["Cargo.toml", "apps/aqualotus-ui/src-tauri/Cargo.toml"],
+  // Check test/bench targets too, so `crates/optilotus/tests/` is
+  // analyzed just like `cargo test --workspace --all-targets` builds it.
+  "rust-analyzer.cargo.allTargets": true,
+  // Surface the same lints CI enforces (`clippy -- -D warnings`).
+  "rust-analyzer.check.command": "clippy"
+}

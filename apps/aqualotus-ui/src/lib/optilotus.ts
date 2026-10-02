@@ -1,8 +1,14 @@
 import init, {
   optilotus_add as add_wasm,
+  optilotus_clear as clear_wasm,
   optilotus_emptyProgram as emptyProgram_wasm,
+  optilotus_execMath as execMath_wasm,
+  optilotus_get as get_wasm,
   optilotus_health as health_wasm,
+  optilotus_print as print_wasm,
   optilotus_runEmpty as runEmpty_wasm,
+  optilotus_runFunction as runFunction_wasm,
+  optilotus_set as set_wasm,
   optilotus_version as version_wasm,
 } from "../wasm/optilotus/optilotus.js";
 
@@ -69,4 +75,68 @@ export function optilotus_runEmpty(): string {
 export function optilotus_add(a: number, b: number): number {
   assertReady();
   return Number(add_wasm(BigInt(a), BigInt(b)));
+}
+
+/**
+ * Execute a serialized Function; returns the run-report JSON.
+ * Input: `Function` as JSON (`{id, name, entry, commands}`). Output is
+ * always JSON: `{status: "ok", steps, prints, printed: string[]}` or
+ * `{status: "error", kind, command: number|null, message, ...}` where
+ * `command` identifies the offending block for editor highlighting.
+ * Requires init.
+ */
+export function optilotus_runFunction(functionJson: string): string {
+  assertReady();
+  return runFunction_wasm(functionJson);
+}
+
+/**
+ * Declare/assign a session variable, e.g. `optilotus_set("n", "int32", "41")`.
+ * Types are lowercase tags (`int32`, `string`, `bool`, ...); the text is
+ * parsed into the declared type. Returns `{"status":"ok","var","type"}`
+ * or the error envelope. Requires init.
+ */
+export function optilotus_set(name: string, ty: string, value: string): string {
+  assertReady();
+  return set_wasm(name, ty, value);
+}
+
+/**
+ * Read a session variable. Returns
+ * `{"status":"ok","value","type","display"}` or the error envelope.
+ * Requires init.
+ */
+export function optilotus_get(name: string): string {
+  assertReady();
+  return get_wasm(name);
+}
+
+/**
+ * Evaluate a maths expression against session variables, e.g.
+ * `optilotus_execMath("({n} + 4) % 2")`. Returns
+ * `{"status":"ok","value","type","display"}` or the error envelope.
+ * Requires init.
+ */
+export function optilotus_execMath(expr: string): string {
+  assertReady();
+  return execMath_wasm(expr);
+}
+
+/**
+ * Render a print template against session variables, e.g.
+ * `optilotus_print('"Hello {name}" + "!"')`. Returns
+ * `{"status":"ok","printed"}` or the error envelope. Requires init.
+ */
+export function optilotus_print(template: string): string {
+  assertReady();
+  return print_wasm(template);
+}
+
+/**
+ * Drop all session variables. Returns `{"status":"ok","cleared":N}`.
+ * Requires init.
+ */
+export function optilotus_clear(): string {
+  assertReady();
+  return clear_wasm();
 }
