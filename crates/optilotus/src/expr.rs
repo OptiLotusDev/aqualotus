@@ -18,6 +18,11 @@ pub enum ExprFail {
     TypeMismatch(String),
     Overflow,
     DivByZero,
+    UnknownFunction(String),
+    MissingReturn(String),
+    /// A callee already failed with a fully-typed error (keeps its own
+    /// command id); the executor propagates it unwrapped.
+    Callee(Box<crate::error::ExecError>),
 }
 
 impl fmt::Display for ExprFail {
@@ -28,6 +33,11 @@ impl fmt::Display for ExprFail {
             ExprFail::TypeMismatch(detail) => write!(f, "{detail}"),
             ExprFail::Overflow => write!(f, "integer overflow"),
             ExprFail::DivByZero => write!(f, "division by zero"),
+            ExprFail::UnknownFunction(name) => write!(f, "unknown function {name:?}"),
+            ExprFail::MissingReturn(name) => {
+                write!(f, "function {name:?} returned no value")
+            }
+            ExprFail::Callee(inner) => write!(f, "{inner}"),
         }
     }
 }
@@ -78,10 +88,27 @@ enum Partial {
 /// narrow to `int32`/`int64`/`int128` (integers) or `float64` (floats).
 /// Variable-vs-variable operations stay strict same-type-only.
 pub fn eval_expr(expr: &str, vars: &HashMap<String, Value>) -> Result<Value, ExprFail> {
+    let mut no_calls = |name: &str| -> Result<Value, ExprFail> {
+        Err(ExprFail::UnknownFunction(name.to_string()))
+    };
+    eval_expr_with(expr, vars, &mut no_calls)
+}
+
+/// Same as [`eval_expr`] but `name()` calls resolve via `call` (zero-arg).
+/// Unknown names are `UnknownFunction`, callees without `Return` are
+/// `MissingReturn`, and nested callee failures travel as `Callee` (kept
+/// typed, with their own command id). Calling `main` is rejected by the
+/// caller (entry only).
+pub fn eval_expr_with(
+    expr: &str,
+    vars: &HashMap<String, Value>,
+    call: &mut dyn FnMut(&str) -> Result<Value, ExprFail>,
+) -> Result<Value, ExprFail> {
     let mut parser = ExprParser {
         text: expr,
         pos: 0,
         depth: 0,
+        call,
     };
     parser.skip_ws();
     if parser.peek().is_none() {
@@ -98,13 +125,14 @@ pub fn eval_expr(expr: &str, vars: &HashMap<String, Value>) -> Result<Value, Exp
     finalize(out)
 }
 
-struct ExprParser<'a> {
+struct ExprParser<'a, 'b> {
     text: &'a str,
     pos: usize,
     depth: usize,
+    call: &'b mut dyn FnMut(&str) -> Result<Value, ExprFail>,
 }
 
-impl<'a> ExprParser<'a> {
+impl<'a, 'b> ExprParser<'a, 'b> {
     fn peek(&self) -> Option<char> {
         self.text[self.pos..].chars().next()
     }
@@ -169,7 +197,7 @@ impl<'a> ExprParser<'a> {
     fn parse_primary(&mut self, vars: &HashMap<String, Value>) -> Result<Partial, ExprFail> {
         self.skip_ws();
         match self.peek() {
-            None => Err(self.parse_error("expected a number, '{variable}' or '('")),
+            None => Err(self.parse_error("expected a number, '{variable}', '\"string\"' or '('")),
             Some('(') => {
                 if self.depth >= MAX_EXPR_DEPTH {
                     return Err(ExprFail::Parse("expression too deeply nested".to_string()));
@@ -196,9 +224,98 @@ impl<'a> ExprParser<'a> {
                     .ok_or(ExprFail::UnknownVariable(name))
             }
             Some(c) if c.is_ascii_digit() || c == '.' => self.lex_number().map(Partial::Const),
-            Some('"') => Err(self
-                .parse_error("string literals are not supported in compute; use print templates")),
+            Some('"') => {
+                let text = self.parse_string(vars)?;
+                Ok(Partial::Val(Value::String(text)))
+            }
+            Some(c) if c.is_ascii_alphabetic() || c == '_' => self.parse_call(),
             Some(c) => Err(self.parse_error(&format!("unexpected {c:?}"))),
+        }
+    }
+
+    /// Parse `name()` (zero-arg). Bare identifiers are rejected: use
+    /// `{var}` for variables. Non-empty args are a parse error for now
+    /// (formal parameters are deferred; see the package plan).
+    fn parse_call(&mut self) -> Result<Partial, ExprFail> {
+        let start = self.pos;
+        while let Some(c) = self.peek() {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        let name = self.text[start..self.pos].to_string();
+        if name.is_empty() {
+            return Err(self.parse_error("expected a function name"));
+        }
+        self.skip_ws();
+        if self.peek() != Some('(') {
+            return Err(self.parse_error(&format!(
+                "unexpected identifier {name:?}: use '{{variable}}' for variables or '{name}()' for calls"
+            )));
+        }
+        self.bump(); // '('
+        self.skip_ws();
+        match self.peek() {
+            Some(')') => {
+                self.bump();
+                let value = (self.call)(&name)?;
+                Ok(Partial::Val(value))
+            }
+            _ => Err(self.parse_error("function arguments are not supported; use name()")),
+        }
+    }
+
+    /// Parse a single `"..."` string literal with `\\ \" \n \{ \}`
+    /// escapes and `{var}` interpolation.
+    fn parse_string(&mut self, vars: &HashMap<String, Value>) -> Result<String, ExprFail> {
+        let open = self.pos;
+        self.bump(); // opening quote
+        let mut out = String::new();
+        loop {
+            match self.peek() {
+                None => {
+                    return Err(ExprFail::Parse(format!(
+                        "parse error at {open}: unclosed '\"', expected closing quote"
+                    )));
+                }
+                Some('"') => {
+                    self.bump();
+                    return Ok(out);
+                }
+                Some('\\') => {
+                    self.bump();
+                    match self.peek() {
+                        Some('"') => out.push('"'),
+                        Some('\\') => out.push('\\'),
+                        Some('n') => out.push('\n'),
+                        Some('{') => out.push('{'),
+                        Some('}') => out.push('}'),
+                        Some(c) => {
+                            return Err(ExprFail::Parse(format!(
+                                "parse error at {}: unknown escape '\\{c}'; use \\\" \\\\ \\n \\{{ or \\}}",
+                                self.pos
+                            )));
+                        }
+                        None => {
+                            return Err(ExprFail::Parse(format!(
+                                "parse error at {open}: unclosed '\"', expected closing quote"
+                            )));
+                        }
+                    }
+                    self.bump();
+                }
+                Some('{') => {
+                    let name = self.parse_ref()?;
+                    let value = vars.get(&name).ok_or(ExprFail::UnknownVariable(name))?;
+                    out.push_str(&value.to_string());
+                }
+                Some(c) => {
+                    out.push(c);
+                    self.bump();
+                }
+            }
         }
     }
 

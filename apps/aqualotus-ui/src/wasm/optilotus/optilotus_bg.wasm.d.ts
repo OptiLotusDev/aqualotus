@@ -1,13 +1,27 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
+export const optilotus_assign: (a: number, b: number, c: number, d: number, e: number) => [number, number];
 export const optilotus_clear: () => [number, number];
+export const optilotus_clearPackage: () => [number, number];
+export const optilotus_createFunction: (a: number, b: number) => [number, number];
+export const optilotus_declare: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+export const optilotus_deleteCommand: (a: number, b: number) => [number, number];
+export const optilotus_deleteFunction: (a: number) => [number, number];
 export const optilotus_execMath: (a: number, b: number) => [number, number];
 export const optilotus_get: (a: number, b: number) => [number, number];
+export const optilotus_getFunction: (a: number) => [number, number];
 export const optilotus_health: () => [number, number];
+export const optilotus_listCommands: (a: number) => [number, number];
+export const optilotus_listFunctions: () => [number, number];
 export const optilotus_print: (a: number, b: number) => [number, number];
+export const optilotus_printCommand: (a: number, b: number, c: number) => [number, number];
+export const optilotus_return: (a: number, b: number, c: number) => [number, number];
 export const optilotus_runFunction: (a: number, b: number) => [number, number];
+export const optilotus_runProgram: () => [number, number];
 export const optilotus_set: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+export const optilotus_setEntry: (a: number, b: number) => [number, number];
+export const optilotus_setNext: (a: number, b: number, c: number) => [number, number];
 export const optilotus_version: () => [number, number];
 export const __wbindgen_free: (a: number, b: number, c: number) => void;
 export const __wbindgen_malloc: (a: number, b: number) => number;

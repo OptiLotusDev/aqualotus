@@ -84,7 +84,7 @@ fn expression_failures() {
     assert!(matches!(eval("(3 +"), Err(ExprFail::Parse(_))));
     assert!(matches!(eval(""), Err(ExprFail::Parse(_))));
     assert!(matches!(eval("{}"), Err(ExprFail::Parse(_))));
-    assert!(matches!(eval("3 + \"s\""), Err(ExprFail::Parse(_))));
+    assert!(matches!(eval("3 + \"s\""), Err(ExprFail::TypeMismatch(_))));
     assert!(matches!(eval("2 (3)"), Err(ExprFail::Parse(_))));
     assert_eq!(eval("1 / 0").unwrap_err(), ExprFail::DivByZero);
     assert_eq!(eval("1 % 0").unwrap_err(), ExprFail::DivByZero);
