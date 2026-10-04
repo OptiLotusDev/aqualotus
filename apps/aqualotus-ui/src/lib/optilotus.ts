@@ -1,11 +1,25 @@
 import init, {
+  optilotus_assign as assign_wasm,
   optilotus_clear as clear_wasm,
+  optilotus_clearPackage as clearPackage_wasm,
+  optilotus_createFunction as createFunction_wasm,
+  optilotus_declare as declare_wasm,
+  optilotus_deleteCommand as deleteCommand_wasm,
+  optilotus_deleteFunction as deleteFunction_wasm,
   optilotus_execMath as execMath_wasm,
   optilotus_get as get_wasm,
+  optilotus_getFunction as getFunction_wasm,
   optilotus_health as health_wasm,
+  optilotus_listCommands as listCommands_wasm,
+  optilotus_listFunctions as listFunctions_wasm,
   optilotus_print as print_wasm,
+  optilotus_printCommand as printCommand_wasm,
+  optilotus_return as return_wasm,
   optilotus_runFunction as runFunction_wasm,
+  optilotus_runProgram as runProgram_wasm,
   optilotus_set as set_wasm,
+  optilotus_setEntry as setEntry_wasm,
+  optilotus_setNext as setNext_wasm,
   optilotus_version as version_wasm,
 } from "../wasm/optilotus/optilotus.js";
 
@@ -118,4 +132,183 @@ export function optilotus_print(template: string): string {
 export function optilotus_clear(): string {
   assertReady();
   return clear_wasm();
+}
+
+/**
+ * Package registry: one package, many functions, stable `main` (id 0).
+ * Typed wrappers only — JSON is parsed once inside each wrapper, so UI
+ * call sites never build or pass IR JSON.
+ */
+export type FunctionId = number;
+export type CommandId = number;
+
+export type FunctionSummary = {
+  id: number;
+  name: string;
+  is_main: boolean;
+};
+
+export type FunctionInfo = {
+  id: number;
+  name: string;
+  is_main: boolean;
+  entry: number | null;
+  command_count: number;
+};
+
+export type CommandSummary = {
+  id: number;
+  kind: "declare" | "assign" | "print" | "return";
+  var?: string;
+  ty?: string;
+  expr?: string;
+  template?: string;
+};
+
+export type OptilotusError = {
+  status: "error";
+  kind: string;
+  command: number | null;
+  message: string;
+  [key: string]: unknown;
+};
+
+function parseBridge<T>(raw: string): T {
+  return JSON.parse(raw) as T;
+}
+
+export function optilotus_listFunctions(): {
+  status: "ok";
+  functions: FunctionSummary[];
+} {
+  assertReady();
+  return parseBridge(listFunctions_wasm());
+}
+
+export function optilotus_createFunction(
+  name: string,
+):
+  | { status: "ok"; id: number; name: string; is_main: boolean }
+  | OptilotusError {
+  assertReady();
+  return parseBridge(createFunction_wasm(name));
+}
+
+export function optilotus_getFunction(
+  id: number,
+): ({ status: "ok" } & FunctionInfo) | OptilotusError {
+  assertReady();
+  return parseBridge(getFunction_wasm(id));
+}
+
+export function optilotus_deleteFunction(
+  id: number,
+): { status: "ok"; deleted: number } | OptilotusError {
+  assertReady();
+  return parseBridge(deleteFunction_wasm(id));
+}
+
+export function optilotus_clearPackage(): {
+  status: "ok";
+  cleared: number;
+} {
+  assertReady();
+  return parseBridge(clearPackage_wasm());
+}
+
+export function optilotus_declare(
+  fid: number,
+  name: string,
+  ty: string,
+  init?: string,
+): { status: "ok"; id: number } | OptilotusError {
+  assertReady();
+  return parseBridge(declare_wasm(fid, name, ty, init));
+}
+
+export function optilotus_assign(
+  fid: number,
+  name: string,
+  expr: string,
+): { status: "ok"; id: number } | OptilotusError {
+  assertReady();
+  return parseBridge(assign_wasm(fid, name, expr));
+}
+
+export function optilotus_printCommand(
+  fid: number,
+  template: string,
+): { status: "ok"; id: number } | OptilotusError {
+  assertReady();
+  return parseBridge(printCommand_wasm(fid, template));
+}
+
+export function optilotus_return(
+  fid: number,
+  expr: string,
+): { status: "ok"; id: number } | OptilotusError {
+  assertReady();
+  return parseBridge(return_wasm(fid, expr));
+}
+
+export function optilotus_listCommands(
+  fid: number,
+):
+  | { status: "ok"; commands: CommandSummary[] }
+  | OptilotusError {
+  assertReady();
+  return parseBridge(listCommands_wasm(fid));
+}
+
+export function optilotus_setEntry(
+  fid: number,
+  cmd: number,
+): { status: "ok" } | OptilotusError {
+  assertReady();
+  return parseBridge(setEntry_wasm(fid, cmd));
+}
+
+export function optilotus_setNext(
+  fid: number,
+  cmd: number,
+  next?: number,
+): { status: "ok" } | OptilotusError {
+  assertReady();
+  return parseBridge(setNext_wasm(fid, cmd, next));
+}
+
+export function optilotus_deleteCommand(
+  fid: number,
+  cmd: number,
+): { status: "ok"; deleted: number } | OptilotusError {
+  assertReady();
+  return parseBridge(deleteCommand_wasm(fid, cmd));
+}
+
+/** Typed result of `optilotus_runProgram()` (parsed once, inside). */
+export type RunOk = {
+  status: "ok";
+  steps: number;
+  prints: number;
+  printed: string[];
+};
+
+export type RunErr = {
+  status: "error";
+  kind: string;
+  command: number | null;
+  message: string;
+  [key: string]: unknown;
+};
+
+export type RunResult = RunOk | RunErr;
+
+/**
+ * Run `main` by id only — no IR JSON crosses the boundary.
+ * Returns the parsed `RunResult` (JSON stays inside the bridge).
+ * Requires init.
+ */
+export function optilotus_runProgram(): RunResult {
+  assertReady();
+  return JSON.parse(runProgram_wasm()) as RunResult;
 }

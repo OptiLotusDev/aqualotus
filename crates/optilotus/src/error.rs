@@ -39,6 +39,14 @@ pub enum ExecError {
         command: CommandId,
         detail: String,
     },
+    UnknownFunction {
+        command: CommandId,
+        name: String,
+    },
+    MissingReturn {
+        command: CommandId,
+        function: String,
+    },
 }
 
 impl fmt::Display for ExecError {
@@ -78,6 +86,16 @@ impl fmt::Display for ExecError {
             }
             ExecError::ExprError { command, detail } => {
                 write!(f, "expression error at {:?}: {detail}", command.0)
+            }
+            ExecError::UnknownFunction { command, name } => {
+                write!(f, "unknown function {name:?} at {:?}", command.0)
+            }
+            ExecError::MissingReturn { command, function } => {
+                write!(
+                    f,
+                    "function {function:?} returned no value at {:?}",
+                    command.0
+                )
             }
         }
     }

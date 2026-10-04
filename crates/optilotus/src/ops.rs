@@ -25,6 +25,10 @@ pub enum Op {
     /// Evaluate an arithmetic expression (see `crate::expr::eval_expr`).
     /// 0 inputs, 1 output.
     Compute { expr: String },
+    /// Evaluate an expression, store it as the function return value and
+    /// stop the function. 0 inputs, 0 outputs. The value is used when
+    /// another function calls this one in expression text (`name()`).
+    Return { expr: String },
 }
 
 /// Pure arithmetic failure, without command identity.
