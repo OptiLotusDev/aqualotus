@@ -84,12 +84,16 @@ export function optilotus_runFunction(functionJson: string): string {
 }
 
 /**
- * Declare/assign a session variable, e.g. `optilotus_set("n", "int32", "41")`.
- * Types are lowercase tags (`int32`, `string`, `bool`, ...); the text is
- * parsed into the declared type. Returns `{"status":"ok","var","type"}`
- * or the error envelope. Requires init.
+ * Declare/assign a session variable, e.g.
+ * `optilotus_set("n", optilotus_type.int32, "41")`.
+ * The text is parsed into the declared type. Returns
+ * `{"status":"ok","var","type"}` or the error envelope. Requires init.
  */
-export function optilotus_set(name: string, ty: string, value: string): string {
+export function optilotus_set(
+  name: string,
+  ty: OptilotusType,
+  value: string,
+): string {
   assertReady();
   return set_wasm(name, ty, value);
 }
@@ -142,6 +146,32 @@ export function optilotus_clear(): string {
 export type FunctionId = number;
 export type CommandId = number;
 
+/**
+ * Scalar type tags (mirrors Rust `Type::tag()`).
+ * Use as `optilotus_type.int32` instead of raw `"int32"` strings.
+ */
+export const optilotus_type = {
+  int8: "int8",
+  int16: "int16",
+  int32: "int32",
+  int64: "int64",
+  int128: "int128",
+  uint8: "uint8",
+  uint16: "uint16",
+  uint32: "uint32",
+  uint64: "uint64",
+  uint128: "uint128",
+  float32: "float32",
+  float64: "float64",
+  bool: "bool",
+  char: "char",
+  string: "string",
+  void: "void",
+} as const;
+
+export type OptilotusType =
+  (typeof optilotus_type)[keyof typeof optilotus_type];
+
 export type FunctionSummary = {
   id: number;
   name: string;
@@ -160,7 +190,7 @@ export type CommandSummary = {
   id: number;
   kind: "declare" | "assign" | "print" | "return";
   var?: string;
-  ty?: string;
+  ty?: OptilotusType;
   expr?: string;
   template?: string;
 };
@@ -219,7 +249,7 @@ export function optilotus_clearPackage(): {
 export function optilotus_declare(
   fid: number,
   name: string,
-  ty: string,
+  ty: OptilotusType,
   init?: string,
 ): { status: "ok"; id: number } | OptilotusError {
   assertReady();
