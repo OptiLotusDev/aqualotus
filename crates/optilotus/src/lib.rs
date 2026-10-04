@@ -7,7 +7,6 @@
 /// - `ir` — authoritative program model (`Program`/`Function`/`Command`, `entry`/`next`)
 /// - `ops` — primitive operations and pure arithmetic helpers
 /// - `expr` — expression/template mini-language (compute, print templates)
-/// - `session` — owned variable session (the easy single-operation path)
 /// - `exec` — sequential executor over `next` edges
 /// - `sink` — explicit effect boundary for `Print`
 /// - `error` — typed execution failures with source identity
@@ -19,7 +18,6 @@ pub mod expr;
 pub mod ir;
 pub mod ops;
 pub mod package;
-pub mod session;
 pub mod sink;
 pub mod types;
 pub mod value;
@@ -28,8 +26,7 @@ pub use bridge::{
     health_check, package_assign, package_clear, package_create_function, package_declare,
     package_delete_command, package_delete_function, package_get_function, package_list_commands,
     package_list_functions, package_print, package_return, package_set_entry, package_set_next,
-    run_function_json, run_program, session_clear, session_exec_math, session_get, session_print,
-    session_set, version, VERSION,
+    run_program, version, VERSION,
 };
 pub use error::ExecError;
 pub use exec::{
@@ -44,7 +41,6 @@ pub use package::{
     CommandKind, CommandSummary, FunctionInfo, FunctionSummary, Package, PackageError, MAIN_ID,
     MAIN_NAME,
 };
-pub use session::Session;
 pub use sink::{PrintSink, VecSink};
 pub use types::Type;
 pub use value::Value;

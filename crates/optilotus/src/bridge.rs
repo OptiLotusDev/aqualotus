@@ -2,9 +2,6 @@ use std::cell::RefCell;
 
 use wasm_bindgen::prelude::*;
 
-use crate::expr::ExprFail;
-use crate::session::Session;
-
 /// Crate version, also exposed to JS.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -23,43 +20,6 @@ pub fn health_check() -> &'static str {
 /// Crate version string.
 pub fn version() -> &'static str {
     VERSION
-}
-
-/// Execute one serialized `Function` and return a JSON run report.
-///
-/// Input is a `Function` as JSON (see `crate::ir` for the shape). The
-/// output is always a JSON string — this never throws across the
-/// boundary, so JS callers only parse:
-///
-/// - ok: `{"status":"ok","steps":N,"prints":M,"printed":[...]}`
-/// - failure: `{"status":"error","kind":K,"command":id|null,"message":"..."}`
-///   with variant-specific fields (`var`, `value`, `expected`, `found`,
-///   `limit`, `detail`). Unparseable input is `kind: "ParseError"`.
-///
-/// Runs headlessly with a buffer sink under the default step cap.
-pub fn run_function_json(input: &str) -> String {
-    match serde_json::from_str::<crate::ir::Function>(input) {
-        Err(e) => serde_json::json!({
-            "status": "error",
-            "kind": "ParseError",
-            "command": null,
-            "message": format!("invalid function JSON: {e}"),
-        })
-        .to_string(),
-        Ok(function) => {
-            let mut sink = crate::sink::VecSink::default();
-            match crate::exec::run_function(&function, &mut sink) {
-                Ok(report) => serde_json::json!({
-                    "status": "ok",
-                    "steps": report.steps,
-                    "prints": report.prints,
-                    "printed": sink.lines,
-                })
-                .to_string(),
-                Err(e) => exec_error_json(&e).to_string(),
-            }
-        }
-    }
 }
 
 /// Map an execution failure to the frontend-facing error object.
@@ -144,33 +104,17 @@ pub fn js_health() -> String {
     health_check().to_string()
 }
 
-/// JS: `optilotus_runFunction(functionJson) -> string` (JSON report)
-#[wasm_bindgen(js_name = optilotus_runFunction)]
-pub fn js_run_function(input: &str) -> String {
-    init_panic_hook();
-    run_function_json(input)
-}
-
 // ---------------------------------------------------------------------------
-// Session API: the easy path (no IR assembly required)
+// Package registry: the single global behind the bridge.
 // ---------------------------------------------------------------------------
-// One explicitly-owned variable session for the JS world. Plain `Session`
-// values stay global-free and unit-testable (see `crate::session`); this
-// singleton is the documented owner of the browser session state, so
-// `set` then `exec_math("{n} + 1")` works across calls. `clear` resets it.
+// One explicitly-owned package for the JS world. Plain `Package` values
+// stay global-free and unit-testable (see `crate::package`); this
+// singleton is the documented owner of the browser package state.
 // `thread_local` (not `static`) keeps native test threads isolated.
-
-thread_local! {
-    static SESSION: RefCell<Session> = RefCell::new(Session::new());
-}
 
 thread_local! {
     static PACKAGE: RefCell<crate::package::Package> =
         RefCell::new(crate::package::Package::new());
-}
-
-fn with_session<T>(f: impl FnOnce(&mut Session) -> T) -> T {
-    SESSION.with(|cell| f(&mut cell.borrow_mut()))
 }
 
 fn with_package<T>(f: impl FnOnce(&mut crate::package::Package) -> T) -> T {
@@ -333,9 +277,9 @@ pub fn package_delete_command(fid: u32, cmd: u32) -> String {
     })
 }
 
-/// Run `main` by id only (no JSON input). Same JSON envelope as
-/// `run_function_json`, built inside the bridge: ok
-/// `{"status":"ok","steps","prints","printed"}` or the typed error object.
+/// Run `main` by id only (no JSON input). The output is always a JSON
+/// string — this never throws across the boundary, so JS callers only parse:
+/// ok `{"status":"ok","steps","prints","printed"}` or the typed error object.
 pub fn run_program() -> String {
     with_package(|pkg| {
         let mut sink = crate::sink::VecSink::default();
@@ -350,163 +294,6 @@ pub fn run_program() -> String {
             Err(e) => exec_error_json(&e).to_string(),
         }
     })
-}
-
-/// Map a session failure to the frontend error envelope.
-/// Same shape as `exec_error_json`, with `command: null` (no block ran).
-fn session_fail_json(err: &ExprFail) -> serde_json::Value {
-    let message = err.to_string();
-    match err {
-        ExprFail::Parse(detail) => serde_json::json!({
-            "status": "error", "kind": "ExprError",
-            "command": null, "message": message, "detail": detail,
-        }),
-        ExprFail::UnknownVariable(var) => serde_json::json!({
-            "status": "error", "kind": "UnknownVariable",
-            "command": null, "message": message, "var": var,
-        }),
-        ExprFail::TypeMismatch(detail) => serde_json::json!({
-            "status": "error", "kind": "TypeMismatch",
-            "command": null, "message": message, "detail": detail,
-        }),
-        ExprFail::Overflow => serde_json::json!({
-            "status": "error", "kind": "Overflow",
-            "command": null, "message": message,
-        }),
-        ExprFail::DivByZero => serde_json::json!({
-            "status": "error", "kind": "DivByZero",
-            "command": null, "message": message,
-        }),
-        ExprFail::UnknownFunction(name) => serde_json::json!({
-            "status": "error", "kind": "UnknownFunction",
-            "command": null, "message": message, "function": name,
-        }),
-        ExprFail::MissingReturn(name) => serde_json::json!({
-            "status": "error", "kind": "MissingReturn",
-            "command": null, "message": message, "function": name,
-        }),
-        ExprFail::Callee(inner) => exec_error_json(inner),
-    }
-}
-
-fn value_json(value: &crate::value::Value) -> serde_json::Value {
-    serde_json::json!({
-        "value": value,
-        "type": value.ty().tag(),
-        "display": value.to_string(),
-    })
-}
-
-/// Declare/assign a session variable: `set("n", "int32", "41")`.
-/// Types are lowercase tags (`int32`, `string`, `bool`, ...); the text is
-/// parsed into the declared type (`string` kept verbatim).
-/// Returns `{"status":"ok","var","type"}` or the error envelope.
-pub fn session_set(name: &str, ty: &str, text: &str) -> String {
-    let Some(parsed_ty) = crate::types::Type::parse_tag(ty) else {
-        return serde_json::json!({
-            "status": "error", "kind": "ExprError",
-            "command": null,
-            "message": format!("unknown type {ty:?}: use a lowercase tag like \"int32\" or \"string\""),
-        })
-        .to_string();
-    };
-    with_session(|session| {
-        let value = match Session::parse_value(parsed_ty, text) {
-            Ok(value) => value,
-            Err(e) => return session_fail_json(&e).to_string(),
-        };
-        match session.set(name, parsed_ty, value) {
-            Ok(()) => serde_json::json!({
-                "status": "ok", "var": name.trim(), "type": parsed_ty.tag(),
-            })
-            .to_string(),
-            Err(e) => session_fail_json(&e).to_string(),
-        }
-    })
-}
-
-/// Read a session variable: `get("n")`.
-/// Returns `{"status":"ok","value","type","display"}` or the error envelope.
-pub fn session_get(name: &str) -> String {
-    with_session(|session| match session.get(name) {
-        Ok(value) => {
-            let mut out = value_json(&value);
-            out["status"] = serde_json::Value::String("ok".to_string());
-            out.to_string()
-        }
-        Err(e) => session_fail_json(&e).to_string(),
-    })
-}
-
-/// Evaluate a maths expression against session variables:
-/// `exec_math("({n} + 4) % 2")`. See `eval_expr` for the language.
-/// Returns `{"status":"ok","value","type","display"}` or the error envelope.
-pub fn session_exec_math(expr: &str) -> String {
-    with_session(|session| match session.exec_math(expr) {
-        Ok(value) => {
-            let mut out = value_json(&value);
-            out["status"] = serde_json::Value::String("ok".to_string());
-            out.to_string()
-        }
-        Err(e) => session_fail_json(&e).to_string(),
-    })
-}
-
-/// Render a print template against session variables:
-/// `print("\"Hello {name}\" + \"!\"")`. See `render_template`.
-/// Returns `{"status":"ok","printed"}` or the error envelope.
-pub fn session_print(template: &str) -> String {
-    with_session(|session| match session.render(template) {
-        Ok(printed) => serde_json::json!({
-            "status": "ok", "printed": printed,
-        })
-        .to_string(),
-        Err(e) => session_fail_json(&e).to_string(),
-    })
-}
-
-/// Drop all session variables. Returns `{"status":"ok","cleared":N}`.
-pub fn session_clear() -> String {
-    let cleared = with_session(|session| session.clear());
-    serde_json::json!({
-        "status": "ok", "cleared": cleared,
-    })
-    .to_string()
-}
-
-/// JS: `optilotus_set(name, ty, value) -> string` (JSON)
-#[wasm_bindgen(js_name = optilotus_set)]
-pub fn js_session_set(name: &str, ty: &str, text: &str) -> String {
-    init_panic_hook();
-    session_set(name, ty, text)
-}
-
-/// JS: `optilotus_get(name) -> string` (JSON)
-#[wasm_bindgen(js_name = optilotus_get)]
-pub fn js_session_get(name: &str) -> String {
-    init_panic_hook();
-    session_get(name)
-}
-
-/// JS: `optilotus_execMath(expr) -> string` (JSON)
-#[wasm_bindgen(js_name = optilotus_execMath)]
-pub fn js_session_exec_math(expr: &str) -> String {
-    init_panic_hook();
-    session_exec_math(expr)
-}
-
-/// JS: `optilotus_print(template) -> string` (JSON)
-#[wasm_bindgen(js_name = optilotus_print)]
-pub fn js_session_print(template: &str) -> String {
-    init_panic_hook();
-    session_print(template)
-}
-
-/// JS: `optilotus_clear() -> string` (JSON)
-#[wasm_bindgen(js_name = optilotus_clear)]
-pub fn js_session_clear() -> String {
-    init_panic_hook();
-    session_clear()
 }
 
 /// JS: `optilotus_listFunctions() -> string` (JSON)
@@ -559,7 +346,6 @@ pub fn js_package_assign(fid: u32, name: &str, expr: &str) -> String {
 }
 
 /// JS: `optilotus_printCommand(fid, template) -> string` (JSON)
-/// Named `printCommand` to avoid clashing with session `optilotus_print`.
 #[wasm_bindgen(js_name = optilotus_printCommand)]
 pub fn js_package_print(fid: u32, template: &str) -> String {
     init_panic_hook();

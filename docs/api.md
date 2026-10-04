@@ -27,17 +27,6 @@ Pure, headless, unit-tested (`cargo test -p optilotus`):
     `delete_command(fid, cmd)`.
   - `run_main(sink)` / `run_main_with_limit(sink, limit)` — runs `main`
     by id only, with `name()` calls + `Return` shared over one step budget.
-- `run_function_json(input: &str) -> String` — legacy single-function path
-  (obsolete as primary; prefer `run_program()` below).
-- `run_program() -> String` — runs `main` by id only, no JSON input.
-  Same JSON envelope as `run_function_json`, built inside the bridge.
-- Session API (no IR assembly required; one explicitly-owned session per
-  loaded module, reset with `session_clear`):
-  - `session_set(name, ty, text) -> String` — declare/assign a variable.
-  - `session_get(name) -> String` — read a variable.
-  - `session_exec_math(expr) -> String` — maths expression string.
-  - `session_print(template) -> String` — print template string.
-  - `session_clear() -> String` — drop all session variables.
 
 Naming rule: every function in the UI that originates from the Optilotus
 API layer carries the `optilotus_` prefix with a camelCase remainder
@@ -52,8 +41,6 @@ Built with `npm run build:wasm` into `src/wasm/optilotus/`:
 
 - `optilotus_version(): string`
 - `optilotus_health(): string`
-- `optilotus_runFunction(functionJson: string): string` (legacy JSON report;
-  obsolete as primary — prefer `optilotus_runProgram()`)
 - `optilotus_runProgram(): string` (JSON report, no JSON input)
 - `optilotus_listFunctions(): string`
 - `optilotus_createFunction(name: string): string`
@@ -68,11 +55,6 @@ Built with `npm run build:wasm` into `src/wasm/optilotus/`:
 - `optilotus_setEntry(fid: number, cmd: number): string`
 - `optilotus_setNext(fid: number, cmd: number, next?: number): string`
 - `optilotus_deleteCommand(fid: number, cmd: number): string`
-- `optilotus_set(name: string, ty: string, value: string): string` (JSON)
-- `optilotus_get(name: string): string` (JSON)
-- `optilotus_execMath(expr: string): string` (JSON)
-- `optilotus_print(template: string): string` (JSON)
-- `optilotus_clear(): string` (JSON)
 
 ## TypeScript bridge (`src/lib/optilotus.ts`)
 
@@ -85,13 +67,14 @@ JSON:
 - `optilotus_version(): string`
 - `optilotus_health(): string`
 - Types: `FunctionId`, `CommandId`, `FunctionSummary`, `FunctionInfo`,
-  `CommandSummary`, `RunResult` (`RunOk | RunErr`), `OptilotusError`.
+  `CommandSummary`, `RunResult` (`RunOk | RunErr`), `OptilotusError`,
+  `optilotus_type` (`optilotus_type.int32`, …) + `OptilotusType`.
 - `optilotus_listFunctions(): {status:"ok",functions: FunctionSummary[]}`
 - `optilotus_createFunction(name): {status:"ok",id,name,is_main} | OptilotusError`
 - `optilotus_getFunction(id): ({status:"ok"} & FunctionInfo) | OptilotusError`
 - `optilotus_deleteFunction(id): {status:"ok",deleted} | OptilotusError`
 - `optilotus_clearPackage(): {status:"ok",cleared}`
-- `optilotus_declare(fid, name, ty, init?): {status:"ok",id} | OptilotusError`
+- `optilotus_declare(fid, name, ty: OptilotusType, init?): {status:"ok",id} | OptilotusError`
 - `optilotus_assign(fid, name, expr): {status:"ok",id} | OptilotusError`
 - `optilotus_printCommand(fid, template): {status:"ok",id} | OptilotusError`
 - `optilotus_return(fid, expr): {status:"ok",id} | OptilotusError`
@@ -100,10 +83,8 @@ JSON:
 - `optilotus_setNext(fid, cmd, next?): {status:"ok"} | OptilotusError`
 - `optilotus_deleteCommand(fid, cmd): {status:"ok",deleted} | OptilotusError`
 - `optilotus_runProgram(): RunResult` — runs `main` by id only.
-- Legacy: `optilotus_runFunction(functionJson: string): string`,
-  `optilotus_set/get/execMath/print/clear(): string` (JSON strings).
 
-## Package API (start here)
+## Package API (the only API)
 
 One package, many functions, permanent `main` (`FunctionId(0)`).
 Frontend surface is IDs + typed results; JSON never leaves the bridge:
@@ -115,7 +96,7 @@ const { functions } = optilotus_listFunctions();
 const created = optilotus_createFunction("helper");
 // {status:"ok", id: 1, name: "helper", is_main: false}
 
-optilotus_declare(0, "n", "int32", "41");
+optilotus_declare(0, "n", optilotus_type.int32, "41");
 optilotus_assign(0, "n", "{n} + 1");
 optilotus_printCommand(0, '"{n}"');
 
@@ -133,7 +114,7 @@ const result: RunResult = optilotus_runProgram();
 - `create_function("main")` and duplicate names are rejected; `main`
   cannot be deleted; `clear_package()` wipes helpers and re-creates an
   empty `main`.
-- `declare` needs an unused name + lowercase `ty` tag; `assign` needs a
+- `declare` needs an unused name + `optilotus_type` tag; `assign` needs a
   declared name (type is taken from the declaration); `print` takes a
   template; `return` takes an expression and stops the function.
 - `list_commands` returns user kinds (`declare` | `assign` | `print` |
@@ -145,107 +126,13 @@ const result: RunResult = optilotus_runProgram();
 - Errors are typed: `PackageError` for CRUD/builders (`command` set for
   `UnknownCommand`), execution failures carry the offending `command`
   (`null` for `LoopLimit`).
-
-## Session API (easy single-operation path)
-
-No IR assembly required — plain strings in, JSON out. One session per
-loaded module holds the variables; every call returns a JSON string
-(parse it, don't string-match it). All five share the error envelope
-`{"status":"error","kind","command":null,"message",...}` (`command` is
-always null here — no block ran; `kind` is one of `ExprError`,
-`UnknownVariable`, `TypeMismatch`, `Overflow`, `DivByZero`,
-`UnknownFunction`, `MissingReturn`).
-
-```ts
-optilotus_set("n", "int32", "3");
-// {"status":"ok","var":"n","type":"int32"}
-
-optilotus_execMath("({n} + 4) % 2");
-// {"status":"ok","value":{"Int32":1},"type":"int32","display":"1"}
-
-optilotus_set("name", "string", "Bob");
-optilotus_print('"Hello {name}" + " AAA"');
-// {"status":"ok","printed":"Hello Bob AAA"}
-
-optilotus_get("n");
-// {"status":"ok","value":{"Int32":3},"type":"int32","display":"3"}
-
-optilotus_clear();
-// {"status":"ok","cleared":2}
-```
-
-- `ty` is a lowercase tag (`int8`…`uint128`, `float32`, `float64`,
-  `bool`, `char`, `string`). Unknown tags are an error naming the fix.
-- The value text is parsed into `ty` (`string` kept verbatim,
-  `" 41 "` trims for numerics). Out-of-range integers are `Overflow`,
-  malformed text names the expected shape.
-- `set` enforces the declared type and freezes it: re-declaring `n`
-  as another type is `TypeMismatch`. Same type re-assigns.
-- `clear` resets the session — call it when starting a fresh user flow
-  so stale variables can't leak in.
-
-## Running functions (legacy full-program path, obsolete as primary)
-
-Prefer the Package API above (`optilotus_runProgram()` runs `main` by id
-only). The old path below passes a serialized `Function` and remains
-only for compatibility:
-
-```json
-{
-  "id": 1,
-  "name": "main",
-  "entry": 1,
-  "commands": [
-    {"id": 1, "op": {"Lit": {"String": "Bob"}}, "inputs": [], "outputs": [1], "next": 2},
-    {"id": 2, "op": {"Set": {"var": "name", "ty": "string"}}, "inputs": [1], "outputs": [], "next": 3},
-    {"id": 3, "op": {"Compute": {"expr": "({n} + 4) % 2"}}, "inputs": [], "outputs": [2], "next": 4},
-    {"id": 4, "op": "Print", "inputs": [2], "outputs": [], "next": null}
-  ]
-}
-```
-
-Ops (maths is usually a `Compute` expression string — there are no
-`Add`/`Sub`/`Mul`/`Div`/`Mod` commands; `Return` evaluates an expression
-and stops with a value for callers):
-
-- `{"Lit": <value>}` — constant. Values use tagged shapes:
-  `{"Int32": 41}`, `{"String": "hi"}`, `{"Bool": true}`, `"Void"`.
-  Type tags in `Set` are lowercase: `"ty": "string"`.
-- `"Print"` — 1 input, 0 outputs. `String` inputs are templates:
-  quoted literals joined by `+` with `{variable}` interpolation
-  (`"\"Hello {name}\" + \" AAA\""`); other values print as-is.
-- `{"Set": {"var": "<name>", "ty": "<Tag>"}}` — 1 input, 0 outputs.
-  Declares/assigns a function-scoped variable; the value must match `ty`.
-- `{"Get": {"var": "<name>"}}` — 0 inputs, 1 output. Inline variable read.
-- `{"Compute": {"expr": "<expression>"}}` — 0 inputs, 1 output.
-  `+ - * / %`, parentheses, unary minus, numbers, `{variables}`,
-  `"string"` literals, `name()` zero-arg calls.
-  Integer literals adopt a combined variable's type (`{int8var} + 2`
-  works); variable-vs-variable stays strict same-type-only.
-- `{"Return": {"expr": "<expression>"}}` — 0 inputs, 0 outputs.
-  Same expression language as `Compute`; stops the function with the value.
-
-Success report:
-
-```json
-{"status": "ok", "steps": 4, "prints": 1, "printed": ["Hello Bob AAA"]}
-```
-
-Error report (`command` is the offending block id, `null` for
-`LoopLimit`; `kind` is one of `ParseError`, `TypeMismatch`, `Overflow`,
-`DivByZero`, `MissingValue`, `Arity`, `UnknownCommand`, `LoopLimit`,
-`UnknownVariable`, `ExprError`, `UnknownFunction`, `MissingReturn`):
-
-```json
-{"status": "error", "kind": "UnknownVariable", "command": 1, "var": "ghost", "message": "unknown variable \"ghost\" at 1"}
-```
-
-Variables live for one run only — each call starts with an empty scope.
+- Variables live for one run only — each call starts with an empty scope.
 
 ## UI state
 
 - `useOptilotus(): OptilotusStatus` (`src/hooks/useOptilotus.ts`) —
-  readonly snapshot for `OptilotusPanel`.
+  readonly snapshot for `OptilotusPanel` (demo runs `main` via the
+  package API, no session).
 - `useIsMobile(): boolean` — viewport/nativeshell layout switch.
 - `hasCapacitorBridge(value: unknown)` / `isNativeMobile(value: unknown)`
   (`src/hooks/capacitorBridge.ts`) — pure predicates, tested with

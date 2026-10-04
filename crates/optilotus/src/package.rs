@@ -3,10 +3,9 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::expr::check_var_name;
+use crate::expr::{check_var_name, ExprFail};
 use crate::ir::{Command, CommandId, Function, FunctionId, ValueId};
 use crate::ops::Op;
-use crate::session::Session;
 use crate::sink::PrintSink;
 use crate::types::Type;
 use crate::value::Value;
@@ -16,7 +15,7 @@ pub const MAIN_ID: FunctionId = FunctionId(0);
 /// Reserved entry name.
 pub const MAIN_NAME: &str = "main";
 
-/// Owned single-package registry (same pattern as `Session`).
+/// Owned single-package registry: the single global behind the bridge.
 ///
 /// Holds all functions behind the bridge. `main` (`FunctionId(0)`) always
 /// exists and cannot be deleted. Id allocators live here so the UI only
@@ -157,6 +156,91 @@ fn default_value(ty: Type) -> Value {
         Type::Char => Value::Char('\0'),
         Type::String => Value::String(String::new()),
         Type::Void => Value::Void,
+    }
+}
+
+/// Parse user text into a value of the declared type.
+///
+/// `string` is kept verbatim (no trimming); every other type trims
+/// surrounding whitespace. Out-of-range integers are `Overflow`,
+/// malformed text is `Parse`, `void` is rejected.
+fn parse_value(ty: Type, text: &str) -> Result<Value, ExprFail> {
+    match ty {
+        Type::String => Ok(Value::String(text.to_string())),
+        Type::Void => Err(ExprFail::TypeMismatch(
+            "cannot declare a variable of type void".to_string(),
+        )),
+        Type::Bool => match text.trim() {
+            "true" => Ok(Value::Bool(true)),
+            "false" => Ok(Value::Bool(false)),
+            _ => Err(ExprFail::Parse(format!(
+                "invalid bool literal {text:?}: expected \"true\" or \"false\""
+            ))),
+        },
+        Type::Char => {
+            let mut chars = text.trim().chars();
+            match (chars.next(), chars.next()) {
+                (Some(c), None) => Ok(Value::Char(c)),
+                _ => Err(ExprFail::Parse(format!(
+                    "invalid char literal {text:?}: expected a single character"
+                ))),
+            }
+        }
+        Type::Float32 | Type::Float64 => {
+            let number: f64 = text
+                .trim()
+                .parse()
+                .map_err(|_| ExprFail::Parse(format!("invalid {} literal {text:?}", ty.tag())))?;
+            if ty == Type::Float32 {
+                Ok(Value::Float32(number as f32))
+            } else {
+                Ok(Value::Float64(number))
+            }
+        }
+        _ => {
+            let raw = text
+                .trim()
+                .parse::<i128>()
+                .map_err(|_| ExprFail::Parse(format!("invalid {} literal {text:?}", ty.tag())))?;
+            narrow_int(raw, ty)
+        }
+    }
+}
+
+fn narrow_int(raw: i128, ty: Type) -> Result<Value, ExprFail> {
+    match ty {
+        Type::Int8 => i8::try_from(raw)
+            .map(Value::Int8)
+            .map_err(|_| ExprFail::Overflow),
+        Type::Int16 => i16::try_from(raw)
+            .map(Value::Int16)
+            .map_err(|_| ExprFail::Overflow),
+        Type::Int32 => i32::try_from(raw)
+            .map(Value::Int32)
+            .map_err(|_| ExprFail::Overflow),
+        Type::Int64 => i64::try_from(raw)
+            .map(Value::Int64)
+            .map_err(|_| ExprFail::Overflow),
+        Type::Int128 => Ok(Value::Int128(raw)),
+        Type::Uint8 => u8::try_from(raw)
+            .map(Value::Uint8)
+            .map_err(|_| ExprFail::Overflow),
+        Type::Uint16 => u16::try_from(raw)
+            .map(Value::Uint16)
+            .map_err(|_| ExprFail::Overflow),
+        Type::Uint32 => u32::try_from(raw)
+            .map(Value::Uint32)
+            .map_err(|_| ExprFail::Overflow),
+        Type::Uint64 => u64::try_from(raw)
+            .map(Value::Uint64)
+            .map_err(|_| ExprFail::Overflow),
+        Type::Uint128 => u128::try_from(raw)
+            .map(Value::Uint128)
+            .map_err(|_| ExprFail::Overflow),
+        _ => Err(ExprFail::TypeMismatch(format!(
+            "cannot parse {} value from text",
+            ty.tag()
+        ))),
     }
 }
 
@@ -421,8 +505,9 @@ impl Package {
             return Err(PackageError::DuplicateVariable(var));
         }
         let value = match init {
-            Some(text) => Session::parse_value(ty, text)
-                .map_err(|e| PackageError::InvalidCommand(e.to_string()))?,
+            Some(text) => {
+                parse_value(ty, text).map_err(|e| PackageError::InvalidCommand(e.to_string()))?
+            }
             None => default_value(ty),
         };
         let vid = self.alloc_value_id();
