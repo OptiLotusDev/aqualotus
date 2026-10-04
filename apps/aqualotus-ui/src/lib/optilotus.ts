@@ -1,23 +1,17 @@
 import init, {
   optilotus_assign as assign_wasm,
-  optilotus_clear as clear_wasm,
   optilotus_clearPackage as clearPackage_wasm,
   optilotus_createFunction as createFunction_wasm,
   optilotus_declare as declare_wasm,
   optilotus_deleteCommand as deleteCommand_wasm,
   optilotus_deleteFunction as deleteFunction_wasm,
-  optilotus_execMath as execMath_wasm,
-  optilotus_get as get_wasm,
   optilotus_getFunction as getFunction_wasm,
   optilotus_health as health_wasm,
   optilotus_listCommands as listCommands_wasm,
   optilotus_listFunctions as listFunctions_wasm,
-  optilotus_print as print_wasm,
   optilotus_printCommand as printCommand_wasm,
   optilotus_return as return_wasm,
-  optilotus_runFunction as runFunction_wasm,
   optilotus_runProgram as runProgram_wasm,
-  optilotus_set as set_wasm,
   optilotus_setEntry as setEntry_wasm,
   optilotus_setNext as setNext_wasm,
   optilotus_version as version_wasm,
@@ -25,7 +19,7 @@ import init, {
 
 // Project rule: every function in the UI that originates from the
 // Optilotus API layer carries the `optilotus_` prefix with a camelCase
-// remainder (e.g. `optilotus_execMath`). This deliberately takes
+// remainder (e.g. `optilotus_runProgram`). This deliberately takes
 // precedence over the generic camelCase rule (P9/P24) for this module.
 // The `_wasm` aliases keep the bridge exports exactly `optilotus_*`.
 
@@ -68,74 +62,6 @@ export function optilotus_version(): string {
 export function optilotus_health(): string {
   assertReady();
   return health_wasm();
-}
-
-/**
- * Execute a serialized Function; returns the run-report JSON.
- * Input: `Function` as JSON (`{id, name, entry, commands}`). Output is
- * always JSON: `{status: "ok", steps, prints, printed: string[]}` or
- * `{status: "error", kind, command: number|null, message, ...}` where
- * `command` identifies the offending block for editor highlighting.
- * Requires init.
- */
-export function optilotus_runFunction(functionJson: string): string {
-  assertReady();
-  return runFunction_wasm(functionJson);
-}
-
-/**
- * Declare/assign a session variable, e.g.
- * `optilotus_set("n", optilotus_type.int32, "41")`.
- * The text is parsed into the declared type. Returns
- * `{"status":"ok","var","type"}` or the error envelope. Requires init.
- */
-export function optilotus_set(
-  name: string,
-  ty: OptilotusType,
-  value: string,
-): string {
-  assertReady();
-  return set_wasm(name, ty, value);
-}
-
-/**
- * Read a session variable. Returns
- * `{"status":"ok","value","type","display"}` or the error envelope.
- * Requires init.
- */
-export function optilotus_get(name: string): string {
-  assertReady();
-  return get_wasm(name);
-}
-
-/**
- * Evaluate a maths expression against session variables, e.g.
- * `optilotus_execMath("({n} + 4) % 2")`. Returns
- * `{"status":"ok","value","type","display"}` or the error envelope.
- * Requires init.
- */
-export function optilotus_execMath(expr: string): string {
-  assertReady();
-  return execMath_wasm(expr);
-}
-
-/**
- * Render a print template against session variables, e.g.
- * `optilotus_print('"Hello {name}" + "!"')`. Returns
- * `{"status":"ok","printed"}` or the error envelope. Requires init.
- */
-export function optilotus_print(template: string): string {
-  assertReady();
-  return print_wasm(template);
-}
-
-/**
- * Drop all session variables. Returns `{"status":"ok","cleared":N}`.
- * Requires init.
- */
-export function optilotus_clear(): string {
-  assertReady();
-  return clear_wasm();
 }
 
 /**

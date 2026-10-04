@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react'
 import {
-  optilotus_execMath,
+  optilotus_assign,
+  optilotus_clearPackage,
+  optilotus_declare,
   optilotus_health,
+  optilotus_printCommand,
+  optilotus_runProgram,
   optilotus_tryEnsure,
+  optilotus_type,
   optilotus_version,
 } from '../lib/optilotus'
 
@@ -21,12 +26,23 @@ const LOADING: OptilotusStatus = {
   mathDemo: '',
 }
 
+/** Demo `(3 + 4) % 2` built with the package API (IDs only, no IR JSON). */
+function runMathDemo(): string {
+  optilotus_clearPackage();
+  const declared = optilotus_declare(0, 'n', optilotus_type.int32, '3');
+  if (declared.status !== 'ok') return `error: ${declared.message}`;
+  const assigned = optilotus_assign(0, 'n', '({n} + 4) % 2');
+  if (assigned.status !== 'ok') return `error: ${assigned.message}`;
+  const printed = optilotus_printCommand(0, '"{n}"');
+  if (printed.status !== 'ok') return `error: ${printed.message}`;
+  const result = optilotus_runProgram();
+  if (result.status !== 'ok') return `error: ${result.message}`;
+  return result.printed[0] ?? '';
+}
+
 /**
  * Data hook (P1/P10): owns async bridge state. Renders nothing;
  * `OptilotusPanel` presents the snapshot it returns.
- *
- * The demo expression uses literals only, so it never touches the
- * shared session (no variables to leak into the user's flow).
  */
 export function useOptilotus(): OptilotusStatus {
   const [status, setStatus] = useState<OptilotusStatus>(LOADING)
@@ -38,7 +54,7 @@ export function useOptilotus(): OptilotusStatus {
           wasmStatus: 'connected',
           version: optilotus_version(),
           health: optilotus_health(),
-          mathDemo: optilotus_execMath('(3 + 4) % 2'),
+          mathDemo: runMathDemo(),
         });
       })
       .catch((e: unknown) => {
