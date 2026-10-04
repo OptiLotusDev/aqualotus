@@ -9,7 +9,7 @@ import init, {
   optilotus_health as health_wasm,
   optilotus_listCommands as listCommands_wasm,
   optilotus_listFunctions as listFunctions_wasm,
-  optilotus_printCommand as printCommand_wasm,
+  optilotus_print as print_wasm,
   optilotus_return as return_wasm,
   optilotus_runProgram as runProgram_wasm,
   optilotus_setEntry as setEntry_wasm,
@@ -101,20 +101,22 @@ export type OptilotusType =
 export type FunctionSummary = {
   id: number;
   name: string;
-  is_main: boolean;
+  isMain: boolean;
 };
 
 export type FunctionInfo = {
   id: number;
   name: string;
-  is_main: boolean;
+  isMain: boolean;
   entry: number | null;
-  command_count: number;
+  commandCount: number;
 };
 
 export type CommandSummary = {
   id: number;
   kind: "declare" | "assign" | "print" | "return";
+  /** Following user command head; `null` at the tail end or when cleared. */
+  next: number | null;
   var?: string;
   ty?: OptilotusType;
   expr?: string;
@@ -144,7 +146,7 @@ export function optilotus_listFunctions(): {
 export function optilotus_createFunction(
   name: string,
 ):
-  | { status: "ok"; id: number; name: string; is_main: boolean }
+  | { status: "ok"; id: number; name: string; isMain: boolean }
   | OptilotusError {
   assertReady();
   return parseBridge(createFunction_wasm(name));
@@ -191,12 +193,12 @@ export function optilotus_assign(
   return parseBridge(assign_wasm(fid, name, expr));
 }
 
-export function optilotus_printCommand(
+export function optilotus_print(
   fid: number,
   template: string,
 ): { status: "ok"; id: number } | OptilotusError {
   assertReady();
-  return parseBridge(printCommand_wasm(fid, template));
+  return parseBridge(print_wasm(fid, template));
 }
 
 export function optilotus_return(
@@ -218,7 +220,7 @@ export function optilotus_listCommands(
 
 export function optilotus_setEntry(
   fid: number,
-  cmd: number,
+  cmd: number | null,
 ): { status: "ok" } | OptilotusError {
   assertReady();
   return parseBridge(setEntry_wasm(fid, cmd));

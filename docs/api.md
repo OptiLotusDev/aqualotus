@@ -49,10 +49,10 @@ Built with `npm run build:wasm` into `src/wasm/optilotus/`:
 - `optilotus_clearPackage(): string`
 - `optilotus_declare(fid: number, name: string, ty: string, init?: string): string`
 - `optilotus_assign(fid: number, name: string, expr: string): string`
-- `optilotus_printCommand(fid: number, template: string): string`
+- `optilotus_print(fid: number, template: string): string`
 - `optilotus_return(fid: number, expr: string): string`
 - `optilotus_listCommands(fid: number): string`
-- `optilotus_setEntry(fid: number, cmd: number): string`
+- `optilotus_setEntry(fid: number, cmd?: number): string` (`null`/omitted clears)
 - `optilotus_setNext(fid: number, cmd: number, next?: number): string`
 - `optilotus_deleteCommand(fid: number, cmd: number): string`
 
@@ -69,17 +69,19 @@ JSON:
 - Types: `FunctionId`, `CommandId`, `FunctionSummary`, `FunctionInfo`,
   `CommandSummary`, `RunResult` (`RunOk | RunErr`), `OptilotusError`,
   `optilotus_type` (`optilotus_type.int32`, …) + `OptilotusType`.
+  Wire JSON uses `camelCase` (`isMain`, `commandCount`); Rust fields stay
+  `snake_case`.
 - `optilotus_listFunctions(): {status:"ok",functions: FunctionSummary[]}`
-- `optilotus_createFunction(name): {status:"ok",id,name,is_main} | OptilotusError`
+- `optilotus_createFunction(name): {status:"ok",id,name,isMain} | OptilotusError`
 - `optilotus_getFunction(id): ({status:"ok"} & FunctionInfo) | OptilotusError`
 - `optilotus_deleteFunction(id): {status:"ok",deleted} | OptilotusError`
 - `optilotus_clearPackage(): {status:"ok",cleared}`
 - `optilotus_declare(fid, name, ty: OptilotusType, init?): {status:"ok",id} | OptilotusError`
 - `optilotus_assign(fid, name, expr): {status:"ok",id} | OptilotusError`
-- `optilotus_printCommand(fid, template): {status:"ok",id} | OptilotusError`
+- `optilotus_print(fid, template): {status:"ok",id} | OptilotusError`
 - `optilotus_return(fid, expr): {status:"ok",id} | OptilotusError`
 - `optilotus_listCommands(fid): {status:"ok",commands: CommandSummary[]} | OptilotusError`
-- `optilotus_setEntry(fid, cmd): {status:"ok"} | OptilotusError`
+- `optilotus_setEntry(fid, cmd: number | null): {status:"ok"} | OptilotusError`
 - `optilotus_setNext(fid, cmd, next?): {status:"ok"} | OptilotusError`
 - `optilotus_deleteCommand(fid, cmd): {status:"ok",deleted} | OptilotusError`
 - `optilotus_runProgram(): RunResult` — runs `main` by id only.
@@ -91,21 +93,23 @@ Frontend surface is IDs + typed results; JSON never leaves the bridge:
 
 ```ts
 const { functions } = optilotus_listFunctions();
-// [{id: 0, name: "main", is_main: true}]
+// [{id: 0, name: "main", isMain: true}]
 
 const created = optilotus_createFunction("helper");
-// {status:"ok", id: 1, name: "helper", is_main: false}
+// {status:"ok", id: 1, name: "helper", isMain: false}
 
 optilotus_declare(0, "n", optilotus_type.int32, "41");
 optilotus_assign(0, "n", "{n} + 1");
-optilotus_printCommand(0, '"{n}"');
+optilotus_print(0, '"{n}"');
 
 optilotus_listCommands(0);
 // {status:"ok", commands: [
-//   {id, kind:"declare", var:"n", ty:"int32", expr:"41"},
-//   {id, kind:"assign", var:"n", expr:"{n} + 1"},
-//   {id, kind:"print", template:'"{n}"'},
+//   {id, kind:"declare", next, var:"n", ty:"int32", expr:"41"},
+//   {id, kind:"assign", next, var:"n", expr:"{n} + 1"},
+//   {id, kind:"print", next:null, template:'"{n}"'},
 // ]}
+// `next` is the following user head (`null` at the tail); together with
+// `getFunction(...).entry` the editor rebuilds the chain from this list.
 
 const result: RunResult = optilotus_runProgram();
 // {status:"ok", steps: 6, prints: 1, printed: ["42"]}
@@ -126,6 +130,10 @@ const result: RunResult = optilotus_runProgram();
 - Errors are typed: `PackageError` for CRUD/builders (`command` set for
   `UnknownCommand`), execution failures carry the offending `command`
   (`null` for `LoopLimit`).
+- `setEntry(fid, null)` clears the entry (run becomes a no-op; commands
+  are kept as orphans).
+- The transient `Program` snapshot uses the hardcoded package name `"app"`
+  (`PACKAGE_NAME`) — not user-settable until multi-package exists.
 - Variables live for one run only — each call starts with an empty scope.
 
 ## UI state

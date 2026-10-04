@@ -12,14 +12,101 @@ fn build_main_via_api_lists_back() {
     assert_eq!(cmds[0].id, d);
     assert_eq!(cmds[0].kind, CommandKind::Declare);
     assert_eq!(cmds[0].var.as_deref(), Some("n"));
+    assert_eq!(cmds[0].next, Some(a));
     assert_eq!(cmds[1].id, a);
     assert_eq!(cmds[1].kind, CommandKind::Assign);
+    assert_eq!(cmds[1].next, Some(p));
     assert_eq!(cmds[2].id, p);
     assert_eq!(cmds[2].kind, CommandKind::Print);
+    assert_eq!(cmds[2].next, None);
 
     let info = pkg.get_function(MAIN_ID).unwrap();
     assert_eq!(info.command_count, 3);
     assert_eq!(info.entry, Some(d));
+}
+
+#[test]
+fn declare_without_init_uses_zero_default() {
+    let mut pkg = Package::new();
+    pkg.declare(MAIN_ID, "n", "int32", None).unwrap();
+    pkg.print(MAIN_ID, "\"{n}\"").unwrap();
+    pkg.declare(MAIN_ID, "s", "string", None).unwrap();
+    pkg.print(MAIN_ID, "\"<{s}>\"").unwrap();
+
+    let mut sink = VecSink::default();
+    pkg.run_main(&mut sink).unwrap();
+    assert_eq!(sink.lines, vec!["0".to_string(), "<>".to_string()]);
+}
+
+#[test]
+fn delete_middle_of_chain_repairs_link() {
+    let mut pkg = Package::new();
+    let a = pkg.declare(MAIN_ID, "n", "int32", Some("1")).unwrap();
+    let b = pkg.print(MAIN_ID, "\"{n}\"").unwrap();
+    let c = pkg.print(MAIN_ID, "\"done\"").unwrap();
+
+    // Delete the reachable middle: a -> c must hold afterwards.
+    pkg.delete_command(MAIN_ID, b).unwrap();
+    let cmds = pkg.list_commands(MAIN_ID).unwrap();
+    assert_eq!(cmds.len(), 2);
+    assert_eq!(cmds[0].id, a);
+    assert_eq!(cmds[0].next, Some(c));
+    assert_eq!(cmds[1].id, c);
+    assert_eq!(cmds[1].next, None);
+
+    let mut sink = VecSink::default();
+    pkg.run_main(&mut sink).unwrap();
+    assert_eq!(sink.lines, vec!["done".to_string()]);
+}
+
+#[test]
+fn delete_entry_moves_entry_to_successor() {
+    let mut pkg = Package::new();
+    let a = pkg.declare(MAIN_ID, "n", "int32", Some("1")).unwrap();
+    let b = pkg.print(MAIN_ID, "\"{n}\"").unwrap();
+
+    pkg.delete_command(MAIN_ID, a).unwrap();
+    let info = pkg.get_function(MAIN_ID).unwrap();
+    assert_eq!(info.entry, Some(b));
+
+    // b alone needs `n`, which died with `a`: the error names the block.
+    let mut sink = VecSink::default();
+    let err = pkg.run_main(&mut sink).unwrap_err();
+    assert!(matches!(err, optilotus::ExecError::UnknownVariable { .. }));
+}
+
+#[test]
+fn set_next_then_run_program_uses_product_path() {
+    let mut pkg = Package::new();
+    let a = pkg.declare(MAIN_ID, "n", "int32", Some("1")).unwrap();
+    let b = pkg.print(MAIN_ID, "\"{n}\"").unwrap();
+    let c = pkg.print(MAIN_ID, "\"done\"").unwrap();
+
+    pkg.set_next(MAIN_ID, a, Some(c)).unwrap();
+    let cmds = pkg.list_commands(MAIN_ID).unwrap();
+    assert_eq!(cmds[0].next, Some(c));
+
+    // Same rewire through `run_main` (the `runProgram` product path).
+    let mut sink = VecSink::default();
+    pkg.run_main(&mut sink).unwrap();
+    assert_eq!(sink.lines, vec!["done".to_string()]);
+    let _ = b;
+}
+
+#[test]
+fn clear_entry_empties_run_but_keeps_commands() {
+    let mut pkg = Package::new();
+    pkg.declare(MAIN_ID, "n", "int32", Some("1")).unwrap();
+    pkg.print(MAIN_ID, "\"{n}\"").unwrap();
+
+    pkg.set_entry(MAIN_ID, None).unwrap();
+    assert!(pkg.get_function(MAIN_ID).unwrap().entry.is_none());
+    // Commands are kept (as orphans); the run is a no-op.
+    assert_eq!(pkg.list_commands(MAIN_ID).unwrap().len(), 2);
+    let mut sink = VecSink::default();
+    let report = pkg.run_main(&mut sink).unwrap();
+    assert_eq!(report.steps, 0);
+    assert!(sink.lines.is_empty());
 }
 
 #[test]
