@@ -4,7 +4,7 @@ import {
   optilotus_clearPackage,
   optilotus_declare,
   optilotus_health,
-  optilotus_printCommand,
+  optilotus_print,
   optilotus_runProgram,
   optilotus_tryEnsure,
   optilotus_type,
@@ -33,7 +33,7 @@ function runMathDemo(): string {
   if (declared.status !== 'ok') return `error: ${declared.message}`;
   const assigned = optilotus_assign(0, 'n', '({n} + 4) % 2');
   if (assigned.status !== 'ok') return `error: ${assigned.message}`;
-  const printed = optilotus_printCommand(0, '"{n}"');
+  const printed = optilotus_print(0, '"{n}"');
   if (printed.status !== 'ok') return `error: ${printed.message}`;
   const result = optilotus_runProgram();
   if (result.status !== 'ok') return `error: ${result.message}`;

@@ -135,24 +135,25 @@ fn package_fail_json(err: &crate::package::PackageError) -> serde_json::Value {
     })
 }
 
-/// List functions: `{"status":"ok","functions":[{id,name,is_main}]}`.
+/// List functions: `{"status":"ok","functions":[{id,name,isMain}]}`.
+/// Wire JSON uses `camelCase` for the TS bridge; Rust fields stay `snake_case`.
 pub fn package_list_functions() -> String {
     let functions = with_package(|pkg| pkg.list_functions());
     let items: Vec<serde_json::Value> = functions
         .iter()
-        .map(|f| serde_json::json!({"id": f.id.0, "name": f.name, "is_main": f.is_main}))
+        .map(|f| serde_json::json!({"id": f.id.0, "name": f.name, "isMain": f.is_main}))
         .collect();
     serde_json::json!({"status": "ok", "functions": items}).to_string()
 }
 
-/// Create a function: `{"status":"ok","id","name","is_main"}`.
+/// Create a function: `{"status":"ok","id","name","isMain"}`.
 pub fn package_create_function(name: &str) -> String {
     with_package(|pkg| match pkg.create_function(name) {
         Ok(id) => {
             let info = pkg.get_function(id).expect("just created");
             serde_json::json!({
                 "status": "ok", "id": info.id.0,
-                "name": info.name, "is_main": info.is_main,
+                "name": info.name, "isMain": info.is_main,
             })
             .to_string()
         }
@@ -165,9 +166,9 @@ pub fn package_get_function(id: u32) -> String {
     with_package(|pkg| match pkg.get_function(crate::ir::FunctionId(id)) {
         Ok(info) => serde_json::json!({
             "status": "ok", "id": info.id.0, "name": info.name,
-            "is_main": info.is_main,
+            "isMain": info.is_main,
             "entry": info.entry.map(|c| c.0),
-            "command_count": info.command_count,
+            "commandCount": info.command_count,
         })
         .to_string(),
         Err(e) => package_fail_json(&e).to_string(),
@@ -243,10 +244,10 @@ pub fn package_list_commands(fid: u32) -> String {
     })
 }
 
-/// `set_entry(fid, cmd)` — cmd head id.
-pub fn package_set_entry(fid: u32, cmd: u32) -> String {
+/// `set_entry(fid, cmd?)` — cmd head id, `null` clears the entry.
+pub fn package_set_entry(fid: u32, cmd: Option<u32>) -> String {
     with_package(|pkg| {
-        match pkg.set_entry(crate::ir::FunctionId(fid), Some(crate::ir::CommandId(cmd))) {
+        match pkg.set_entry(crate::ir::FunctionId(fid), cmd.map(crate::ir::CommandId)) {
             Ok(()) => serde_json::json!({"status": "ok"}).to_string(),
             Err(e) => package_fail_json(&e).to_string(),
         }
@@ -345,8 +346,8 @@ pub fn js_package_assign(fid: u32, name: &str, expr: &str) -> String {
     package_assign(fid, name, expr)
 }
 
-/// JS: `optilotus_printCommand(fid, template) -> string` (JSON)
-#[wasm_bindgen(js_name = optilotus_printCommand)]
+/// JS: `optilotus_print(fid, template) -> string` (JSON)
+#[wasm_bindgen(js_name = optilotus_print)]
 pub fn js_package_print(fid: u32, template: &str) -> String {
     init_panic_hook();
     package_print(fid, template)
@@ -366,9 +367,9 @@ pub fn js_package_list_commands(fid: u32) -> String {
     package_list_commands(fid)
 }
 
-/// JS: `optilotus_setEntry(fid, cmd) -> string` (JSON)
+/// JS: `optilotus_setEntry(fid, cmd?) -> string` (JSON, `null` clears)
 #[wasm_bindgen(js_name = optilotus_setEntry)]
-pub fn js_package_set_entry(fid: u32, cmd: u32) -> String {
+pub fn js_package_set_entry(fid: u32, cmd: Option<u32>) -> String {
     init_panic_hook();
     package_set_entry(fid, cmd)
 }

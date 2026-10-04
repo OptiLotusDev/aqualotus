@@ -80,7 +80,7 @@ fn bridge_crud_round_trip() {
     assert_eq!(list["status"], "ok");
     assert_eq!(list["functions"].as_array().unwrap().len(), 1);
     assert_eq!(list["functions"][0]["name"], "main");
-    assert_eq!(list["functions"][0]["is_main"], true);
+    assert_eq!(list["functions"][0]["isMain"], true);
 
     let created = bridge_json(&package_create_function("helper"));
     assert_eq!(created["status"], "ok");

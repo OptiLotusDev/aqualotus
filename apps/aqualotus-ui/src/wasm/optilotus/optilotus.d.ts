@@ -52,9 +52,9 @@ export function optilotus_listCommands(fid: number): string;
 export function optilotus_listFunctions(): string;
 
 /**
- * JS: `optilotus_printCommand(fid, template) -> string` (JSON)
+ * JS: `optilotus_print(fid, template) -> string` (JSON)
  */
-export function optilotus_printCommand(fid: number, template: string): string;
+export function optilotus_print(fid: number, template: string): string;
 
 /**
  * JS: `optilotus_return(fid, expr) -> string` (JSON)
@@ -67,9 +67,9 @@ export function optilotus_return(fid: number, expr: string): string;
 export function optilotus_runProgram(): string;
 
 /**
- * JS: `optilotus_setEntry(fid, cmd) -> string` (JSON)
+ * JS: `optilotus_setEntry(fid, cmd?) -> string` (JSON, `null` clears)
  */
-export function optilotus_setEntry(fid: number, cmd: number): string;
+export function optilotus_setEntry(fid: number, cmd?: number | null): string;
 
 /**
  * JS: `optilotus_setNext(fid, cmd, next?) -> string` (JSON)
@@ -95,7 +95,7 @@ export interface InitOutput {
     readonly optilotus_health: () => [number, number];
     readonly optilotus_listCommands: (a: number) => [number, number];
     readonly optilotus_listFunctions: () => [number, number];
-    readonly optilotus_printCommand: (a: number, b: number, c: number) => [number, number];
+    readonly optilotus_print: (a: number, b: number, c: number) => [number, number];
     readonly optilotus_return: (a: number, b: number, c: number) => [number, number];
     readonly optilotus_runProgram: () => [number, number];
     readonly optilotus_setEntry: (a: number, b: number) => [number, number];

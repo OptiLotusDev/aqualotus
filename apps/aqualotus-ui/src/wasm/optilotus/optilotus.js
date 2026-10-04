@@ -196,18 +196,18 @@ export function optilotus_listFunctions() {
 }
 
 /**
- * JS: `optilotus_printCommand(fid, template) -> string` (JSON)
+ * JS: `optilotus_print(fid, template) -> string` (JSON)
  * @param {number} fid
  * @param {string} template
  * @returns {string}
  */
-export function optilotus_printCommand(fid, template) {
+export function optilotus_print(fid, template) {
     let deferred2_0;
     let deferred2_1;
     try {
         const ptr0 = passStringToWasm0(template, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.optilotus_printCommand(fid, ptr0, len0);
+        const ret = wasm.optilotus_print(fid, ptr0, len0);
         deferred2_0 = ret[0];
         deferred2_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);
@@ -255,16 +255,16 @@ export function optilotus_runProgram() {
 }
 
 /**
- * JS: `optilotus_setEntry(fid, cmd) -> string` (JSON)
+ * JS: `optilotus_setEntry(fid, cmd?) -> string` (JSON, `null` clears)
  * @param {number} fid
- * @param {number} cmd
+ * @param {number | null} [cmd]
  * @returns {string}
  */
 export function optilotus_setEntry(fid, cmd) {
     let deferred1_0;
     let deferred1_1;
     try {
-        const ret = wasm.optilotus_setEntry(fid, cmd);
+        const ret = wasm.optilotus_setEntry(fid, isLikeNone(cmd) ? Number.MAX_SAFE_INTEGER : (cmd) >>> 0);
         deferred1_0 = ret[0];
         deferred1_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);

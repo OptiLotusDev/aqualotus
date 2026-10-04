@@ -39,7 +39,7 @@ pub use ir::{Command, CommandId, Function, FunctionId, Program, ValueId};
 pub use ops::{apply_arith, print_text, ArithKind, Op, OpError};
 pub use package::{
     CommandKind, CommandSummary, FunctionInfo, FunctionSummary, Package, PackageError, MAIN_ID,
-    MAIN_NAME,
+    MAIN_NAME, PACKAGE_NAME,
 };
 pub use sink::{PrintSink, VecSink};
 pub use types::Type;

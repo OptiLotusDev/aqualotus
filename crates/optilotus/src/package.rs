@@ -14,6 +14,9 @@ use crate::value::Value;
 pub const MAIN_ID: FunctionId = FunctionId(0);
 /// Reserved entry name.
 pub const MAIN_NAME: &str = "main";
+/// Package name used in [`Package::as_program`]. Hardcoded placeholder
+/// until multi-package exists; not user-settable.
+pub const PACKAGE_NAME: &str = "app";
 
 /// Owned single-package registry: the single global behind the bridge.
 ///
@@ -93,23 +96,28 @@ impl fmt::Display for PackageError {
 
 impl std::error::Error for PackageError {}
 
-/// `{id, name, is_main}` for `list_functions`.
+/// `{id, name, isMain}` for `list_functions`.
+/// Rust fields stay `snake_case`; wire JSON uses `camelCase` for the TS
+/// bridge (see `docs/api.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FunctionSummary {
     pub id: FunctionId,
     pub name: String,
+    #[serde(rename = "isMain")]
     pub is_main: bool,
 }
 
-/// `{id, name, is_main, entry, command_count}` for `get_function`.
+/// `{id, name, isMain, entry, commandCount}` for `get_function`.
 /// `command_count` is the user-visible count (matches `list_commands`
 /// length), not raw IR length.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FunctionInfo {
     pub id: FunctionId,
     pub name: String,
+    #[serde(rename = "isMain")]
     pub is_main: bool,
     pub entry: Option<CommandId>,
+    #[serde(rename = "commandCount")]
     pub command_count: usize,
 }
 
@@ -124,10 +132,15 @@ pub enum CommandKind {
 }
 
 /// User-facing command row for `list_commands`.
+/// `next` is the following user command head (`None` at the tail end or
+/// when the edge was cleared); it is filled from the live raw graph on
+/// every `list_commands` call, so rewires are always reflected. The
+/// stored meta keeps `None` — the raw `next` edges are the source of truth.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandSummary {
     pub id: CommandId,
     pub kind: CommandKind,
+    pub next: Option<CommandId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub var: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -536,6 +549,7 @@ impl Package {
             CommandSummary {
                 id: head_id,
                 kind: CommandKind::Declare,
+                next: None,
                 var: Some(var),
                 ty: Some(ty),
                 expr: init.map(|s| s.to_string()),
@@ -592,6 +606,7 @@ impl Package {
             CommandSummary {
                 id: head_id,
                 kind: CommandKind::Assign,
+                next: None,
                 var: Some(var),
                 ty: Some(ty),
                 expr: Some(expr.to_string()),
@@ -629,6 +644,7 @@ impl Package {
             CommandSummary {
                 id: head_id,
                 kind: CommandKind::Print,
+                next: None,
                 var: None,
                 ty: None,
                 expr: None,
@@ -664,6 +680,7 @@ impl Package {
             CommandSummary {
                 id: head_id,
                 kind: CommandKind::Return,
+                next: None,
                 var: None,
                 ty: None,
                 expr: Some(expr.to_string()),
@@ -724,7 +741,22 @@ impl Package {
             meta.values().filter(|s| !seen.contains(&s.id)).collect();
         orphans.sort_by_key(|s| s.id.0);
         out.extend(orphans.into_iter().cloned());
+        // Fill user-level linkage from the live raw graph, so the editor
+        // can reconstruct the chain from this list + `get_function.entry`.
+        // Dangling edges (no known head) surface as `None`.
+        for summary in out.iter_mut() {
+            summary.next = self.user_next(fid, summary.id);
+        }
         Ok(out)
+    }
+
+    /// Following user edge of `head`: the raw pair tail's `next`, kept
+    /// only when it points at a known user head.
+    fn user_next(&self, fid: FunctionId, head: CommandId) -> Option<CommandId> {
+        let tail = self.pair_tail(fid, head).ok()?;
+        let next = self.functions.get(&fid)?.find_command(tail)?.next?;
+        let meta = self.meta.get(&fid)?;
+        meta.contains_key(&next).then_some(next)
     }
 
     fn pair_tail(&self, fid: FunctionId, head: CommandId) -> Result<CommandId, PackageError> {
@@ -883,7 +915,7 @@ impl Package {
         functions.sort_by_key(|f| f.id.0);
         crate::ir::Program {
             version: 1,
-            package: "app".to_string(),
+            package: PACKAGE_NAME.to_string(),
             functions,
         }
     }
