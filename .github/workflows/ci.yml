@@ -14,11 +14,50 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Skip redundant runs: a branch freshly cut from dev with no new changes
+  # was already tested as dev (pushing the branch still fires `on: push`).
+  # Fail open (run) on any doubt. PRs, dispatches, and pushes to main/dev
+  # always run.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        run: |
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "${{ github.ref }}" in
+            refs/heads/main|refs/heads/dev)
+              echo "code=true" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+          git fetch origin dev --quiet || true
+          if ! git rev-parse --verify --quiet refs/remotes/origin/dev >/dev/null; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git merge-base --is-ancestor HEAD refs/remotes/origin/dev; then
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet refs/remotes/origin/dev HEAD; then
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          fi
+
   # Optilotus engine: headless proof. The runtime must never depend on
   # the UI, Tauri, React, or a browser (roadmap invariants 1/11, P11/P12).
   # Plain `cargo test --workspace` excludes the Tauri shell by design
   # (see root Cargo.toml `exclude`).
   rust-core:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +75,11 @@ jobs:
   # Web: the one shared React app + WASM bridge (works today).
   # Covers `lint`, `test:ui`, and the production `build`
   # (which rebuilds WASM via `build:wasm`, then `tsc -b` + `vite build`).
+  # Skipped together with rust-core when there is nothing new to test;
+  # desktop/mobile cascade from these two, so they skip as well.
   web:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
