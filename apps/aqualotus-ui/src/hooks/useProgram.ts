@@ -9,6 +9,7 @@ import type {
 } from "../lib/optilotus";
 import {
   optilotus_assign,
+  optilotus_clearPackage,
   optilotus_createFunction,
   optilotus_declare,
   optilotus_deleteCommand,
@@ -36,6 +37,10 @@ export interface ProgramSnapshot {
   readonly selectedId: FunctionId | null;
   readonly selected: (FunctionInfo & { status: "ok" }) | null;
   readonly commands: readonly CommandSummary[];
+  /** All functions' commands, keyed by FunctionId (for the workspace canvas). */
+  readonly commandsByFunction: Readonly<
+    Record<number, readonly CommandSummary[]>
+  >;
   readonly selectedCommandId: CommandId | null;
   readonly run: RunResult | null;
   readonly running: boolean;
@@ -51,6 +56,7 @@ const EMPTY: ProgramSnapshot = {
   selectedId: null,
   selected: null,
   commands: [],
+  commandsByFunction: {},
   selectedCommandId: null,
   run: null,
   running: false,
@@ -168,6 +174,8 @@ export function useProgram(
   ) => void;
   deleteCommand: (fid: FunctionId, cmd: CommandId) => void;
   applyLinks: (fid: FunctionId, plan: LinkPlan) => void;
+  clearEntry: (fid: FunctionId) => void;
+  clearPackage: () => void;
   run: () => void;
   clearRun: () => void;
   dismissError: () => void;
@@ -237,14 +245,21 @@ export function useProgram(
             : (functions[0]?.id ?? null);
         let selected: ProgramSnapshot["selected"] = null;
         let commands: CommandSummary[] = [];
+        const commandsByFunction: Record<number, readonly CommandSummary[]> =
+          {};
+        for (const fn of functions) {
+          const cmds = optilotus_listCommands(fn.id);
+          if (!isOptilotusError(cmds)) {
+            commandsByFunction[fn.id] = [...cmds.commands];
+          } else {
+            commandsByFunction[fn.id] = [];
+          }
+        }
         if (nextSelected !== null) {
           const info = optilotus_getFunction(nextSelected);
           if (!isOptilotusError(info)) {
             selected = info;
-            const cmds = optilotus_listCommands(nextSelected);
-            if (!isOptilotusError(cmds)) {
-              commands = [...cmds.commands];
-            }
+            commands = [...(commandsByFunction[nextSelected] ?? [])];
           }
         }
         setSnapshot((prev) => ({
@@ -253,6 +268,7 @@ export function useProgram(
           selectedId: nextSelected,
           selected,
           commands,
+          commandsByFunction,
           selectedCommandId:
             prev.selectedCommandId !== null &&
             commands.some((c) => c.id === prev.selectedCommandId)
@@ -780,6 +796,178 @@ export function useProgram(
     [runLinkPlan, load, pushHistory, restoreLinks],
   );
 
+  /**
+   * Clear a function's entry point (`setEntry(fid, null)`). The commands
+   * stay as orphans and runs become a no-op — exact engine semantics.
+   * Undo restores the previous entry head.
+   */
+  const clearEntry = useCallback(
+    (fid: FunctionId): void => {
+      try {
+        const info = optilotus_getFunction(fid);
+        if (isOptilotusError(info)) {
+          setSnapshot((prev) => failCommand(prev, info));
+          return;
+        }
+        const prevEntry = info.entry ?? null;
+        if (prevEntry === null) return;
+        setSnapshot((prev) => ({ ...prev, busy: true }));
+        const cleared = optilotus_setEntry(fid, null);
+        if (isOptilotusError(cleared)) {
+          setSnapshot((prev) => failCommand(prev, cleared));
+          return;
+        }
+        load(fid);
+        pushHistory({
+          label: "Clear entry point",
+          undo: () => {
+            setSnapshot((prev) => ({ ...prev, busy: true }));
+            const restored = optilotus_setEntry(fid, prevEntry);
+            if (isOptilotusError(restored)) {
+              setSnapshot((prev) => failCommand(prev, restored));
+              return;
+            }
+            load(fid);
+          },
+          redo: () => {
+            setSnapshot((prev) => ({ ...prev, busy: true }));
+            const gone = optilotus_setEntry(fid, null);
+            if (isOptilotusError(gone)) {
+              setSnapshot((prev) => failCommand(prev, gone));
+              return;
+            }
+            load(fid);
+          },
+        });
+      } catch (e: unknown) {
+        setSnapshot((prev) => failThrown(prev, e));
+      }
+    },
+    [load, pushHistory],
+  );
+
+  /** One function's restorable backup for project reset undo. */
+  interface FunctionBackup {
+    readonly name: string;
+    readonly isMain: boolean;
+    readonly items: { draft: CommandDraft }[];
+    readonly links: readonly (readonly [number, number | null])[];
+    readonly entry: number | null;
+  }
+
+  /**
+   * Reset the whole project (`clearPackage`: helpers wiped, `main`
+   * re-created empty). Captures every function's drafts + links + entry
+   * first, so undo rebuilds the package through real bridge operations
+   * (recreated commands get fresh ids — the engine has no un-delete).
+   */
+  const clearPackage = useCallback((): void => {
+    try {
+      setSnapshot((prev) => ({ ...prev, busy: true }));
+      const backups: FunctionBackup[] = [];
+      const listed = optilotus_listFunctions();
+      for (const fn of listed.functions) {
+        const info = optilotus_getFunction(fn.id);
+        if (isOptilotusError(info)) {
+          setSnapshot((prev) => failCommand(prev, info));
+          return;
+        }
+        const cmds = optilotus_listCommands(fn.id);
+        const ordered = isOptilotusError(cmds) ? [] : [...cmds.commands];
+        backups.push({
+          name: info.name,
+          isMain: info.isMain,
+          items: ordered.map((c) => ({ draft: summaryToDraft(c) })),
+          links: ordered.map(
+            (c) => [c.id, c.next ?? null] as const,
+          ),
+          entry: info.entry ?? null,
+        });
+      }
+      const selectedName = snapshot.selected?.name ?? null;
+
+      /** Rebuild every backup; returns the restored selected id. */
+      const restoreAll = (): FunctionId | null => {
+        let restoredSelected: FunctionId | null = null;
+        for (const backup of backups) {
+          let fid: number | null = null;
+          if (backup.isMain) {
+            const fresh = optilotus_listFunctions();
+            const main = fresh.functions.find((f) => f.name === backup.name);
+            if (main === undefined) {
+              setSnapshot((prev) => ({
+                ...prev,
+                actionError: `Cannot restore: function "${backup.name}" is missing.`,
+              }));
+              return null;
+            }
+            fid = main.id;
+          } else {
+            const again = optilotus_createFunction(backup.name);
+            if (isOptilotusError(again)) {
+              setSnapshot((prev) => failCommand(prev, again));
+              return null;
+            }
+            fid = again.id;
+          }
+          const createdIds: number[] = [];
+          for (const item of backup.items) {
+            const nid = createDetached(fid, item.draft);
+            if (nid === null) return null;
+            createdIds.push(nid);
+          }
+          const remap = new Map<number, number>();
+          backup.links.forEach(([old], i) => {
+            const nid = createdIds[i];
+            if (nid !== undefined) remap.set(old, nid);
+          });
+          const edits: { id: number; next: number | null }[] = [];
+          for (const [old, next] of backup.links) {
+            const nid = remap.get(old);
+            if (nid === undefined) continue;
+            edits.push({
+              id: nid,
+              next: next === null ? null : (remap.get(next) ?? null),
+            });
+          }
+          const applied = runLinkPlan(fid, {
+            edits,
+            entry:
+              backup.entry === null
+                ? { type: "keep" as const }
+                : {
+                    type: "set" as const,
+                    entry: remap.get(backup.entry) ?? null,
+                  },
+          });
+          if (!applied) return null;
+          if (backup.name === selectedName) restoredSelected = fid;
+        }
+        return restoredSelected;
+      };
+
+      optilotus_clearPackage();
+      setSnapshot((prev) => ({ ...prev, selectedCommandId: null }));
+      load(null);
+      pushHistory({
+        label: "Reset project",
+        undo: () => {
+          setSnapshot((prev) => ({ ...prev, busy: true }));
+          const restored = restoreAll();
+          load(restored);
+        },
+        redo: () => {
+          setSnapshot((prev) => ({ ...prev, busy: true }));
+          optilotus_clearPackage();
+          setSnapshot((prev) => ({ ...prev, selectedCommandId: null }));
+          load(null);
+        },
+      });
+    } catch (e: unknown) {
+      setSnapshot((prev) => failThrown(prev, e));
+    }
+  }, [load, pushHistory, snapshot.selected, createDetached, runLinkPlan]);
+
   const run = useCallback((): void => {
     try {
       setSnapshot((prev) => ({ ...prev, running: true }));
@@ -855,6 +1043,8 @@ export function useProgram(
     replaceCommand,
     deleteCommand,
     applyLinks,
+    clearEntry,
+    clearPackage,
     run,
     clearRun,
     dismissError,

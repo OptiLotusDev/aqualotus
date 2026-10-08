@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from "react";
+import type { ReactElement } from "react";
 import type { FunctionId, FunctionSummary } from "../lib/optilotus";
 
 interface FunctionBrowserProps {
@@ -6,29 +6,24 @@ interface FunctionBrowserProps {
   readonly selectedId: FunctionId | null;
   readonly busy: boolean;
   readonly onSelect: (id: FunctionId) => void;
-  readonly onCreate: (name: string) => void;
   readonly onDelete: (id: FunctionId) => void;
 }
 
 /**
- * Project / function navigation. Identity is the stable FunctionId;
- * `isMain` marks the entry function without affecting semantics.
+ * Block navigator: one row per function container on the canvas.
+ * Identity is the stable FunctionId; `isMain` marks the entry function
+ * without affecting semantics. New functions are created from the
+ * Library's Function block (the bridge `createFunction` path), so this
+ * list has no creation form — select, jump, delete only.
  */
 export default function FunctionBrowser(
   props: FunctionBrowserProps,
 ): ReactElement {
-  const { functions, selectedId, busy, onSelect, onCreate, onDelete } = props;
-  const [draft, setDraft] = useState<string>("");
-
-  function submit(): void {
-    if (draft.trim() === "") return;
-    onCreate(draft);
-    setDraft("");
-  }
+  const { functions, selectedId, busy, onSelect, onDelete } = props;
 
   return (
     <div>
-      <ul className="fn-list" aria-label="Functions">
+      <ul className="fn-list" aria-label="Blocks">
         {functions.map((fn) => (
           <li key={fn.id}>
             <button
@@ -49,39 +44,10 @@ export default function FunctionBrowser(
       </ul>
       {functions.length === 0 ? (
         <div className="empty">
-          <strong>No functions</strong>
-          <span>Create one to start building.</span>
+          <strong>No blocks</strong>
+          <span>Create a function from the Library to start.</span>
         </div>
       ) : null}
-      <form
-        className="field"
-        style={{ marginTop: 12 }}
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit();
-        }}
-      >
-        <span>
-          <label htmlFor="fn-name">New function</label>
-        </span>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input
-            id="fn-name"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="helper"
-            autoComplete="off"
-            style={{ flex: 1, minWidth: 0 }}
-          />
-          <button
-            type="submit"
-            className="btn btn-sm"
-            disabled={busy || draft.trim() === ""}
-          >
-            Add
-          </button>
-        </div>
-      </form>
       {selectedId !== null &&
       functions.some((f) => f.id === selectedId && !f.isMain) ? (
         <button

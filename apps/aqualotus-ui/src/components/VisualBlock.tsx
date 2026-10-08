@@ -1,46 +1,77 @@
 import type { ReactElement } from "react";
 import type { CommandSummary } from "../lib/optilotus";
-import { commandMainLine, commandSubLine } from "../lib/program";
+import { commandMainLine } from "../lib/program";
 import type { Pos } from "../lib/layout";
 
 interface VisualBlockProps {
   readonly command: CommandSummary;
+  readonly fid: number;
+  readonly functionName: string;
   readonly index: number;
   readonly position: Pos;
   readonly selected: boolean;
   readonly failed: boolean;
   readonly connectFrom: boolean;
+  readonly interactive: boolean;
 }
 
 /**
- * One visual node. Purely presentational: geometry comes from the
- * layout map, semantics from the Optilotus projection. Ports are
- * visual anchors at top-center (in) and bottom-center (out).
+ * One hand-drawn node. Purely presentational: geometry comes from the
+ * layout map (relative to its function container), semantics from the
+ * Optilotus projection. Exactly two ports: left (in) and right (out),
+ * so chains run left → right like the reference sketch.
+ *
+ * Declare blocks use the reference palette: red `var: name`, green
+ * `type:` / `value:` lines. Other kinds render their engine content in
+ * light ink. Blocks in the non-selected function are preview-only.
  */
 export default function VisualBlock(props: VisualBlockProps): ReactElement {
-  const { command, index, position, selected, failed, connectFrom } = props;
+  const {
+    command,
+    fid,
+    functionName,
+    index,
+    position,
+    selected,
+    failed,
+    connectFrom,
+    interactive,
+  } = props;
   return (
     <div
-      id={`vblock-${command.id}`}
+      id={`vblock-${fid}-${command.id}`}
       data-block-id={command.id}
+      data-fid={fid}
       className="vblock"
       data-kind={command.kind}
       data-selected={selected}
       data-error={failed}
       data-connect-from={connectFrom}
+      data-interactive={interactive}
       role="button"
-      tabIndex={0}
+      tabIndex={interactive ? 0 : -1}
       aria-pressed={selected}
-      aria-label={`${command.kind} block ${index + 1}: ${commandMainLine(command)}`}
+      aria-label={`${command.kind} block ${index + 1} in ${functionName}: ${commandMainLine(command)}`}
       style={{ left: position.x, top: position.y }}
     >
-      <span className="vport vport-top" data-port="in" aria-hidden="true" />
       <span className="vport vport-left" data-port="in" aria-hidden="true" />
-      <span className="vblock-kind">
-        {index + 1} · {command.kind}
-      </span>
-      <span className="vblock-main">{commandMainLine(command)}</span>
-      <span className="vblock-sub">{commandSubLine(command)}</span>
+      {command.kind === "declare" ? (
+        <>
+          <span className="vblock-var">var: {command.var ?? "?"}</span>
+          <span className="vblock-type">type: {command.ty ?? "?"}</span>
+          <span className="vblock-type">
+            value:{" "}
+            {command.expr !== undefined && command.expr !== ""
+              ? command.expr
+              : "—"}
+          </span>
+        </>
+      ) : (
+        <>
+          <span className="vblock-kind">{command.kind}</span>
+          <span className="vblock-main">{commandMainLine(command)}</span>
+        </>
+      )}
       {failed ? (
         <span className="vblock-error" role="alert">
           Error reported here
@@ -51,13 +82,7 @@ export default function VisualBlock(props: VisualBlockProps): ReactElement {
         data-port="out"
         data-side="right"
         data-block-id={command.id}
-        aria-hidden="true"
-      />
-      <span
-        className="vport vport-bottom"
-        data-port="out"
-        data-side="bottom"
-        data-block-id={command.id}
+        data-fid={fid}
         aria-hidden="true"
       />
     </div>

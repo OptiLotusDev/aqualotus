@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { useInheritPosition } from "../hooks/useInheritPosition";
 import { useLayout } from "../hooks/useLayout";
 import { useTheme } from "../hooks/useTheme";
 import type { RuntimeStatus } from "../hooks/useRuntime";
@@ -7,15 +8,16 @@ import type { ProgramSnapshot } from "../hooks/useProgram";
 import type { CommandDraft } from "../lib/program";
 import { freshName } from "../lib/program";
 import type { LinkPlan } from "../lib/graph";
-import { planLinkAfter, planLinkBefore, planMoveToEnd } from "../lib/graph";
+import { planDropLink } from "../lib/graph";
 import { findAvailableBlock } from "../lib/blocks";
 import type { LayoutMap } from "../lib/layout";
+import { LAYOUT_ROW_Y, LAYOUT_START_X } from "../lib/layout";
 import type { CommandId, FunctionId } from "../lib/optilotus";
-import BlockLibrary from "./BlockLibrary";
-import FunctionBrowser from "./FunctionBrowser";
 import Inspector from "./Inspector";
+import ProjectNavigator from "./ProjectNavigator";
 import Runner from "./Runner";
 import VisualEditor from "./VisualEditor";
+import { breadcrumbPath } from "../lib/workspace";
 
 /**
  * Aqualotus UI release version shown in the status pill. The live
@@ -48,6 +50,8 @@ interface AppShellProps {
   ) => void;
   readonly onDeleteCommand: (fid: FunctionId, cmd: CommandId) => void;
   readonly onApplyLinks: (fid: FunctionId, plan: LinkPlan) => void;
+  readonly onClearEntry: (fid: FunctionId) => void;
+  readonly onClearPackage: () => void;
   readonly onRun: () => void;
   readonly onDismissError: () => void;
 }
@@ -101,18 +105,45 @@ export default function AppShell(props: AppShellProps): ReactElement {
   const [sheetOpen, setSheetOpen] = useState<boolean>(false);
   const [leftOpen, setLeftOpen] = useState<boolean>(false);
   const [inspOpen, setInspOpen] = useState<boolean>(false);
-  const [runOpen, setRunOpen] = useState<boolean>(true);
+  const [runOpen, setRunOpen] = useState<boolean>(false);
 
   const fid = program.selectedId;
   const commandIds = useMemo(
     () => program.commands.map((c) => c.id),
     [program.commands],
   );
-  // Auto-placed blocks start right of the floating library panel and
-  // below the floating toolbar on wide layouts; drops use their
-  // explicit point instead.
-  const layout = useLayout(fid, commandIds, compact ? 96 : 348, compact ? 72 : 156);
-  const { moveBlock, replaceAll } = layout;
+  // Block positions are relative to their function container (the
+  // hierarchy owns world layout), so auto-placement chains blocks in a
+  // horizontal row matching the left → right ports.
+  const layout = useLayout(fid, commandIds, LAYOUT_START_X, LAYOUT_ROW_Y);
+  const { moveBlockIn, replaceAll } = layout;
+
+  // Edited blocks keep their position: Apply-edit recreates the command
+  // under a fresh id, and the capture below hands the old position to
+  // the newcomer once it appears in the refreshed projection.
+  const { captureInherit } = useInheritPosition(
+    program.commandsByFunction,
+    program.busy,
+    moveBlockIn,
+  );
+
+  /** Apply-edit wrapper that preserves the edited block's position. */
+  function replaceWithPosition(
+    target: FunctionId,
+    oldId: CommandId,
+    draft: CommandDraft,
+  ): void {
+    const cmds = program.commandsByFunction[target] ?? [];
+    captureInherit(
+      target,
+      layout.allPositions[target]?.[oldId] ?? {
+        x: LAYOUT_START_X,
+        y: LAYOUT_ROW_Y,
+      },
+      cmds.map((c) => c.id),
+    );
+    props.onReplaceCommand(target, oldId, draft);
+  }
 
   // View-undo stacks (layout + zoom), stored in refs with synced tops
   // so renders never read refs. Sequenced against semantic history so
@@ -333,8 +364,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
       : null;
 
   /** Add a library block: create the real entity, auto-place its node. */
-  function addLibraryBlock(kind: string): void {
-    if (fid === null) return;
+  function addLibraryBlockFor(target: FunctionId, kind: string): void {
     const def = findAvailableBlock(kind);
     if (def === null) return;
     if (def.action === "create-function") {
@@ -347,11 +377,13 @@ export default function AppShell(props: AppShellProps): ReactElement {
     // first declared variable when one exists; otherwise the runtime
     // error names the fix ("declare it first"). The bridge still
     // validates everything; the inspector refines afterwards.
-    const taken = program.commands.flatMap((c) =>
+    const targetCommands =
+      target === fid ? program.commands : (program.commandsByFunction[target] ?? []);
+    const taken = targetCommands.flatMap((c) =>
       c.var === undefined ? [] : [c.var],
     );
     const firstVar =
-      program.commands.find((c) => c.kind === "declare")?.var ?? null;
+      targetCommands.find((c) => c.kind === "declare")?.var ?? null;
     const draft = def.draft;
     let filled: CommandDraft = draft;
     if (draft.kind === "declare") {
@@ -375,47 +407,68 @@ export default function AppShell(props: AppShellProps): ReactElement {
     } else if (draft.kind === "return" && draft.expr === "") {
       filled = { ...draft, expr: "0" };
     }
-    props.onAddCommand(fid, filled);
+    props.onAddCommand(target, filled);
+  }
+
+  function addLibraryBlock(kind: string): void {
+    if (fid === null) return;
+    addLibraryBlockFor(fid, kind);
   }
 
   /** Connection drop: plan minimal edits, apply only when meaningful. */
   function reconnect(
+    target: FunctionId,
     sourceId: CommandId,
     targetId: CommandId | null,
     where: "after" | "before" | "end",
   ): boolean {
-    if (fid === null) return false;
-    const cmds = program.commands;
-    const entry = program.selected?.entry ?? null;
-    if (where === "end") {
-      if (targetId !== null) return false;
-      const planned = planMoveToEnd(cmds, entry, sourceId);
-      if (planned === null) return false;
-      props.onApplyLinks(fid, planned);
-      return true;
-    }
-    if (targetId === null) return false;
-    const planned =
-      where === "before"
-        ? planLinkBefore(cmds, entry, sourceId, targetId)
-        : planLinkAfter(cmds, entry, sourceId, targetId);
+    const cmds = program.commandsByFunction[target] ?? [];
+    const entry =
+      target === fid ? (program.selected?.entry ?? null) : null;
+    const planned = planDropLink(cmds, entry, sourceId, targetId, where);
     if (planned === null) return false;
-    props.onApplyLinks(fid, planned);
+    props.onApplyLinks(target, planned);
     return true;
   }
 
   /** Select a block and bring it into view (run-error handoff). */
   function showBlock(id: CommandId): void {
+    // Run failures name a command id; locate its owning function so the
+    // canvas focuses the right container (execution is `main`-rooted
+    // but callee frames report their own command ids).
+    let owner: FunctionId | null = fid;
+    if (
+      owner === null ||
+      !(program.commandsByFunction[owner] ?? []).some((c) => c.id === id)
+    ) {
+      owner = null;
+      for (const fn of program.functions) {
+        if ((program.commandsByFunction[fn.id] ?? []).some((c) => c.id === id)) {
+          owner = fn.id;
+          break;
+        }
+      }
+    }
+    if (owner !== null && owner !== fid) {
+      props.onSelectFunction(owner);
+    }
     props.onSelectCommand(id);
     if (compact) {
       setSheetOpen(true);
       return;
     }
     setInspOpen(true);
+    const ownerId = owner;
     requestAnimationFrame(() => {
-      document
-        .getElementById(`vblock-${id}`)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const el =
+        ownerId !== null
+          ? document.getElementById(`vblock-${ownerId}-${id}`)
+          : null;
+      const fallback =
+        el ?? document.getElementById(`vblock-${id}`);
+      if (fallback instanceof HTMLElement && typeof fallback.scrollIntoView === "function") {
+        fallback.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
     });
   }
 
@@ -452,14 +505,14 @@ export default function AppShell(props: AppShellProps): ReactElement {
 
   /** Block drag commit with view-undo recording. */
   const moveBlockWithHistory = useCallback(
-    (id: CommandId, pos: { x: number; y: number }): void => {
-      const before = layout.positions;
-      moveBlock(id, pos);
+    (target: FunctionId, id: CommandId, pos: { x: number; y: number }): void => {
+      const before = layout.allPositions[target] ?? {};
+      moveBlockIn(target, id, pos);
       const ctl = zoomCtlRef.current;
       const z = ctl?.getZoom() ?? 1;
-      pushView(fid, "Move block", before, { ...before, [id]: pos }, z, z);
+      pushView(target, "Move block", before, { ...before, [id]: pos }, z, z);
     },
-    [layout.positions, moveBlock, fid, pushView],
+    [layout.allPositions, moveBlockIn, pushView],
   );
 
   /** Discrete zoom commit with view-undo recording. */
@@ -478,41 +531,33 @@ export default function AppShell(props: AppShellProps): ReactElement {
   );
 
   const leftPanel = (
-    <div className="left-stack">
-      <section aria-label="Functions">
-        <div className="pane-head">
-          <h2 className="pane-title">Functions</h2>
-        </div>
-        <div className="pane-body">
-          <FunctionBrowser
-            functions={program.functions}
-            selectedId={program.selectedId}
-            busy={program.busy}
-            onSelect={(id) => {
-              props.onSelectFunction(id);
-              setNavOpen(false);
-            }}
-            onCreate={props.onCreateFunction}
-            onDelete={props.onDeleteFunction}
-          />
-        </div>
-      </section>
-      <section aria-label="Block library">
-        <div className="pane-head">
-          <h2 className="pane-title">Blocks</h2>
-        </div>
-        <div className="pane-body">
-          <BlockLibrary
-            busy={program.busy || fid === null}
-            onAdd={addLibraryBlock}
-            onDropToCanvas={(kind, clientX, clientY) => {
-              dropHandlerRef.current?.(kind, clientX, clientY);
-            }}
-          />
-        </div>
-      </section>
-    </div>
+    <ProjectNavigator
+      functions={program.functions}
+      selectedId={program.selectedId}
+      busy={program.busy}
+      onSelect={(id) => {
+        props.onSelectFunction(id);
+        setNavOpen(false);
+      }}
+      onDelete={props.onDeleteFunction}
+      libraryBusy={program.busy || fid === null}
+      onAddBlock={addLibraryBlock}
+      onClearPackage={props.onClearPackage}
+      onDropToCanvas={(kind, clientX, clientY) => {
+        dropHandlerRef.current?.(kind, clientX, clientY);
+      }}
+    />
   );
+
+  // Owning function of the reported error command, if it is still live.
+  const errorFunctionId: FunctionId | null =
+    program.commandErrorId === null
+      ? null
+      : (program.functions.find((fn) =>
+          (program.commandsByFunction[fn.id] ?? []).some(
+            (c) => c.id === program.commandErrorId,
+          ),
+        )?.id ?? fid);
 
   const inspector = (
     <Inspector
@@ -520,11 +565,14 @@ export default function AppShell(props: AppShellProps): ReactElement {
       selected={selectedCommand}
       busy={program.busy}
       onReplace={(id, draft) =>
-        fid !== null ? props.onReplaceCommand(fid, id, draft) : undefined
+        fid !== null ? replaceWithPosition(fid, id, draft) : undefined
       }
       onDeleteBlock={(id) => deleteBlock(id)}
       onDeleteFunction={() => {
         if (fid !== null) props.onDeleteFunction(fid);
+      }}
+      onClearEntry={() => {
+        if (fid !== null) props.onClearEntry(fid);
       }}
     />
   );
@@ -584,7 +632,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
           <button
             type="button"
             className="btn btn-ghost btn-sm icon-btn"
-            aria-label="Open blocks and functions"
+            aria-label="Open blocks panel"
             onClick={() => setNavOpen(true)}
           >
             ☰
@@ -593,18 +641,18 @@ export default function AppShell(props: AppShellProps): ReactElement {
           <button
             type="button"
             className="btn btn-panel btn-sm"
-            aria-label="Toggle functions and blocks panel"
+            aria-label="Toggle blocks panel"
             aria-pressed={leftOpen}
             onClick={() => setLeftOpen((v) => !v)}
           >
-            ☰ Functions
+            ☰ Blocks
           </button>
         )}
         <div style={{ minWidth: 0 }}>
           <div className="appbar-title">Aqualotus</div>
           <div className="appbar-sub">
             {program.selected !== null
-              ? `${program.selected.name} · ${program.selected.commandCount} blocks`
+              ? breadcrumbPath(program.selected.name)
               : "Visual programming"}
           </div>
         </div>
@@ -692,21 +740,22 @@ export default function AppShell(props: AppShellProps): ReactElement {
               </div>
             ) : (
               <VisualEditor
-                functionName={program.selected.name}
-                isMain={program.selected.isMain}
-                blockCount={program.selected.commandCount}
-                commands={program.commands}
-                positions={layout.positions}
-                selectedId={program.selectedCommandId}
+                functions={program.functions}
+                commandsByFunction={program.commandsByFunction}
+                layoutStore={layout.allPositions}
+                chromeLeft={!compact && leftOpen ? 300 : 0}
+                selectedFunctionId={program.selectedId}
+                selectedCommandId={program.selectedCommandId}
                 errorId={program.commandErrorId}
+                errorFunctionId={errorFunctionId}
                 busy={program.busy}
-                onSelect={selectCommandWithPanel}
+                onSelectFunction={props.onSelectFunction}
+                onSelectCommand={selectCommandWithPanel}
                 onReconnect={reconnect}
                 onMoveBlock={moveBlockWithHistory}
-                onDropBlock={(kind, pos) => {
-                  if (fid === null) return;
+                onDropBlock={(target, kind, pos) => {
                   layout.placeNextAt(pos);
-                  addLibraryBlock(kind);
+                  addLibraryBlockFor(target, kind);
                 }}
                 onRegisterDrop={registerDrop}
                 onRegisterZoom={registerZoom}
@@ -749,7 +798,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
                     ✕
                   </button>
                 </div>
-                <div className="pane-body">{inspector}</div>
+                <div className="pane-body insp-body">{inspector}</div>
               </aside>
             ) : null}
             {runOpen ? (

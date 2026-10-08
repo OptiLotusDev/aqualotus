@@ -3,6 +3,11 @@ import type { CommandId, CommandSummary } from "../lib/optilotus";
 import type { FunctionInfo } from "../lib/optilotus";
 import { optilotus_type, type OptilotusType } from "../lib/optilotus";
 import { summaryToDraft, type CommandDraft } from "../lib/program";
+import {
+  PACKAGE_NAME,
+  PRESENTATION_STRUCT_NAME,
+  breadcrumbPath,
+} from "../lib/workspace";
 
 interface InspectorProps {
   readonly func: (FunctionInfo & { status: "ok" }) | null;
@@ -11,15 +16,20 @@ interface InspectorProps {
   readonly onReplace: (id: CommandId, draft: CommandDraft) => void;
   readonly onDeleteBlock: (id: CommandId) => void;
   readonly onDeleteFunction: () => void;
+  readonly onClearEntry: () => void;
 }
 
-const TYPES: readonly OptilotusType[] = [
-  optilotus_type.int32,
-  optilotus_type.int64,
-  optilotus_type.float64,
-  optilotus_type.bool,
-  optilotus_type.string,
-];
+/**
+ * Every scalar tag the engine accepts in `declare` (`optilotus_type`
+ * minus `void`, which the engine always rejects at creation with
+ * "cannot declare a variable of type void"). Derived from the bridge so
+ * the list can never drift behind `docs/api.md`. The bridge still
+ * validates each declare (unknown tags, duplicates, bad literals);
+ * failures surface as typed errors.
+ */
+const TYPES: readonly OptilotusType[] = (
+  Object.values(optilotus_type) as OptilotusType[]
+).filter((t) => t !== optilotus_type.void);
 
 function KindFields(props: {
   draft: CommandDraft;
@@ -144,8 +154,15 @@ function KindFields(props: {
  * no in-place update; deletes call the existing bridge mutation.
  */
 export default function Inspector(props: InspectorProps): ReactElement {
-  const { func, selected, busy, onReplace, onDeleteBlock, onDeleteFunction } =
-    props;
+  const {
+    func,
+    selected,
+    busy,
+    onReplace,
+    onDeleteBlock,
+    onDeleteFunction,
+    onClearEntry,
+  } = props;
   const [edit, setEdit] = useState<CommandDraft | null>(null);
 
   useEffect(() => {
@@ -155,6 +172,24 @@ export default function Inspector(props: InspectorProps): ReactElement {
   if (selected !== null && edit !== null) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="pane-title">Inspector</div>
+        <div className="insp-path" title="Package / Struct / Function">
+          {breadcrumbPath(func?.name ?? null)}
+        </div>
+        <dl className="props">
+          <div>
+            <dt>Package</dt>
+            <dd>{PACKAGE_NAME}</dd>
+          </div>
+          <div>
+            <dt>Struct</dt>
+            <dd>{PRESENTATION_STRUCT_NAME} · preview</dd>
+          </div>
+          <div>
+            <dt>Function</dt>
+            <dd>{func?.name ?? "—"}</dd>
+          </div>
+        </dl>
         <div className="pane-title">
           {selected.kind} · #{selected.id}
         </div>
@@ -186,6 +221,20 @@ export default function Inspector(props: InspectorProps): ReactElement {
   if (func !== null) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="pane-title">Inspector</div>
+        <div className="insp-path" title="Package / Struct / Function">
+          {breadcrumbPath(func.name)}
+        </div>
+        <dl className="props">
+          <div>
+            <dt>Package</dt>
+            <dd>{PACKAGE_NAME}</dd>
+          </div>
+          <div>
+            <dt>Struct</dt>
+            <dd>{PRESENTATION_STRUCT_NAME} · preview</dd>
+          </div>
+        </dl>
         <div className="pane-title">
           {func.name}
           {func.isMain ? " · MAIN" : ""}
@@ -201,9 +250,26 @@ export default function Inspector(props: InspectorProps): ReactElement {
           </div>
           <div>
             <dt>Entry point</dt>
-            <dd>{func.isMain ? "Yes — Run executes main()" : "No"}</dd>
+            <dd>
+              {func.entry === null || func.entry === undefined
+                ? "Cleared — run is a no-op"
+                : func.isMain
+                  ? `Yes — starts at #${func.entry}`
+                  : `Starts at #${func.entry}`}
+            </dd>
           </div>
         </dl>
+        {func.entry !== null && func.entry !== undefined ? (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm btn-danger"
+            disabled={busy}
+            onClick={onClearEntry}
+            title="Detach the entry head; commands are kept as orphans and runs become a no-op"
+          >
+            Clear entry point
+          </button>
+        ) : null}
         {!func.isMain ? (
           <button
             type="button"

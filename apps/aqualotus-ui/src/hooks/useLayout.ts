@@ -19,7 +19,9 @@ export function useLayout(
   minY: number,
 ): {
   positions: LayoutMap;
+  allPositions: Readonly<Record<number, LayoutMap>>;
   moveBlock: (id: CommandId, pos: Pos) => void;
+  moveBlockIn: (target: FunctionId, id: CommandId, pos: Pos) => void;
   placeNextAt: (pos: Pos) => void;
   replaceAll: (target: FunctionId, map: LayoutMap) => void;
 } {
@@ -55,6 +57,16 @@ export function useLayout(
     [fid],
   );
 
+  const moveBlockIn = useCallback(
+    (target: FunctionId, id: CommandId, pos: Pos): void => {
+      setStore((prev) => ({
+        ...prev,
+        [target]: { ...(prev[target] ?? {}), [id]: pos },
+      }));
+    },
+    [],
+  );
+
   const placeNextAt = useCallback((pos: Pos): void => {
     pendingRef.current = pos;
   }, []);
@@ -64,5 +76,5 @@ export function useLayout(
     setStore((prev) => ({ ...prev, [target]: { ...map } }));
   }, []);
 
-  return { positions: fid === null ? {} : (store[fid] ?? {}), moveBlock, placeNextAt, replaceAll };
+  return { positions: fid === null ? {} : (store[fid] ?? {}), allPositions: store, moveBlock, moveBlockIn, placeNextAt, replaceAll };
 }

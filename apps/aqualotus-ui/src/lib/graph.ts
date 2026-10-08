@@ -165,6 +165,58 @@ export function planMoveToEnd(
   return { edits: edits.filter((e) => e.id !== e.next), entry: entryUpdate };
 }
 
+/**
+ * Where a wire dragged from an out-port lands.
+ * - `"after"`: dropped on the target block body — target moves to run
+ *   right after the source (legacy move semantics).
+ * - `"before"`: dropped on the target's in-port — forward port-to-port
+ *   wiring: out → in always flows forward, never reverses intent.
+ * - `"end"`: dropped on empty canvas — source detaches into a tail.
+ */
+export type DropWhere = "after" | "before" | "end";
+
+/**
+ * One entry point for connection drops (UI gesture → link plan).
+ *
+ * In-port drops follow an anchor rule so successive port-to-port drags
+ * build chains the way the user draws them:
+ * - source detached (fresh block) → insert source right *before* the
+ *   target; the target keeps its successor, entry follows a moved head.
+ *   This makes `D.out → A.in` yield `D → A`, and prepending work.
+ * - source already chained → insert target right *after* the source
+ *   (target adopts the source's old successor, its old gap bridges).
+ *   This makes `A.out → P.in` yield `… → A → P` without tearing down
+ *   what was built before.
+ *
+ * Returns null when invalid or a no-op, like the planners.
+ */
+export function planDropLink(
+  cmds: readonly Linked[],
+  entry: number | null,
+  sourceId: number,
+  targetId: number | null,
+  where: DropWhere,
+): LinkPlan | null {
+  if (where === "end") {
+    if (targetId !== null) return null;
+    return planMoveToEnd(cmds, entry, sourceId);
+  }
+  if (targetId === null) return null;
+  if (where === "after") {
+    return planLinkAfter(cmds, entry, sourceId, targetId);
+  }
+  const links = linksOf(cmds);
+  if (!links.has(sourceId) || !links.has(targetId) || sourceId === targetId) {
+    return null;
+  }
+  const preds = predecessorsOf(cmds);
+  const sourceDetached =
+    !preds.has(sourceId) && (links.get(sourceId) ?? null) === null;
+  return sourceDetached
+    ? planLinkBefore(cmds, entry, targetId, sourceId)
+    : planLinkAfter(cmds, entry, sourceId, targetId);
+}
+
 /** Smooth cubic Bézier from source port to target port. */
 export function edgePath(
   x1: number,

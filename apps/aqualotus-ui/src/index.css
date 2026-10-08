@@ -37,9 +37,9 @@
   --danger-text: #e89a9a;
 
   /* Canvas + edges. */
-  --canvas: #000;
+  --canvas: #1e1e1e;
   --dot: rgba(255, 255, 255, 0.06);
-  --edge: rgba(170, 178, 198, 0.55);
+  --edge: rgba(159, 178, 216, 0.8);
 
   /* Status. */
   --success: #5fd39a;
@@ -60,6 +60,8 @@
   /* Type + spacing. */
   --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
     "Segoe UI", Roboto, sans-serif;
+  --hand: "Segoe Print", "Bradley Hand", "Chalkboard SE", "Comic Sans MS",
+    cursive;
   --heading: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont,
     system-ui, sans-serif;
   --rounded: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont,
@@ -129,32 +131,17 @@
     linear-gradient(var(--night-1), var(--night-0));
 }
 
-/* Light-mode category accents: darker twins of the night values. */
-:root[data-theme="light"] .vblock[data-kind="declare"],
-:root[data-theme="light"] .vblock[data-kind="assign"],
+/* Light-mode library dashes: darker twins of the night values. */
 :root[data-theme="light"] .lib-item[data-category="Variables"] {
-  --cat: #4a7dff;
-  --cat-text: #2f5fd0;
+  --cat: #2f6bff;
 }
 
-:root[data-theme="light"] .vblock[data-kind="print"],
 :root[data-theme="light"] .lib-item[data-category="Output"] {
   --cat: #1e9e62;
-  --cat-text: #177245;
 }
 
-:root[data-theme="light"] .vblock[data-kind="return"],
 :root[data-theme="light"] .lib-item[data-category="Program"] {
   --cat: #c08c1d;
-  --cat-text: #8a6410;
-}
-
-:root[data-theme="light"] .lib-item[data-category="Values"],
-:root[data-theme="light"] .lib-item[data-category="Arithmetic"],
-:root[data-theme="light"] .lib-item[data-category="Comparison"],
-:root[data-theme="light"] .lib-item[data-category="Logic"] {
-  --cat: #6a5ae0;
-  --cat-text: #4a3ec2;
 }
 
 *,
@@ -237,10 +224,10 @@ p {
   z-index: 30;
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  margin: 12px 16px 0;
-  padding: var(--space-3) var(--space-4);
-  border-radius: 20px;
+  gap: var(--space-2);
+  margin: 8px 12px 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: 16px;
   border: 1px solid var(--border-strong);
   background: var(--surface);
   -webkit-backdrop-filter: blur(22px) saturate(1.4);
@@ -262,7 +249,7 @@ p {
 
 .appbar-title {
   font-family: var(--rounded);
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 650;
   letter-spacing: 0.02em;
 }
@@ -272,7 +259,7 @@ p {
 }
 
 .appbar-sub {
-  font-size: 12.5px;
+  font-size: 11px;
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -323,7 +310,7 @@ p {
   .pane-editor {
     position: absolute;
     inset: 0;
-    background: #000;
+    background: var(--canvas);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     border: none;
@@ -350,7 +337,7 @@ p {
   .float-left {
     position: absolute;
     left: 16px;
-    top: 88px;
+    top: 76px;
     bottom: 16px;
     width: 272px;
     overflow: auto;
@@ -358,9 +345,9 @@ p {
   .float-right {
     position: absolute;
     right: 16px;
-    top: 88px;
+    top: 76px;
     bottom: 16px;
-    width: 308px;
+    width: 264px;
     overflow: auto;
   }
   .float-runner {
@@ -378,7 +365,7 @@ p {
     width: 240px;
   }
   .float-right {
-    width: 272px;
+    width: 232px;
   }
   .float-runner {
     left: 16px;
@@ -432,6 +419,13 @@ p {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+/* Compact inspector body: the inspector panel is narrower overall. */
+.pane-body.insp-body {
+  padding: var(--space-3);
+  gap: var(--space-2);
+  font-size: 13.5px;
 }
 
 /* ---------- Glass controls ---------- */
@@ -555,7 +549,7 @@ p {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: 4px;
 }
 
 .fn-item {
@@ -563,11 +557,12 @@ p {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
   text-align: left;
+  font-size: 13.5px;
   transition: background 120ms ease, border-color 120ms ease;
 }
 
@@ -754,8 +749,6 @@ p {
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background-color: var(--canvas);
-  background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
-  background-size: 26px 26px;
   touch-action: pan-x pan-y;
   overscroll-behavior: contain;
 }
@@ -782,32 +775,32 @@ p {
 .edge {
   fill: none;
   stroke: var(--edge);
-  stroke-width: 2;
+  stroke-width: 1.5;
 }
 
 .edge-selected {
-  stroke: var(--accent);
+  stroke: #5aa9e6;
 }
 
 .edge-preview {
-  stroke: var(--accent);
+  stroke: #5aa9e6;
   stroke-dasharray: 6 5;
+}
+
+.marker-flow {
+  fill: #9fb2d8;
 }
 
 .vblock {
   position: absolute;
   width: 216px;
-  padding: 12px 14px 16px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  border-top: 3px solid var(--cat, var(--border-strong));
-  background: var(--surface-elevated);
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
-  box-shadow: var(--shadow-soft);
+  padding: 12px 14px 14px;
+  border-radius: 12px 28px 14px 26px / 26px 14px 28px 12px;
+  border: 1.5px solid #5aa9e6;
+  background: transparent;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -819,8 +812,8 @@ p {
 }
 
 .vblock[data-selected="true"] {
-  border-color: var(--accent-border);
-  box-shadow: 0 0 0 1px var(--accent-border), var(--shadow-soft);
+  border-color: #8fc2f5;
+  box-shadow: 0 0 0 1px rgba(90, 169, 230, 0.5);
 }
 
 .vblock[data-error="true"] {
@@ -828,108 +821,92 @@ p {
 }
 
 .vblock[data-connect-from="true"] {
-  border-color: var(--accent-border);
+  border-color: #8fc2f5;
 }
 
 .vblock-kind {
-  font-family: var(--rounded);
+  font-family: var(--hand);
   font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--cat-text, var(--accent));
+  color: #7d8db0;
 }
 
 .vblock-main {
-  font-family: var(--mono);
-  font-size: 14px;
+  font-family: var(--hand);
+  font-size: 15px;
+  color: #e8e8e8;
   overflow-wrap: anywhere;
 }
 
-.vblock-sub {
-  font-size: 12.5px;
-  color: var(--text-secondary);
+/* Reference palette for declares: red var line, green type/value. */
+.vblock-var {
+  font-family: var(--hand);
+  font-size: 16px;
+  color: #ff7b72;
+  overflow-wrap: anywhere;
+}
+
+.vblock-type {
+  font-family: var(--hand);
+  font-size: 13px;
+  color: #7ee2a8;
   overflow-wrap: anywhere;
 }
 
 .vblock-error {
-  font-size: 12px;
+  font-family: var(--hand);
+  font-size: 13px;
   color: var(--error);
 }
 
 .vport {
   position: absolute;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  background: var(--night-2);
-  border: 2px solid var(--text-muted);
-}
-
-.vport-top {
-  left: 50%;
-  top: -8px;
-  margin-left: -7px;
-}
-
-.vport-bottom {
-  left: 50%;
-  bottom: -8px;
-  margin-left: -7px;
-  border-color: var(--accent);
-  cursor: crosshair;
+  background: var(--canvas);
+  border: 2px solid #7d8db0;
+  transition: transform 120ms ease, background 120ms ease;
 }
 
 .vport-left {
   left: -8px;
   top: 50%;
-  margin-top: -7px;
+  margin-top: -6px;
 }
 
 .vport-right {
   right: -8px;
   top: 50%;
-  margin-top: -7px;
-  border-color: var(--accent);
+  margin-top: -6px;
+  border-color: #5aa9e6;
   cursor: crosshair;
 }
 
-.vblock[data-connect-from="true"] .vport-bottom,
-.vblock[data-connect-from="true"] .vport-right {
-  background: var(--accent);
+.vport:hover {
+  transform: scale(1.25);
 }
 
-/* Category identity: restrained single accents. */
-.vblock[data-kind="declare"],
-.vblock[data-kind="assign"],
+.vblock[data-connect-from="true"] .vport-right {
+  background: #5aa9e6;
+}
+
+.vblock[data-interactive="false"] {
+  cursor: pointer;
+}
+
+.vblock[data-interactive="false"] .vport {
+  display: none;
+}
+
+/* Library category dashes: api.md surface only. */
 .lib-item[data-category="Variables"] {
-  --cat: #8fb4ff;
-  --cat-text: #a9c3ff;
+  --cat: #5aa9e6;
 }
-.vblock[data-kind="print"],
 .lib-item[data-category="Output"] {
-  --cat: #5fd39a;
-  --cat-text: #7fdcab;
+  --cat: #7ee2a8;
 }
-.vblock[data-kind="return"],
 .lib-item[data-category="Program"] {
   --cat: #e8c26a;
-  --cat-text: #eecf85;
-}
-.lib-item[data-category="Values"],
-.lib-item[data-category="Arithmetic"],
-.lib-item[data-category="Comparison"],
-.lib-item[data-category="Logic"] {
-  --cat: #9d8cff;
-  --cat-text: #b3a7ff;
-}
-.lib-item[data-category="Control Flow"],
-.lib-item[data-category="Data"],
-.lib-item[data-category="String"],
-.lib-item[data-category="Types"],
-.lib-item[data-category="Advanced"] {
-  --cat: #6e7690;
-  --cat-text: #9aa1b8;
 }
 
 .canvas-empty {
@@ -1038,11 +1015,6 @@ button.lib-item[disabled] {
   cursor: not-allowed;
 }
 
-.lib-item[data-status="coming-soon"] {
-  opacity: 0.55;
-  cursor: default;
-}
-
 /* Category color as a separated line, never a box. */
 .lib-dash {
   width: 20px;
@@ -1058,16 +1030,6 @@ button.lib-item[disabled] {
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.01em;
-}
-
-.lib-soon {
-  margin-left: auto;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  flex: none;
 }
 
 /* Ghost following the cursor during a library drag. Portaled to the
@@ -1370,7 +1332,7 @@ button.lib-item[disabled] {
   }
   .pane-editor {
     position: static;
-    background: #000;
+    background: var(--canvas);
     border: none;
     border-radius: 0;
     box-shadow: none;
@@ -1437,4 +1399,330 @@ button.lib-item[disabled] {
     opacity: 1;
     transform: none;
   }
+}
+
+/* ---------- Program-model hierarchy (Package → Struct → Function) ----
+ * Hand-drawn Excalidraw look: sketchy wobbled outlines (rough radius +
+ * turbulence filter), transparent fills over the charcoal canvas, titles
+ * straddling the top border, handwritten ink. Colors follow the
+ * reference: white package, green struct, blue functions/blocks. */
+
+.pkg-pos,
+.struct-pos {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.pkg {
+  position: absolute;
+  border: none;
+  border-radius: 22px 70px 26px 64px / 64px 26px 70px 22px;
+  background: transparent;
+  overflow: visible;
+  cursor: grab;
+}
+
+/* Sketch wobble lives on a border-only layer so text inside the
+ * containers never passes through the displacement filter (which
+ * rasterizes soft, increasingly blurry under zoom). */
+.pkg::before,
+.structc::before,
+.funcc::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1.5px solid currentColor;
+  pointer-events: none;
+  filter: url(#sketch);
+}
+
+.pkg::before {
+  color: #e8e8e8;
+}
+
+.pkg:active {
+  cursor: grabbing;
+}
+
+.pkg-head {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 2px 16px;
+  background: var(--canvas);
+  white-space: nowrap;
+}
+
+.pkg-name {
+  font-family: var(--hand);
+  font-size: 19px;
+  color: #f0f0f0;
+}
+
+.pkg-meta {
+  font-family: var(--hand);
+  font-size: 13px;
+  color: #9a9a9a;
+}
+
+.pkg-body {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.structc {
+  position: absolute;
+  border: none;
+  border-radius: 18px 60px 20px 56px / 56px 20px 60px 18px;
+  background: transparent;
+  overflow: visible;
+}
+
+.structc::before {
+  color: #46a758;
+}
+
+.structc-head {
+  position: absolute;
+  top: 0;
+  left: 28px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 2px 12px;
+  background: var(--canvas);
+  white-space: nowrap;
+}
+
+.structc-name {
+  font-family: var(--hand);
+  font-size: 16px;
+  color: #7ee2a8;
+}
+
+.preview-badge {
+  font-family: var(--hand);
+  font-size: 12px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px dashed #6e6e6e;
+  color: #9a9a9a;
+}
+
+.structc-body {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.funcc {
+  position: absolute;
+  border: none;
+  border-radius: 16px 48px 18px 44px / 44px 18px 48px 16px;
+  background: transparent;
+  overflow: visible;
+  transition: none;
+}
+
+.funcc::before {
+  color: #5aa9e6;
+}
+
+.funcc[data-selected="true"]::before {
+  color: #8fc2f5;
+}
+
+.funcc-head {
+  position: absolute;
+  top: 0;
+  left: 22px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 10px;
+  background: var(--canvas);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.funcc-name {
+  font-family: var(--hand);
+  font-size: 14px;
+  color: #8fc2f5;
+}
+
+.funcc-name .fn-call {
+  color: #6e7b96;
+}
+
+.funcc-body {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.funcc-empty {
+  position: absolute;
+  left: 48px;
+  top: 36px;
+  right: 48px;
+  padding: var(--space-4);
+  border-radius: 12px 26px 14px 24px / 24px 14px 26px 12px;
+  border: 1.5px dashed #6e6e6e;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+  color: #9a9a9a;
+  font-family: var(--hand);
+  font-size: 14px;
+}
+
+.funcc-empty strong {
+  color: #e8e8e8;
+  font-weight: 400;
+}
+
+/* Relationship wires: thin light flow curves, dashed blue preview. */
+
+/* Breadcrumb crumbs in the canvas toolbar. */
+.crumb {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.crumb-strong {
+  color: var(--text-primary);
+}
+
+.crumb-sep {
+  color: var(--text-muted);
+  margin: 0 6px;
+}
+
+/* Project navigator tree. */
+.proj-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.proj-pkg,
+.proj-struct {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-inset);
+}
+
+.proj-struct {
+  margin-left: 16px;
+  border-color: rgba(95, 211, 154, 0.3);
+}
+
+.proj-label {
+  font-family: var(--rounded);
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.proj-label-struct {
+  color: #7fdcab;
+}
+
+.proj-name {
+  font-weight: 700;
+}
+
+.proj-path {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 2px 4px;
+  overflow-wrap: anywhere;
+}
+
+.proj-reset-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 143, 143, 0.45);
+  background: var(--error-soft);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.insp-path {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* Light-mode twins for the sketch containers. */
+:root[data-theme="light"] .pkg::before {
+  color: #3c4358;
+}
+
+:root[data-theme="light"] .pkg-name {
+  color: #161a26;
+}
+
+:root[data-theme="light"] .structc::before {
+  color: #1e9e62;
+}
+
+:root[data-theme="light"] .structc-name {
+  color: #177245;
+}
+
+:root[data-theme="light"] .funcc::before {
+  color: #2f6bff;
+}
+
+:root[data-theme="light"] .funcc-name {
+  color: #2f5fd0;
+}
+
+:root[data-theme="light"] .vblock {
+  border-color: #2f6bff;
+}
+
+:root[data-theme="light"] .vblock-main {
+  color: #161a26;
+}
+
+:root[data-theme="light"] .vblock-var {
+  color: #c02c2c;
+}
+
+:root[data-theme="light"] .vblock-type {
+  color: #177245;
+}
+
+:root[data-theme="light"] .edge {
+  stroke: rgba(60, 70, 100, 0.7);
+}
+
+:root[data-theme="light"] .marker-flow {
+  fill: #4a5268;
 }

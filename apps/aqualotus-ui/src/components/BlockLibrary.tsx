@@ -23,11 +23,10 @@ interface Ghost {
 const DRAG_THRESHOLD_PX = 8;
 
 /**
- * Language block library: search + collapsible categories with
- * available / coming-soon states. Click (or tap) adds a real bridge
- * entity at an automatic position; dragging (mouse) shows a ghost
- * under the cursor and drops the block onto the canvas.
- * Coming-soon blocks are inert and never produce runtime behavior.
+ * Language block library: search + collapsible categories, exactly the
+ * `docs/api.md` surface. Click (or tap) adds a real bridge entity at an
+ * automatic position; dragging (mouse) shows a ghost under the cursor
+ * and drops the block onto the canvas.
  */
 export default function BlockLibrary(props: BlockLibraryProps): ReactElement {
   const { busy, onAdd, onDropToCanvas } = props;
@@ -134,29 +133,14 @@ export default function BlockLibrary(props: BlockLibraryProps): ReactElement {
   }
 
   function renderItem(block: BlockDefinition): ReactElement {
-    if (block.status !== "available") {
-      return (
-        <div
-          className="lib-item"
-          data-category={block.category}
-          data-status="coming-soon"
-          aria-disabled="true"
-          title={`${block.label} — coming soon`}
-        >
-          <span className="lib-dash" aria-hidden="true" />
-          <span className="lib-name">{block.label}</span>
-          <span className="lib-soon">Soon</span>
-        </div>
-      );
-    }
     return (
       <button
         type="button"
         className="lib-item"
         data-category={block.category}
-        data-status="available"
         disabled={busy}
         aria-label={`Add ${block.label} block`}
+        title={block.description}
         onPointerDown={(e) => beginDrag(e, block)}
         onClickCapture={swallowDragClick}
         onClick={() => onAdd(block.kind)}
@@ -204,7 +188,11 @@ export default function BlockLibrary(props: BlockLibraryProps): ReactElement {
             <details
               key={category}
               className="lib-category"
-              open={category === "Program" || category === "Variables"}
+              open={
+                category === "Program" ||
+                category === "Variables" ||
+                category === "Output"
+              }
             >
               <summary>{category}</summary>
               <ul className="lib-flat" aria-label={`${category} blocks`}>

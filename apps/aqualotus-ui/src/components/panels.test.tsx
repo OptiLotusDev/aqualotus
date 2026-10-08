@@ -5,6 +5,7 @@ import FunctionBrowser from "./FunctionBrowser";
 import Inspector from "./Inspector";
 import Runner from "./Runner";
 import BlockLibrary from "./BlockLibrary";
+import ProjectNavigator from "./ProjectNavigator";
 
 describe("FunctionBrowser", () => {
   it("marks main and selects by stable id", async () => {
@@ -19,7 +20,6 @@ describe("FunctionBrowser", () => {
         selectedId={0}
         busy={false}
         onSelect={onSelect}
-        onCreate={vi.fn()}
         onDelete={vi.fn()}
       />,
     );
@@ -28,23 +28,37 @@ describe("FunctionBrowser", () => {
     expect(onSelect).toHaveBeenCalledWith(1);
   });
 
-  it("creates functions from the form", async () => {
+  it("shows the empty list and deletes the selected helper", async () => {
     const user = userEvent.setup();
-    const onCreate = vi.fn();
-    render(
+    const onDelete = vi.fn();
+    const { rerender } = render(
       <FunctionBrowser
         functions={[]}
         selectedId={null}
         busy={false}
         onSelect={vi.fn()}
-        onCreate={onCreate}
-        onDelete={vi.fn()}
+        onDelete={onDelete}
       />,
     );
-    expect(screen.getByText("No functions")).toBeDefined();
-    await user.type(screen.getByPlaceholderText("helper"), "calc");
-    await user.click(screen.getByRole("button", { name: "Add" }));
-    expect(onCreate).toHaveBeenCalledWith("calc");
+    expect(screen.getByText("No blocks")).toBeDefined();
+    // Creation lives in the Library's Function block; the list only
+    // offers deletion of the selected non-main function.
+    rerender(
+      <FunctionBrowser
+        functions={[
+          { id: 0, name: "main", isMain: true },
+          { id: 1, name: "helper", isMain: false },
+        ]}
+        selectedId={1}
+        busy={false}
+        onSelect={vi.fn()}
+        onDelete={onDelete}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Delete selected function" }),
+    );
+    expect(onDelete).toHaveBeenCalledWith(1);
   });
 });
 
@@ -103,25 +117,26 @@ describe("BlockLibrary", () => {
     return { busy: false, onAdd: vi.fn(), onDropToCanvas: vi.fn() };
   }
 
-  it("searches blocks and blocks coming-soon from adding", async () => {
+  it("lists exactly the api.md blocks and adds them", async () => {
     const user = userEvent.setup();
     const props = libraryProps();
     render(<BlockLibrary {...props} />);
     await user.type(
       screen.getByPlaceholderText("Search blocks…"),
-      "declare",
+      "declare variable",
     );
     await user.click(
       screen.getByRole("button", { name: /Add Declare Variable block/ }),
     );
     expect(props.onAdd).toHaveBeenCalledWith("declare");
+    // Nothing beyond the engine surface exists in the list.
     expect(screen.queryByRole("button", { name: /Add If block/ })).toBeNull();
     await user.clear(screen.getByPlaceholderText("Search blocks…"));
     await user.type(screen.getByPlaceholderText("Search blocks…"), "zzz-nope");
     expect(screen.getByText("No blocks match")).toBeDefined();
     await user.clear(screen.getByPlaceholderText("Search blocks…"));
     await user.type(screen.getByPlaceholderText("Search blocks…"), "while loop");
-    expect(screen.getByText("Soon")).toBeDefined();
+    expect(screen.getByText("No blocks match")).toBeDefined();
   });
 
   it("shows a ghost while dragging and drops nothing outside the board", () => {
@@ -148,6 +163,49 @@ describe("BlockLibrary", () => {
   });
 });
 
+describe("ProjectNavigator", () => {
+  function navigatorProps(): React.ComponentProps<typeof ProjectNavigator> {
+    return {
+      functions: [{ id: 0, name: "main", isMain: true }],
+      selectedId: 0,
+      busy: false,
+      onSelect: vi.fn(),
+      onDelete: vi.fn(),
+      libraryBusy: false,
+      onAddBlock: vi.fn(),
+      onClearPackage: vi.fn(),
+      onDropToCanvas: vi.fn(),
+    };
+  }
+
+  it("asks twice before resetting the project", async () => {
+    const user = userEvent.setup();
+    const props = navigatorProps();
+    render(<ProjectNavigator {...props} />);
+    await user.click(
+      screen.getByRole("button", { name: "Reset project" }),
+    );
+    // First click only arms; nothing destructive fires yet.
+    expect(props.onClearPackage).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Yes, reset" }));
+    expect(props.onClearPackage).toHaveBeenCalledOnce();
+  });
+
+  it("cancels the reset without touching the project", async () => {
+    const user = userEvent.setup();
+    const props = navigatorProps();
+    render(<ProjectNavigator {...props} />);
+    await user.click(
+      screen.getByRole("button", { name: "Reset project" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(props.onClearPackage).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Reset project" }),
+    ).toBeDefined();
+  });
+});
+
 describe("Inspector", () => {
   const func = {
     status: "ok" as const,
@@ -158,27 +216,45 @@ describe("Inspector", () => {
     commandCount: 1,
   };
 
+  function inspectorProps(): React.ComponentProps<typeof Inspector> {
+    return {
+      func,
+      selected: null,
+      busy: false,
+      onReplace: vi.fn(),
+      onDeleteBlock: vi.fn(),
+      onDeleteFunction: vi.fn(),
+      onClearEntry: vi.fn(),
+    };
+  }
+
   it("shows function properties when nothing is selected", () => {
-    render(
-      <Inspector
-        func={func}
-        selected={null}
-        busy={false}
-        onReplace={vi.fn()}
-        onDeleteBlock={vi.fn()}
-        onDeleteFunction={vi.fn()}
-      />,
-    );
-    expect(screen.getByText("Yes — Run executes main()")).toBeDefined();
+    render(<Inspector {...inspectorProps()} />);
+    expect(screen.getByText("Cleared — run is a no-op")).toBeDefined();
+    // A cleared entry offers no clear action.
+    expect(
+      screen.queryByRole("button", { name: "Clear entry point" }),
+    ).toBeNull();
   });
 
-  it("edits and deletes the selected block", async () => {
+  it("shows a live entry head with a clear action", async () => {
+    const user = userEvent.setup();
+    const props = { ...inspectorProps(), func: { ...func, entry: 3 } };
+    render(<Inspector {...props} />);
+    expect(screen.getByText("Yes — starts at #3")).toBeDefined();
+    await user.click(
+      screen.getByRole("button", { name: "Clear entry point" }),
+    );
+    expect(props.onClearEntry).toHaveBeenCalledOnce();
+  });
+
+  it("offers every engine type tag, not a subset", async () => {
     const user = userEvent.setup();
     const onReplace = vi.fn();
-    const onDeleteBlock = vi.fn();
     render(
       <Inspector
-        func={func}
+        {...inspectorProps()}
+        onReplace={onReplace}
         selected={{
           id: 1,
           kind: "declare",
@@ -187,10 +263,59 @@ describe("Inspector", () => {
           ty: "int32",
           expr: "41",
         }}
-        busy={false}
+      />,
+    );
+    const select = screen.getByLabelText("Type");
+    const options = [...select.querySelectorAll("option")].map(
+      (o) => o.value,
+    );
+    for (const ty of [
+      "int8",
+      "int16",
+      "int32",
+      "int64",
+      "int128",
+      "uint8",
+      "uint16",
+      "uint32",
+      "uint64",
+      "uint128",
+      "float32",
+      "float64",
+      "bool",
+      "char",
+      "string",
+    ]) {
+      expect(options).toContain(ty);
+    }
+    // `void` is the one engine tag a declare can never use.
+    expect(options).not.toContain("void");
+    // A non-default tag survives the edit round-trip.
+    await user.selectOptions(select, "uint8");
+    await user.click(screen.getByRole("button", { name: "Apply edit" }));
+    expect(onReplace).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ kind: "declare", ty: "uint8" }),
+    );
+  });
+
+  it("edits and deletes the selected block", async () => {
+    const user = userEvent.setup();
+    const onReplace = vi.fn();
+    const onDeleteBlock = vi.fn();
+    render(
+      <Inspector
+        {...inspectorProps()}
+        selected={{
+          id: 1,
+          kind: "declare",
+          next: null,
+          var: "n",
+          ty: "int32",
+          expr: "41",
+        }}
         onReplace={onReplace}
         onDeleteBlock={onDeleteBlock}
-        onDeleteFunction={vi.fn()}
       />,
     );
     expect(screen.getByDisplayValue("41")).toBeDefined();
@@ -204,16 +329,7 @@ describe("Inspector", () => {
   });
 
   it("asks for a selection when idle", () => {
-    render(
-      <Inspector
-        func={null}
-        selected={null}
-        busy={false}
-        onReplace={vi.fn()}
-        onDeleteBlock={vi.fn()}
-        onDeleteFunction={vi.fn()}
-      />,
-    );
+    render(<Inspector {...inspectorProps()} func={null} />);
     expect(
       screen.getByText("Select a block to inspect its properties."),
     ).toBeDefined();

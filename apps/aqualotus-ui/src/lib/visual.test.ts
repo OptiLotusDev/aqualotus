@@ -3,6 +3,7 @@ import { BLOCKS, filterBlocks, findAvailableBlock } from "./blocks";
 import {
   edgeEnds,
   edgePath,
+  planDropLink,
   planLinkAfter,
   planLinkBefore,
   planMoveToEnd,
@@ -16,43 +17,59 @@ describe("filterBlocks", () => {
     expect(filterBlocks("   ").length).toBe(BLOCKS.length);
   });
 
-  it("matches name, category, description, and aliases", () => {
-    expect(filterBlocks("declare").some((b) => b.kind === "declare")).toBe(
+  it("matches labels and aliases exactly", () => {
+    expect(filterBlocks("declare variable").some((b) => b.kind === "declare")).toBe(
       true,
     );
     expect(filterBlocks("let").some((b) => b.kind === "declare")).toBe(true);
-    expect(filterBlocks("control").every((b) => b.category === "Control Flow")).toBe(
-      true,
-    );
+    expect(filterBlocks("output").some((b) => b.kind === "print")).toBe(true);
     expect(filterBlocks("no-such-block")).toEqual([]);
+  });
+
+  it("finds nothing for partial or category-only queries", () => {
+    // "function" is an exact label hit; "program" names no block.
+    expect(filterBlocks("function").map((b) => b.kind)).toEqual(["function"]);
+    expect(filterBlocks("program")).toEqual([]);
+    expect(filterBlocks("decl")).toEqual([]);
+  });
+
+  it("lists exactly the api.md surface — nothing invented", () => {
+    const kinds = BLOCKS.map((b) => b.kind).sort();
+    expect(kinds).toEqual(
+      ["assign", "call", "declare", "function", "print", "return"].sort(),
+    );
   });
 });
 
 describe("findAvailableBlock", () => {
-  it("only resolves addable blocks", () => {
-    expect(findAvailableBlock("declare")?.status).toBe("available");
+  it("resolves every api.md block and nothing else", () => {
+    for (const kind of ["declare", "assign", "print", "return", "call", "function"]) {
+      expect(findAvailableBlock(kind)?.kind).toBe(kind);
+    }
     expect(findAvailableBlock("if")).toBe(null);
     expect(findAvailableBlock("nope")).toBe(null);
   });
 });
 
 describe("initialLayout / reconcileLayout", () => {
-  it("stacks fresh ids vertically", () => {
+  it("chains fresh ids left-to-right in one row", () => {
     const layout = initialLayout([1, 2, 3]);
-    expect(layout[1]?.y ?? 0).toBeLessThan(layout[2]?.y ?? 0);
-    expect(layout[2]?.y ?? 0).toBeLessThan(layout[3]?.y ?? 0);
+    expect(layout[1]?.x ?? 0).toBeLessThan(layout[2]?.x ?? 0);
+    expect(layout[2]?.x ?? 0).toBeLessThan(layout[3]?.x ?? 0);
+    expect(layout[1]?.y).toBe(layout[2]?.y);
   });
 
   it("preserves surviving positions and drops removed ids", () => {
     const prev = {
       1: { x: 10, y: 20 },
-      2: { x: 30, y: 400 },
+      2: { x: 300, y: 20 },
       9: { x: 0, y: 0 },
     };
     const next = reconcileLayout(prev, [1, 2, 3]);
     expect(next[1]).toEqual({ x: 10, y: 20 });
     expect(next[9]).toBeUndefined();
-    expect((next[3]?.y ?? 0)).toBeGreaterThan(400);
+    expect((next[3]?.x ?? 0)).toBeGreaterThan(300);
+    expect(next[3]?.y).toBe(20);
   });
 
   it("places a dropped newcomer at the pending point", () => {
@@ -66,7 +83,7 @@ describe("initialLayout / reconcileLayout", () => {
   it("keeps auto-placed blocks right of the given start", () => {
     const next = reconcileLayout({ 1: { x: 10, y: 20 } }, [1, 2], null, 348);
     expect(next[2]?.x).toBe(348);
-    expect((next[2]?.y ?? 0)).toBeGreaterThan(20);
+    expect(next[2]?.y).toBe(36);
   });
 });
 
@@ -216,6 +233,89 @@ describe("planMoveToEnd", () => {
   it("rejects tails and unknown ids", () => {
     expect(planMoveToEnd(cmds, 1, 3)).toBe(null);
     expect(planMoveToEnd(cmds, 1, 9)).toBe(null);
+  });
+});
+
+describe("planDropLink", () => {
+  // The reported flow: fresh declare(1), assign(2), print(3) chained by
+  // successive out-port → in-port drags must come out 1 -> 2 -> 3.
+
+  it("chains a detached source before a detached target", () => {
+    const cmds = [
+      { id: 1, next: null },
+      { id: 2, next: null },
+      { id: 3, next: null },
+    ];
+    expect(planDropLink(cmds, null, 1, 2, "before")).toEqual({
+      edits: [{ id: 1, next: 2 }],
+      entry: { type: "set", entry: 1 },
+    });
+  });
+
+  it("appends to a chained source without tearing the chain down", () => {
+    const cmds = [
+      { id: 1, next: 2 },
+      { id: 2, next: null },
+      { id: 3, next: null },
+    ];
+    expect(planDropLink(cmds, 1, 2, 3, "before")).toEqual({
+      edits: [
+        { id: 2, next: 3 },
+        { id: 3, next: null },
+      ],
+      entry: { type: "keep" },
+    });
+  });
+
+  it("prepends a detached source before the entry head", () => {
+    const cmds = [
+      { id: 1, next: 2 },
+      { id: 2, next: null },
+      { id: 4, next: null },
+    ];
+    expect(planDropLink(cmds, 1, 4, 1, "before")).toEqual({
+      edits: [{ id: 4, next: 1 }],
+      entry: { type: "set", entry: 4 },
+    });
+  });
+
+  it("appends a detached target after a chained source", () => {
+    const cmds = [
+      { id: 1, next: 2 },
+      { id: 2, next: null },
+      { id: 4, next: null },
+    ];
+    expect(planDropLink(cmds, 1, 2, 4, "before")).toEqual({
+      edits: [
+        { id: 2, next: 4 },
+        { id: 4, next: null },
+      ],
+      entry: { type: "keep" },
+    });
+  });
+
+  it("keeps body drops on legacy move semantics", () => {
+    const cmds = [
+      { id: 1, next: 2 },
+      { id: 2, next: 3 },
+      { id: 3, next: null },
+      { id: 4, next: null },
+    ];
+    expect(planDropLink(cmds, 1, 1, 4, "after")).toEqual(
+      planLinkAfter(cmds, 1, 1, 4),
+    );
+  });
+
+  it("rejects self-drops, unknown ids, and no-ops", () => {
+    const cmds = [
+      { id: 1, next: 2 },
+      { id: 2, next: null },
+    ];
+    expect(planDropLink(cmds, 1, 1, 1, "before")).toBe(null);
+    expect(planDropLink(cmds, 1, 1, 9, "before")).toBe(null);
+    expect(planDropLink(cmds, 1, 9, 1, "before")).toBe(null);
+    // Already 1 -> 2: re-dropping the same wire is a no-op.
+    expect(planDropLink(cmds, 1, 1, 2, "before")).toBe(null);
   });
 });
 
