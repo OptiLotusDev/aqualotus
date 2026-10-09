@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { memo, type ReactElement } from "react";
 import type { CommandSummary } from "../lib/optilotus";
 import { commandMainLine } from "../lib/program";
 import type { Pos } from "../lib/layout";
@@ -24,8 +24,11 @@ interface VisualBlockProps {
  * Declare blocks use the reference palette: red `var: name`, green
  * `type:` / `value:` lines. Other kinds render their engine content in
  * light ink. Blocks in the non-selected function are preview-only.
+ *
+ * Memoized (Issue 9): a block re-renders only when its own props change,
+ * so edits/selection elsewhere do not rebuild the whole canvas tree.
  */
-export default function VisualBlock(props: VisualBlockProps): ReactElement {
+function VisualBlock(props: VisualBlockProps): ReactElement {
   const {
     command,
     fid,
@@ -88,3 +91,5 @@ export default function VisualBlock(props: VisualBlockProps): ReactElement {
     </div>
   );
 }
+
+export default memo(VisualBlock);

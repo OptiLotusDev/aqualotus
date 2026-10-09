@@ -70,6 +70,7 @@ function App(): ReactElement {
       onCreateFunction={program.createFunction}
       onDeleteFunction={program.deleteFunction}
       onAddCommand={program.addCommand}
+      onDeclareVariable={program.declareVariable}
       onReplaceCommand={program.replaceCommand}
       onDeleteCommand={program.deleteCommand}
       onApplyLinks={program.applyLinks}

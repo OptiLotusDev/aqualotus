@@ -270,6 +270,10 @@ p {
   min-height: 100svh;
   display: flex;
   flex-direction: column;
+  /* An app, not a document: browser pinch-zoom is excluded app-wide so
+   * two-finger gestures can only ever drive canvas zoom (the board owns
+   * pinch) — single-finger panning/scrolling is unaffected. */
+  touch-action: pan-x pan-y;
 }
 
 @media (min-width: 768px) {
@@ -804,6 +808,12 @@ p {
   color: var(--color-console-warn);
 }
 
+.cull-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
 .board {
   position: relative;
   flex: 1;
@@ -814,6 +824,9 @@ p {
   background-color: var(--color-canvas);
   background-image: radial-gradient(circle, var(--color-dot) 1px, transparent 1px);
   background-size: 26px 26px;
+  /* Canvas-only gestures: single-finger pans natively; browser
+   * pinch-zoom is excluded (not listed) so two-finger pinch reaches
+   * the board's own zoom handler instead of scaling the whole app. */
   touch-action: pan-x pan-y;
   overscroll-behavior: contain;
 }
@@ -1164,6 +1177,14 @@ button.lib-item[disabled] {
   align-items: center;
   gap: var(--space-3);
   flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.run-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
 }
 
 .run-duration {
@@ -1491,8 +1512,9 @@ button.lib-item[disabled] {
 }
 
 /* Sketch wobble lives on a border-only layer so text inside the
- * containers never passes through the displacement filter (which
- * rasterizes soft, increasingly blurry under zoom). */
+ * containers is never rasterized through a filter. The wobble itself
+ * is pure border-radius asymmetry (no SVG turbulence filter): cheap
+ * on HiDPI/HDR multi-display compositors, same hand-drawn read. */
 .pkg::before,
 .structc::before,
 .funcc::before {
@@ -1502,7 +1524,6 @@ button.lib-item[disabled] {
   border-radius: inherit;
   border: 1.5px solid currentColor;
   pointer-events: none;
-  filter: url(#sketch);
 }
 
 .pkg::before {

@@ -40,6 +40,12 @@ export function useInheritPosition(
     [],
   );
 
+  // Settle the pending capture on every render (deliberately no dep
+  // array): the hook must observe the settled projection even when the
+  // parent passes a referentially-equal map (failed edit → same ids),
+  // otherwise a stale capture would hijack a later unrelated newcomer.
+  // The write targets a *different* hook's store and fires at most once
+  // per capture — an async-sync handoff, not render-derived state.
   useEffect(() => {
     const pending = pendingRef.current;
     if (pending === null) return;

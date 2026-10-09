@@ -73,6 +73,32 @@ describe("Runner", () => {
     };
   }
 
+  it("renders the panel heading and run action", async () => {
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    render(
+      <Runner {...runnerProps()} onRun={onRun} busy={false} canRun={true} />,
+    );
+    expect(screen.getByTestId("runner-panel")).toBeDefined();
+    expect(screen.getByText("Runner")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Run program" }));
+    expect(onRun).toHaveBeenCalledOnce();
+  });
+
+  it("renders running state distinctly from idle", () => {
+    const { rerender } = render(<Runner {...runnerProps()} />);
+    expect(screen.getByTestId("runner-empty")).toBeDefined();
+    expect(screen.getByText("Ready to run")).toBeDefined();
+    expect(
+      screen.getByText("Run the program to see output here."),
+    ).toBeDefined();
+
+    rerender(<Runner {...runnerProps()} running={true} />);
+    expect(screen.getByTestId("runner-running")).toBeDefined();
+    expect(screen.getByText("Running…")).toBeDefined();
+    expect(screen.getByTestId("runner-status").dataset.state).toBe("busy");
+  });
+
   it("renders idle, ok with duration, and error states", async () => {
     const user = userEvent.setup();
     const { rerender } = render(<Runner {...runnerProps()} />);
@@ -88,6 +114,7 @@ describe("Runner", () => {
         durationMs={4.2}
       />,
     );
+    expect(screen.getByTestId("runner-success")).toBeDefined();
     expect(screen.getByText("> 42")).toBeDefined();
     expect(screen.getByText("6", { selector: "strong" })).toBeDefined();
     expect(screen.getByText("4.2 ms")).toBeDefined();
@@ -106,9 +133,25 @@ describe("Runner", () => {
         onShowBlock={onShowBlock}
       />,
     );
-    expect(screen.getByText("Run failed", { selector: ".notice-title" })).toBeDefined();
+    expect(screen.getByTestId("runner-error")).toBeDefined();
+    expect(
+      screen.getByTestId("runner-error").textContent ?? "",
+    ).toContain("Run failed");
     await user.click(screen.getByRole("button", { name: "Show block #7" }));
     expect(onShowBlock).toHaveBeenCalledWith(7);
+  });
+
+  it("announces success without output as its own empty state", () => {
+    render(
+      <Runner
+        {...runnerProps()}
+        run={{ status: "ok", steps: 2, prints: 0, printed: [] }}
+        durationMs={1.5}
+      />,
+    );
+    expect(
+      screen.getByText("Run completed — no printed output."),
+    ).toBeDefined();
   });
 });
 
@@ -333,5 +376,48 @@ describe("Inspector", () => {
     expect(
       screen.getByText("Select a block to inspect its properties."),
     ).toBeDefined();
+  });
+
+  it("offers a non-destructive declare for an undeclared variable", async () => {
+    const user = userEvent.setup();
+    const onDeclareVariable = vi.fn();
+    render(
+      <Inspector
+        {...inspectorProps()}
+        selected={{
+          id: 1,
+          kind: "assign",
+          next: null,
+          var: "ghost",
+          expr: "{ghost}",
+        }}
+        recoveryVar="ghost"
+        onDeclareVariable={onDeclareVariable}
+      />,
+    );
+    // The failed block stays visible and editable…
+    expect(screen.getByDisplayValue("{ghost}")).toBeDefined();
+    // …with a recovery action that declares instead of deleting.
+    await user.click(
+      screen.getByRole("button", { name: /Declare “ghost”/ }),
+    );
+    expect(onDeclareVariable).toHaveBeenCalledWith("ghost");
+  });
+
+  it("marks the declare initializer as optional", () => {
+    render(
+      <Inspector
+        {...inspectorProps()}
+        selected={{
+          id: 1,
+          kind: "declare",
+          next: null,
+          var: "n",
+          ty: "int32",
+          expr: undefined,
+        }}
+      />,
+    );
+    expect(screen.getByLabelText(/Value \(optional\)/)).toBeDefined();
   });
 });

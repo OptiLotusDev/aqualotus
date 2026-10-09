@@ -43,6 +43,7 @@ interface AppShellProps {
   readonly onCreateFunction: (name: string) => void;
   readonly onDeleteFunction: (id: FunctionId) => void;
   readonly onAddCommand: (fid: FunctionId, draft: CommandDraft) => void;
+  readonly onDeclareVariable: (fid: FunctionId, name: string) => void;
   readonly onReplaceCommand: (
     fid: FunctionId,
     oldId: CommandId,
@@ -222,12 +223,10 @@ export default function AppShell(props: AppShellProps): ReactElement {
     [],
   );
 
-  useEffect(() => {
-    if (!compact) {
-      setNavOpen(false);
-      setSheetOpen(false);
-    }
-  }, [compact]);
+  // Drawer/sheet visibility derives from the viewport during render
+  // (no sync effect): on desktop the compact overlays never show.
+  const navVisible = compact && navOpen;
+  const sheetVisible = compact && sheetOpen;
 
   const undoView = useCallback(
     (entry: ViewEntry, dir: "undo" | "redo"): void => {
@@ -486,6 +485,21 @@ export default function AppShell(props: AppShellProps): ReactElement {
       <div className="notice notice-error" role="alert">
         <div className="notice-title">Something needs attention</div>
         <div>{program.actionError}</div>
+        {program.recoveryVar !== null &&
+        program.recoveryVar !== "" &&
+        fid !== null ? (
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            style={{ marginTop: 8 }}
+            disabled={program.busy}
+            onClick={() =>
+              props.onDeclareVariable(fid, program.recoveryVar as string)
+            }
+          >
+            Declare &ldquo;{program.recoveryVar}&rdquo; (int32)
+          </button>
+        ) : null}
         <button
           type="button"
           className="btn btn-ghost btn-sm"
@@ -497,11 +511,9 @@ export default function AppShell(props: AppShellProps): ReactElement {
       </div>
     ) : null;
 
-  useEffect(() => {
-    if (program.actionError !== "") {
-      setRunOpen(true);
-    }
-  }, [program.actionError]);
+  // The runner panel opens for errors without a sync effect: visibility
+  // derives during render from the manual toggle OR a live error.
+  const runnerVisible = runOpen || program.actionError !== "";
 
   /** Block drag commit with view-undo recording. */
   const moveBlockWithHistory = useCallback(
@@ -564,6 +576,10 @@ export default function AppShell(props: AppShellProps): ReactElement {
       func={program.selected}
       selected={selectedCommand}
       busy={program.busy}
+      recoveryVar={program.recoveryVar}
+      onDeclareVariable={
+        fid !== null ? (name) => props.onDeclareVariable(fid, name) : undefined
+      }
       onReplace={(id, draft) =>
         fid !== null ? replaceWithPosition(fid, id, draft) : undefined
       }
@@ -585,7 +601,10 @@ export default function AppShell(props: AppShellProps): ReactElement {
         running={program.running}
         durationMs={program.durationMs}
         errorId={program.commandErrorId}
+        busy={program.busy}
+        canRun={fid !== null}
         onShowBlock={showBlock}
+        onRun={props.onRun}
       />
     </div>
   );
@@ -801,7 +820,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
                 <div className="pane-body insp-body">{inspector}</div>
               </aside>
             ) : null}
-            {runOpen ? (
+            {runnerVisible ? (
               <section className="pane float-runner" aria-label="Runner">
                 <div className="pane-head float-head">
                   <h2 className="pane-title">Runner</h2>
@@ -844,7 +863,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
         )}
       </div>
 
-      {compact && navOpen ? (
+      {navVisible ? (
         <>
           <div
             className="scrim"
@@ -875,7 +894,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
         </>
       ) : null}
 
-      {compact && sheetOpen ? (
+      {sheetVisible ? (
         <>
           <div
             className="scrim"

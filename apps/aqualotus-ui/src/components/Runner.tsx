@@ -7,7 +7,10 @@ interface RunnerProps {
   readonly running: boolean;
   readonly durationMs: number | null;
   readonly errorId: CommandId | null;
+  readonly busy?: boolean;
+  readonly canRun?: boolean;
   readonly onShowBlock: (id: CommandId) => void;
+  readonly onRun?: () => void;
 }
 
 function formatDuration(ms: number): string {
@@ -17,32 +20,65 @@ function formatDuration(ms: number): string {
 }
 
 /**
- * Runner docked at the bottom of the central editor area (evolved from
- * the output panel). States: idle, running, success (with UI-measured
- * bridge duration), error. Failures link back to the offending block
- * via its stable command id.
+ * Runner panel: one clearly identifiable place for execution status,
+ * printed output, duration, and runtime errors (Issue 11). Status is
+ * icon + text (never color alone); stale output is impossible because
+ * every program refresh clears the result upstream. Empty, running,
+ * success, and failure states each render explicitly.
  */
 export default function Runner(props: RunnerProps): ReactElement {
-  const { run, running, durationMs, errorId, onShowBlock } = props;
+  const {
+    run,
+    running,
+    durationMs,
+    errorId,
+    busy,
+    canRun,
+    onShowBlock,
+    onRun,
+  } = props;
+  const state = running
+    ? "busy"
+    : run === null
+      ? "idle"
+      : run.status === "ok"
+        ? "ready"
+        : "error";
+  const statusIcon = running ? "…" : run === null ? "○" : run.status === "ok" ? "✓" : "✗";
+  const statusText = running
+    ? "Running…"
+    : run === null
+      ? "Ready to run"
+      : run.status === "ok"
+        ? "Completed"
+        : "Run failed";
 
   return (
-    <div>
-      <div className="run-status" aria-live="polite">
+    <div data-testid="runner-panel">
+      <div className="run-head">
+        <span className="pane-title">Runner</span>
+        {onRun !== undefined ? (
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={running || busy === true || canRun === false}
+            onClick={onRun}
+            title="Run (Ctrl/Cmd + Enter)"
+            aria-label="Run program"
+          >
+            ▶ Run
+          </button>
+        ) : null}
+      </div>
+      <div className="run-status" aria-live="polite" data-testid="runner-status" data-state={state}>
         <span
           className="status-dot"
-          data-state={
-            running ? "busy" : run === null ? "idle" : run.status === "ok" ? "ready" : "error"
-          }
+          data-state={state}
           role="status"
         >
           <i aria-hidden="true" />
-          {running
-            ? "Running…"
-            : run === null
-              ? "Ready to run"
-              : run.status === "ok"
-                ? "Completed"
-                : "Run failed"}
+          <span aria-hidden="true">{statusIcon}</span>
+          {statusText}
         </span>
         {durationMs !== null && !running ? (
           <span
@@ -55,14 +91,20 @@ export default function Runner(props: RunnerProps): ReactElement {
       </div>
 
       <div style={{ marginTop: 12 }}>
+        {running ? (
+          <div className="notice" data-testid="runner-running">
+            <div className="skeleton" aria-hidden="true" />
+            <span>Executing main…</span>
+          </div>
+        ) : null}
         {run === null && !running ? (
-          <div className="notice">Run the program to see output here.</div>
+          <div className="notice" data-testid="runner-empty">Run the program to see output here.</div>
         ) : null}
         {run !== null && run.status === "ok" && !running ? (
-          <div>
+          <div data-testid="runner-success">
             <div className="run-meta" style={{ marginBottom: 12 }}>
               <span>
-                Steps <strong>{run.steps}</strong>
+                <span aria-hidden="true">✓ </span>Steps <strong>{run.steps}</strong>
               </span>
               <span>
                 Prints <strong>{run.prints}</strong>
@@ -73,15 +115,15 @@ export default function Runner(props: RunnerProps): ReactElement {
                 Run completed — no printed output.
               </div>
             ) : (
-              <pre className="output-pre" aria-live="polite">
+              <pre className="output-pre" aria-live="polite" aria-label="Program output">
                 {run.printed.map((line) => `> ${line}`).join("\n")}
               </pre>
             )}
           </div>
         ) : null}
         {run !== null && run.status === "error" && !running ? (
-          <div className="notice notice-error" role="alert">
-            <div className="notice-title">Run failed</div>
+          <div className="notice notice-error" role="alert" data-testid="runner-error">
+            <div className="notice-title"><span aria-hidden="true">✗ </span>Run failed</div>
             <div>{errorMessage(run)}</div>
             {typeof errorId === "number" ? (
               <button

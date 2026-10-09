@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import type { CommandId, CommandSummary } from "../lib/optilotus";
 import type { FunctionInfo } from "../lib/optilotus";
 import { optilotus_type, type OptilotusType } from "../lib/optilotus";
@@ -13,10 +13,13 @@ interface InspectorProps {
   readonly func: (FunctionInfo & { status: "ok" }) | null;
   readonly selected: CommandSummary | null;
   readonly busy: boolean;
+  /** Recovery hint: attempted undeclared variable name, if any. */
+  readonly recoveryVar?: string | null;
   readonly onReplace: (id: CommandId, draft: CommandDraft) => void;
   readonly onDeleteBlock: (id: CommandId) => void;
   readonly onDeleteFunction: () => void;
   readonly onClearEntry: () => void;
+  readonly onDeclareVariable?: (name: string) => void;
 }
 
 /**
@@ -72,13 +75,13 @@ function KindFields(props: {
           </div>
           <div className="field">
             <span>
-              <label htmlFor="in-value">Value</label>
+              <label htmlFor="in-value">Value (optional)</label>
             </span>
             <input
               id="in-value"
               value={draft.init}
               onChange={(e) => onChange({ ...draft, init: e.target.value })}
-              placeholder="41"
+              placeholder="41 — empty uses the type default"
               autoComplete="off"
             />
           </div>
@@ -158,21 +161,53 @@ export default function Inspector(props: InspectorProps): ReactElement {
     func,
     selected,
     busy,
+    recoveryVar,
     onReplace,
     onDeleteBlock,
     onDeleteFunction,
     onClearEntry,
+    onDeclareVariable,
   } = props;
-  const [edit, setEdit] = useState<CommandDraft | null>(null);
-
-  useEffect(() => {
+  // Edit draft derived from the selection during render (not synced in
+  // an effect): when a different block is selected, the draft resets to
+  // it; typing only touches local state. This keeps the "adjust state
+  // during render" pattern instead of set-state-in-effect.
+  const [edit, setEdit] = useState<CommandDraft | null>(() =>
+    selected === null ? null : summaryToDraft(selected),
+  );
+  const [editFor, setEditFor] = useState<CommandId | null>(
+    selected?.id ?? null,
+  );
+  if ((selected?.id ?? null) !== editFor) {
+    setEditFor(selected?.id ?? null);
     setEdit(selected === null ? null : summaryToDraft(selected));
-  }, [selected]);
+  }
 
   if (selected !== null && edit !== null) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div className="pane-title">Inspector</div>
+        {recoveryVar !== null &&
+        recoveryVar !== undefined &&
+        recoveryVar !== "" &&
+        onDeclareVariable !== undefined ? (
+          <div className="notice notice-error" role="alert">
+            <div className="notice-title">Undeclared variable</div>
+            <div>
+              Variable &ldquo;{recoveryVar}&rdquo; is not declared yet. The
+              block was kept — declare it first, then retry.
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              style={{ marginTop: 8 }}
+              disabled={busy}
+              onClick={() => onDeclareVariable(recoveryVar)}
+            >
+              Declare &ldquo;{recoveryVar}&rdquo; (int32)
+            </button>
+          </div>
+        ) : null}
         <div className="insp-path" title="Package / Struct / Function">
           {breadcrumbPath(func?.name ?? null)}
         </div>
