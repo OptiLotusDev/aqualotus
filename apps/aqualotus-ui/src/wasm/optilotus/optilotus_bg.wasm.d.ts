@@ -12,6 +12,7 @@ export const optilotus_health: () => [number, number];
 export const optilotus_listCommands: (a: number) => [number, number];
 export const optilotus_listFunctions: () => [number, number];
 export const optilotus_print: (a: number, b: number, c: number) => [number, number];
+export const optilotus_renameFunction: (a: number, b: number, c: number) => [number, number];
 export const optilotus_return: (a: number, b: number, c: number) => [number, number];
 export const optilotus_runProgram: () => [number, number];
 export const optilotus_setEntry: (a: number, b: number) => [number, number];
