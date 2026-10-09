@@ -1,25 +1,79 @@
+# ============================================
 # Dependencies
+# ============================================
 node_modules/
-dist/
-dist-ssr/
+*/node_modules/
+**/node_modules/
 *.local
 
+# ============================================
+# Build outputs
+# ============================================
+dist/
+dist-ssr/
+build/
+*/dist/
+*/build/
+
+# ============================================
+# Capacitor native builds
+# ============================================
+apps/*/android/.gradle/
+apps/*/android/build/
+apps/*/android/app/build/
+apps/*/android/local.properties
+apps/*/android/.idea/
+apps/*/ios/App/Pods/
+apps/*/ios/App/build/
+apps/*/ios/DerivedData/
+apps/*/ios/App/App.xcworkspace/xcuserdata/
+apps/*/ios/App/*.xcworkspace/xcuserdata/
+apps/*/ios/App/*.xcodeproj/xcuserdata/
+
+# ============================================
 # Rust
+# ============================================
 target/
 **/*.rs.bk
 Cargo.lock
 
-# Tauri / OS
+# ============================================
+# Tauri
+# ============================================
 src-tauri/target/
+
+# ============================================
+# Environment
+# ============================================
+.env
+.env.local
+.env.*.local
+.env.*
+
+# ============================================
+# OS
+# ============================================
 .DS_Store
 Thumbs.db
 
-# Editor
+# ============================================
+# Logs
+# ============================================
+*.log
+npm-debug.log*
+
+# ============================================
+# IDE / Editor
+# ============================================
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
 .idea/
+*.swp
 
-# Env
-.env
-.env.*
+# ============================================
+# Cache
+# ============================================
+.cache/
+.parcel-cache/
+.turbo/

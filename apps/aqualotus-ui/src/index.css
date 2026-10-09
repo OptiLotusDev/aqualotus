@@ -1,111 +1,1767 @@
+/* Aqualotus design system — Night Mode + Liquid Glass.
+ * Single centralized token layer. Components consume these variables;
+ * no raw palette colors live in component code. */
+
+/* Aqualotus design system — Night Mode + Liquid Glass.
+ * Two token layers, one value source for colour:
+ * `--color-*` is the canonical semantic palette (hierarchy, data,
+ * ports, flow, status, foundation). The older glass-chrome names
+ * (`--surface`, `--text-*`, `--accent-*`, …) remain for the translucent
+ * Liquid Glass layer and point at semantic tokens wherever the spec
+ * governs the value. No raw palette hex lives outside this block. */
+
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  color-scheme: dark;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  /* ---- Semantic colour system: foundation (charcoal, purple tint) ---- */
+  --color-bg: #0a0a0f;
+  --color-card: #121218;
+  --color-muted: #1c1b24;
+  --color-canvas: #0d0c13;
+  --color-line: #2a2833;
+  --color-fg: #fafafa;
+  --color-muted-fg: #a1a1aa;
+  --color-dot: #2a2833;
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
+  /* ---- Actions and interaction ---- */
+  --color-primary: #3b82f6;
+  --color-accent: #8b5cf6;
+  --color-indigo: #818cf8;
+  --color-ring: #3b82f6;
+
+  /* ---- Program hierarchy: white → green → blue, outer to inner ---- */
+  --color-hierarchy-package: #e8e8e8;
+  --color-hierarchy-struct: #46a758;
+  --color-hierarchy-struct-label: #7ee2a8;
+  --color-hierarchy-function: #5aa9e6;
+  --color-hierarchy-function-label: #8fc2f5;
+
+  /* ---- Data semantics: red names identity, green types/values ---- */
+  --color-data-identity: #ff7b72;
+  --color-data-type: #7ee2a8;
+  --color-data-value: #7ee2a8;
+
+  /* ---- Ports and the single `next` flow relationship ---- */
+  --color-port-in: #7d8db0;
+  --color-port-out: #5aa9e6;
+  --color-flow: #9fb2d8;
+  --color-flow-selected: #5aa9e6;
+  --color-flow-preview: #5aa9e6;
+
+  /* ---- Runtime status (application-wide starting hues) ---- */
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  /* Softer console variants for dark-theme text/surfaces (same meaning,
+   * readable on charcoal; see accessibility rules). */
+  --color-console-ok: #5fd39a;
+  --color-console-warn: #e8c26a;
+  --color-console-err: #ff8f8f;
+
+  /* Night background stack (deep, never pure black). */
+  --night-0: var(--color-bg);
+  --night-1: #14101d;
+
+  /* Glass surfaces — translucent layers over the night background. */
+  --surface: rgba(22, 26, 38, 0.62);
+  --surface-elevated: rgba(32, 38, 56, 0.66);
+  --surface-selected: rgba(56, 68, 100, 0.55);
+  --surface-inset: rgba(7, 8, 13, 0.55);
+
+  /* Borders — subtle, with one stronger step. */
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  /* Text — soft neutrals for calm readability on night layers. */
+  --text-primary: var(--color-fg);
+  --text-secondary: var(--color-muted-fg);
+  --text-muted: #6e7690;
+
+  /* Accent — follows the primary action token, kept translucent. */
+  --accent: var(--color-primary);
+  --accent-soft: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  --accent-border: color-mix(in srgb, var(--color-primary) 45%, transparent);
+
+  /* Danger — dark red, used sparingly for panel toggles. */
+  --danger: #c14b4b;
+  --danger-soft: rgba(193, 75, 75, 0.16);
+  --danger-border: rgba(193, 75, 75, 0.55);
+  --danger-text: #e89a9a;
+
+  /* Status — foundation hues; text uses the console variants. */
+  --success: var(--color-success);
+  --success-soft: color-mix(in srgb, var(--color-success) 13%, transparent);
+  --warning: var(--color-warning);
+  --warning-soft: color-mix(in srgb, var(--color-warning) 13%, transparent);
+  --error: var(--color-error);
+  --error-soft: color-mix(in srgb, var(--color-error) 12%, transparent);
+
+  /* Shape + depth. */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-full: 999px;
+  --shadow-soft: 0 8px 32px rgba(0, 0, 0, 0.38);
+  --shadow-lift: 0 16px 48px rgba(0, 0, 0, 0.5);
+
+  /* Type + spacing. */
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
+    "Segoe UI", Roboto, sans-serif;
+  --hand: "Segoe Print", "Bradley Hand", "Chalkboard SE", "Comic Sans MS",
+    cursive;
+  --heading: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont,
+    system-ui, sans-serif;
+  --rounded: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont,
+    system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Responsive breakpoints (layout space, not devices). */
+  --bp-compact: 767px;
+  --bp-large: 1100px;
+
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+  background: var(--night-0);
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
+  text-rendering: optimizeLegibility;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
+/* Light mode: same token names, light glass values. Night stays the
+ * default; the theme hook flips `data-theme` on the root element. */
+:root[data-theme="light"] {
+  color-scheme: light;
 
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
+  /* Semantic palette: light counterparts, same meanings. */
+  --color-bg: #f3f1f8;
+  --color-card: #ffffff;
+  --color-muted: #e9e6f1;
+  --color-canvas: #ece8f4;
+  --color-line: rgba(30, 20, 60, 0.14);
+  --color-fg: #17131f;
+  --color-muted-fg: #5d566e;
+  --color-dot: rgba(60, 40, 110, 0.12);
+
+  --color-primary: #2f6bff;
+  --color-accent: #7c5cf0;
+  --color-indigo: #5a67f0;
+  --color-ring: #2f6bff;
+
+  --color-hierarchy-package: #3c4358;
+  --color-hierarchy-struct: #1e9e62;
+  --color-hierarchy-struct-label: #177245;
+  --color-hierarchy-function: #2f6bff;
+  --color-hierarchy-function-label: #2f5fd0;
+
+  --color-data-identity: #c02c2c;
+  --color-data-type: #177245;
+  --color-data-value: #177245;
+
+  --color-port-in: #6e7690;
+  --color-port-out: #2f6bff;
+  --color-flow: rgba(70, 75, 105, 0.65);
+  --color-flow-selected: #2f6bff;
+  --color-flow-preview: #2f6bff;
+
+  --color-success: #1e9e62;
+  --color-warning: #b45309;
+  --color-error: #c02c2c;
+  --color-console-ok: #1e9e62;
+  --color-console-warn: #b45309;
+  --color-console-err: #c02c2c;
+
+  --night-0: #e4e1ec;
+  --night-1: #f3f1f8;
+
+  --surface: rgba(255, 255, 255, 0.68);
+  --surface-elevated: rgba(255, 255, 255, 0.82);
+  --surface-selected: rgba(47, 107, 255, 0.12);
+  --surface-inset: rgba(255, 255, 255, 0.6);
+
+  --border: rgba(20, 30, 60, 0.1);
+  --border-strong: rgba(20, 30, 60, 0.2);
+
+  --text-primary: #161a26;
+  --text-secondary: #4a5268;
+  --text-muted: #7c86a0;
+
+  --danger-text: #a02c2c;
+
+  --shadow-soft: 0 8px 32px rgba(30, 40, 80, 0.12);
+  --shadow-lift: 0 16px 48px rgba(30, 40, 80, 0.18);
+  background: var(--night-0);
 }
 
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
+:root[data-theme="light"] body {
+  background:
+    radial-gradient(1200px 600px at 15% -5%, color-mix(in srgb, var(--color-primary) 8%, transparent), transparent 60%),
+    radial-gradient(1000px 500px at 90% 10%, color-mix(in srgb, var(--color-accent) 7%, transparent), transparent 60%),
+    linear-gradient(var(--night-1), var(--night-0));
+}
+
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
+html,
 body {
   margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(1200px 600px at 15% -5%, color-mix(in srgb, var(--color-accent) 10%, transparent), transparent 60%),
+    radial-gradient(1000px 500px at 90% 10%, color-mix(in srgb, var(--color-indigo) 8%, transparent), transparent 60%),
+    linear-gradient(var(--night-1), var(--night-0));
+  background-attachment: fixed;
+  color: var(--text-primary);
+}
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Readable focus everywhere (keyboard navigation). */
+:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Base controls. */
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+input,
+select {
+  font: inherit;
+  color: var(--text-primary);
 }
 
 h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
+h2,
+h3,
+h4,
 p {
   margin: 0;
 }
 
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
+/* ---------- App shell ---------- */
+
+.shell {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  /* An app, not a document: browser pinch-zoom is excluded app-wide so
+   * two-finger gestures can only ever drive canvas zoom (the board owns
+   * pinch) — single-finger panning/scrolling is unaffected. */
+  touch-action: pan-x pan-y;
 }
 
-code {
+@media (min-width: 768px) {
+  .shell {
+    height: 100svh;
+    min-height: 560px;
+    overflow: hidden;
+    position: relative;
+  }
+}
+
+.appbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 8px 12px 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: 16px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  -webkit-backdrop-filter: blur(22px) saturate(1.4);
+  backdrop-filter: blur(22px) saturate(1.4);
+  box-shadow: var(--shadow-soft);
+}
+
+/* Desktop: the rounded bar floats over the canvas so the black
+ * canvas with its blur shows through like the side panels. */
+@media (min-width: 768px) {
+  .appbar {
+    position: absolute;
+    top: 12px;
+    left: 16px;
+    right: 16px;
+    margin: 0;
+  }
+}
+
+.appbar-title {
+  font-family: var(--rounded);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.appbar > div {
+  min-width: 0;
+}
+
+.appbar-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appbar-spacer {
+  flex: 1;
+}
+
+.workspace {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: block;
+  padding: 0;
+  margin: 0;
+  max-width: none;
+  width: 100%;
+  overflow: hidden;
+}
+
+@media (min-width: 768px) {
+  .workspace {
+    flex: 1;
+    min-height: 0;
+  }
+}
+
+.pane {
+  background: var(--surface);
+  -webkit-backdrop-filter: blur(22px) saturate(1.4);
+  backdrop-filter: blur(22px) saturate(1.4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.pane-editor {
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Full-bleed black canvas pane (desktop floating layout). */
+@media (min-width: 768px) {
+  .pane-editor {
+    position: absolute;
+    inset: 0;
+    background: var(--color-canvas);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: hidden;
+  }
+  .editor-head {
+    display: none;
+  }
+  .pane-body.editor-body {
+    padding: 0;
+  }
+}
+
+/* Floating glass panels above the canvas. */
+.float-left,
+.float-right,
+.float-runner {
+  z-index: 10;
+}
+
+@media (min-width: 768px) {
+  .float-left {
+    position: absolute;
+    left: 16px;
+    top: 76px;
+    bottom: 16px;
+    width: 272px;
+    overflow: auto;
+  }
+  .float-right {
+    position: absolute;
+    right: 16px;
+    top: 76px;
+    bottom: 16px;
+    width: 264px;
+    overflow: auto;
+  }
+  .float-runner {
+    position: absolute;
+    left: 304px;
+    right: 340px;
+    bottom: 16px;
+    max-height: 36%;
+    overflow: auto;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1100px) {
+  .float-left {
+    width: 240px;
+  }
+  .float-right {
+    width: 232px;
+  }
+  .float-runner {
+    left: 16px;
+    right: 16px;
+    max-height: 30%;
+  }
+}
+
+.float-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.float-pill {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  padding: 6px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-elevated);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-soft);
+}
+
+.runner-inline {
+  display: none;
+}
+
+.pane-head {
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.pane-title {
+  font-family: var(--rounded);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.pane-body {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Compact inspector body: the inspector panel is narrower overall. */
+.pane-body.insp-body {
+  padding: var(--space-3);
+  gap: var(--space-2);
+  font-size: 13.5px;
+}
+
+/* ---------- Glass controls ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-elevated);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  font-weight: 600;
+  font-size: 14px;
+  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.btn:hover {
+  background: var(--surface-selected);
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn-primary {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--color-primary) 24%, transparent);
+}
+
+.btn-danger {
+  color: var(--color-console-err);
+}
+
+.btn-panel {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+  font-weight: 650;
+}
+
+.btn-panel:hover {
+  background: color-mix(in srgb, var(--danger) 24%, transparent);
+}
+
+.btn-panel[aria-pressed="false"] {
+  opacity: 0.75;
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  min-height: 36px;
+  padding: var(--space-1) var(--space-3);
+}
+
+.btn-ghost:hover {
+  background: var(--accent-soft);
+}
+
+.btn-sm {
+  min-height: 32px;
+  padding: var(--space-1) var(--space-3);
+  font-size: 13px;
+}
+
+.btn[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.icon-btn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: var(--space-2);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.field > span {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.field input,
+.field select {
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-inset);
+}
+
+.field input::placeholder {
+  color: var(--text-muted);
+}
+
+/* ---------- Function browser ---------- */
+
+.fn-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fn-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  font-size: 13.5px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.fn-item:hover {
+  background: var(--accent-soft);
+}
+
+.fn-item[aria-current="true"] {
+  background: var(--surface-selected);
+  border-color: var(--border-strong);
+}
+
+.fn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+
+.fn-item[data-main="true"] .fn-dot {
+  background: var(--color-primary);
+}
+
+.fn-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.main-badge {
+  font-family: var(--rounded);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  color: var(--color-primary);
+  flex: none;
+}
+
+/* ---------- Editor / canvas ---------- */
+
+.fn-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.fn-header h2 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.fn-header h2 .fn-call {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.fn-header .cmd-count {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.pane-editor {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.editor-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.runner-dock {
+  border-top: 1px solid var(--border);
+  padding: var(--space-4);
+  max-height: 38%;
+  overflow: auto;
+  background: color-mix(in srgb, var(--color-bg) 55%, transparent);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.left-stack {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.left-stack > section + section {
+  border-top: 1px solid var(--border);
+}
+
+/* Visual canvas */
+
+.canvas-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.canvas-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+}
+
+.canvas-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--rounded);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.canvas-title .cmd-count {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.canvas-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.toolbar-extra {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .toolbar-extra {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-left: auto;
+  }
+  .hide-compact {
+    display: none;
+  }
+}
+
+@media (min-width: 768px) {
+  .canvas-toolbar {
+    position: absolute;
+    top: 84px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 15;
+    padding: 6px 8px 6px 14px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    -webkit-backdrop-filter: blur(22px) saturate(1.4);
+    backdrop-filter: blur(22px) saturate(1.4);
+    box-shadow: var(--shadow-soft);
+    white-space: nowrap;
+  }
+}
+
+.canvas-hint {
+  font-size: 13px;
+  color: var(--color-console-warn);
+}
+
+.cull-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.board {
+  position: relative;
+  flex: 1;
+  min-height: 280px;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background-color: var(--color-canvas);
+  background-image: radial-gradient(circle, var(--color-dot) 1px, transparent 1px);
+  background-size: 26px 26px;
+  /* Canvas-only gestures: single-finger pans natively; browser
+   * pinch-zoom is excluded (not listed) so two-finger pinch reaches
+   * the board's own zoom handler instead of scaling the whole app. */
+  touch-action: pan-x pan-y;
+  overscroll-behavior: contain;
+}
+
+@media (min-width: 768px) {
+  .board {
+    border: none;
+    border-radius: 0;
+  }
+}
+
+.board-world {
+  position: relative;
+  transform-origin: 0 0;
+}
+
+.links {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.edge {
+  fill: none;
+  stroke: var(--color-flow);
+  stroke-width: 1.5;
+}
+
+.edge-selected {
+  stroke: var(--color-flow-selected);
+}
+
+.edge-preview {
+  stroke: var(--color-flow-preview);
+  stroke-dasharray: 6 5;
+}
+
+.marker-flow {
+  fill: var(--color-flow);
+}
+
+.vblock {
+  position: absolute;
+  width: 216px;
+  padding: 12px 14px 14px;
+  border-radius: 12px 28px 14px 26px / 26px 14px 28px 12px;
+  border: 1.5px solid var(--color-hierarchy-function);
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.vblock:active {
+  cursor: grabbing;
+}
+
+.vblock[data-selected="true"] {
+  border-color: var(--color-hierarchy-function-label);
+  box-shadow: 0 0 0 1px var(--color-hierarchy-function-label);
+}
+
+.vblock[data-error="true"] {
+  border-color: var(--color-error);
+}
+
+.vblock[data-connect-from="true"] {
+  border-color: var(--color-hierarchy-function-label);
+}
+
+.vblock-kind {
+  font-family: var(--hand);
+  font-size: 11px;
+  color: var(--color-muted-fg);
+}
+
+.vblock-main {
+  font-family: var(--hand);
   font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+  color: var(--color-fg);
+  overflow-wrap: anywhere;
+}
+
+/* Reference palette for declares: red var line, green type/value. */
+.vblock-var {
+  font-family: var(--hand);
+  font-size: 16px;
+  color: var(--color-data-identity);
+  overflow-wrap: anywhere;
+}
+
+.vblock-type {
+  font-family: var(--hand);
+  font-size: 13px;
+  color: var(--color-data-value);
+  overflow-wrap: anywhere;
+}
+
+.vblock-error {
+  font-family: var(--hand);
+  font-size: 13px;
+  color: var(--color-console-err);
+}
+
+.vport {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-canvas);
+  border: 2px solid var(--color-port-in);
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.vport-left {
+  left: -8px;
+  top: 50%;
+  margin-top: -6px;
+}
+
+.vport-right {
+  right: -8px;
+  top: 50%;
+  margin-top: -6px;
+  border-color: var(--color-port-out);
+  cursor: crosshair;
+}
+
+.vport:hover {
+  transform: scale(1.25);
+}
+
+.vblock[data-connect-from="true"] .vport-right {
+  background: var(--color-port-out);
+}
+
+.vblock[data-interactive="false"] {
+  cursor: pointer;
+}
+
+.vblock[data-interactive="false"] .vport {
+  display: none;
+}
+
+/* Library category dashes: toolbox chrome aids, not canvas semantics.
+ * Variables live at function level (blue); Output prints values
+ * (data green); Program holds toolbox actions (restrained violet). */
+.lib-item[data-category="Variables"] {
+  --cat: var(--color-hierarchy-function);
+}
+.lib-item[data-category="Output"] {
+  --cat: var(--color-data-value);
+}
+.lib-item[data-category="Program"] {
+  --cat: var(--color-accent);
+}
+
+.canvas-empty {
+  position: absolute;
+  top: 150px;
+  left: 24px;
+  right: 24px;
+  max-width: 340px;
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+  padding: var(--space-5);
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border-strong);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.canvas-empty strong {
+  color: var(--text-primary);
+}
+
+/* ---------- Block library ---------- */
+
+.library {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.lib-category {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.lib-category + .lib-category {
+  margin-top: var(--space-2);
+}
+
+.lib-category > summary {
+  cursor: pointer;
+  padding: var(--space-1) 0;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+}
+
+.lib-category > summary::-webkit-details-marker {
+  display: none;
+}
+
+.lib-category > summary::before {
+  content: "›";
+  color: var(--text-muted);
+  transition: transform 120ms ease;
+}
+
+.lib-category[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.lib-flat {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 var(--space-1);
+  display: flex;
+  flex-direction: column;
+}
+
+.lib-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  padding: 7px 2px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+}
+
+button.lib-item {
+  cursor: pointer;
+}
+
+button.lib-item:hover:not([disabled]) .lib-name {
+  color: var(--color-primary);
+}
+
+button.lib-item[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Category color as a separated line, never a box. */
+.lib-dash {
+  width: 20px;
+  height: 2px;
+  border-radius: var(--radius-full);
+  background: var(--cat, var(--border-strong));
+  flex: none;
+}
+
+.lib-name {
+  display: block;
+  font-family: var(--rounded);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* Ghost following the cursor during a library drag. Portaled to the
+ * document body so it paints above every pane stacking context. */
+.lib-ghost {
+  position: fixed;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--surface-elevated);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--accent-border);
+  box-shadow: var(--shadow-lift);
+  pointer-events: none;
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+}
+
+.lib-ghost .lib-name {
+  font-size: 13.5px;
+}
+
+/* ---------- Inspector ---------- */
+
+.props {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.props > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  font-size: 13.5px;
+}
+
+.props > div + div {
+  border-top: 1px solid var(--border);
+}
+
+.props dt {
+  color: var(--text-muted);
+}
+
+.props dd {
+  margin: 0;
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+/* ---------- Runner ---------- */
+
+.run-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.run-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.run-duration {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.status-dot[data-state="idle"] i {
+  background: var(--text-muted);
+}
+
+.status-dot[data-state="busy"] i {
+  background: var(--warning);
+}
+
+/* ---------- Output ---------- */
+
+.output-pre {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.notice {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-elevated);
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.notice-error {
+  border-color: color-mix(in srgb, var(--color-console-err) 45%, transparent);
+  background: var(--error-soft);
+  color: var(--text-primary);
+}
+
+.notice-error .notice-title {
+  color: var(--color-console-err);
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.notice-ok {
+  border-color: color-mix(in srgb, var(--color-console-ok) 40%, transparent);
+}
+
+.run-meta {
+  display: flex;
+  gap: var(--space-4);
+  font-size: 13px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+
+.run-meta strong {
+  color: var(--text-primary);
+}
+
+/* ---------- Status ---------- */
+
+.status-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--surface-inset);
+  white-space: nowrap;
+}
+
+.status-dot i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+  flex: none;
+}
+
+.status-dot[data-state="ready"] i {
+  background: var(--success);
+}
+
+.status-dot[data-state="error"] i {
+  background: var(--error);
+}
+
+/* ---------- Empty / loading ---------- */
+
+.empty {
+  text-align: center;
+  padding: var(--space-5) var(--space-4);
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.empty strong {
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+.skeleton {
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    100deg,
+    var(--surface-elevated) 40%,
+    var(--surface-selected) 50%,
+    var(--surface-elevated) 60%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  min-height: 64px;
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* ---------- Overlays (small layouts) ---------- */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--color-bg) 60%, transparent);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.sheet {
+  position: fixed;
+  z-index: 50;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 82svh;
+  overflow: auto;
+  background: var(--surface-elevated);
+  -webkit-backdrop-filter: blur(28px) saturate(1.5);
+  backdrop-filter: blur(28px) saturate(1.5);
+  border-top: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-lift);
+  padding: var(--space-4) var(--space-4) var(--space-6);
+}
+
+.sheet-grip {
+  width: 40px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--border-strong);
+  margin: 0 auto var(--space-4);
+}
+
+.drawer {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(320px, 86vw);
+  overflow: auto;
+  background: var(--surface-elevated);
+  -webkit-backdrop-filter: blur(28px) saturate(1.5);
+  backdrop-filter: blur(28px) saturate(1.5);
+  border-right: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lift);
+  padding: var(--space-4);
+}
+
+.only-compact {
+  display: none;
+}
+
+/* ---------- Boot / fatal states ---------- */
+
+.boot {
+  min-height: 100svh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+}
+
+.boot-card {
+  width: min(440px, 100%);
+  padding: var(--space-6);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  -webkit-backdrop-filter: blur(22px) saturate(1.4);
+  backdrop-filter: blur(22px) saturate(1.4);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  text-align: center;
+  align-items: center;
+}
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 767px) {
+  .workspace {
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+  }
+  .only-compact {
+    display: inline-flex;
+  }
+  .appbar {
+    margin: 8px 8px 0;
+    padding: var(--space-3);
+  }
+  .pane-editor {
+    position: static;
+    background: var(--color-canvas);
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .pane-body.editor-body {
+    padding: var(--space-3);
+  }
+  .board {
+    min-height: 46svh;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+  }
+  .canvas-toolbar {
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+  }
+  .canvas-title {
+    display: none;
+  }
+  .runner-inline {
+    display: block;
+    border-top: 1px solid var(--border);
+    padding: var(--space-4);
+    background: color-mix(in srgb, var(--color-bg) 60%, transparent);
+  }
+}
+
+/* Very small screens: keep the status dot, drop its text so the
+ * appbar controls stay reachable without horizontal scrolling. */
+@media (max-width: 400px) {
+  .appbar .status-dot {
+    font-size: 0;
+    gap: 0;
+  }
+  .appbar {
+    gap: var(--space-2);
+    padding: var(--space-3);
+  }
+}
+
+/* ---------- Motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.vblock {
+  animation: rise 180ms ease;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------- Program-model hierarchy (Package → Struct → Function) ----
+ * Hand-drawn Excalidraw look: sketchy wobbled outlines (rough radius +
+ * turbulence filter), transparent fills over the charcoal canvas, titles
+ * straddling the top border, handwritten ink. Colors follow the
+ * reference: white package, green struct, blue functions/blocks. */
+
+.pkg-pos,
+.struct-pos {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.pkg {
+  position: absolute;
+  border: none;
+  border-radius: 22px 70px 26px 64px / 64px 26px 70px 22px;
+  background: transparent;
+  overflow: visible;
+  cursor: grab;
+}
+
+/* Sketch wobble lives on a border-only layer so text inside the
+ * containers is never rasterized through a filter. The wobble itself
+ * is pure border-radius asymmetry (no SVG turbulence filter): cheap
+ * on HiDPI/HDR multi-display compositors, same hand-drawn read. */
+.pkg::before,
+.structc::before,
+.funcc::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1.5px solid currentColor;
+  pointer-events: none;
+}
+
+.pkg::before {
+  color: var(--color-hierarchy-package);
+}
+
+.pkg:active {
+  cursor: grabbing;
+}
+
+.pkg-head {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 2px 16px;
+  background: var(--color-canvas);
+  white-space: nowrap;
+}
+
+.pkg-name {
+  font-family: var(--hand);
+  font-size: 19px;
+  color: var(--color-fg);
+}
+
+.pkg-meta {
+  font-family: var(--hand);
+  font-size: 13px;
+  color: var(--color-muted-fg);
+}
+
+.pkg-body {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.structc {
+  position: absolute;
+  border: none;
+  border-radius: 18px 60px 20px 56px / 56px 20px 60px 18px;
+  background: transparent;
+  overflow: visible;
+}
+
+.structc::before {
+  color: var(--color-hierarchy-struct);
+}
+
+.structc-head {
+  position: absolute;
+  top: 0;
+  left: 28px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 2px 12px;
+  background: var(--color-canvas);
+  white-space: nowrap;
+}
+
+.structc-name {
+  font-family: var(--hand);
+  font-size: 16px;
+  color: var(--color-hierarchy-struct-label);
+}
+
+.preview-badge {
+  font-family: var(--hand);
+  font-size: 12px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px dashed var(--color-line);
+  color: var(--color-muted-fg);
+}
+
+.structc-body {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.funcc {
+  position: absolute;
+  border: none;
+  border-radius: 16px 48px 18px 44px / 44px 18px 48px 16px;
+  background: transparent;
+  overflow: visible;
+  transition: none;
+}
+
+.funcc::before {
+  color: var(--color-hierarchy-function);
+}
+
+.funcc[data-selected="true"]::before {
+  color: var(--color-hierarchy-function-label);
+}
+
+.funcc-head {
+  position: absolute;
+  top: 0;
+  left: 22px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 10px;
+  background: var(--color-canvas);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.funcc-name {
+  font-family: var(--hand);
+  font-size: 14px;
+  color: var(--color-hierarchy-function-label);
+}
+
+.funcc-name .fn-call {
+  color: var(--color-muted-fg);
+}
+
+.funcc-body {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.funcc-empty {
+  position: absolute;
+  left: 48px;
+  top: 36px;
+  right: 48px;
+  padding: var(--space-4);
+  border-radius: 12px 26px 14px 24px / 24px 14px 26px 12px;
+  border: 1.5px dashed var(--color-line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+  color: var(--color-muted-fg);
+  font-family: var(--hand);
+  font-size: 14px;
+}
+
+.funcc-empty strong {
+  color: var(--color-fg);
+  font-weight: 400;
+}
+
+/* Relationship wires: thin light flow curves, dashed blue preview. */
+
+/* Breadcrumb crumbs in the canvas toolbar. */
+.crumb {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.crumb-strong {
+  color: var(--text-primary);
+}
+
+.crumb-sep {
+  color: var(--text-muted);
+  margin: 0 6px;
+}
+
+/* Project navigator tree. */
+.proj-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.proj-pkg,
+.proj-struct {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-inset);
+}
+
+.proj-struct {
+  margin-left: 16px;
+  border-color: color-mix(in srgb, var(--color-hierarchy-struct) 45%, transparent);
+}
+
+.proj-label {
+  font-family: var(--rounded);
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.proj-label-struct {
+  color: var(--color-hierarchy-struct-label);
+}
+
+.proj-name {
+  font-weight: 700;
+}
+
+.proj-path {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 2px 4px;
+  overflow-wrap: anywhere;
+}
+
+.proj-reset-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--color-console-err) 45%, transparent);
+  background: var(--error-soft);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.insp-path {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }

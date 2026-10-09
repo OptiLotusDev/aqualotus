@@ -28,20 +28,45 @@ import init, {
 // single-flight init promise; `loaded` records completion. Nothing else
 // may mutate them. Callers must await `optilotus_tryEnsure()` first;
 // sync wrappers enforce that via `assertReady()` (P14/P22).
+//
+// Failure semantics: a rejected `ready` is cleared (only when the
+// failed promise is still the current attempt) so a later call retries
+// instead of replaying the same rejection forever. Concurrent callers
+// share one in-flight promise; `loaded` flips only on success.
 let ready: Promise<void> | null = null;
 let loaded = false;
 
 /**
  * Load the Optilotus WASM module once. Resolves when callable.
  * Rejects (caller handles it) when loading fails, e.g. bad MIME type.
+ *
+ * Concurrent callers share the single in-flight promise. A failure
+ * clears the cache (guarded on identity, so a stale rejection can
+ * never invalidate a newer attempt) and the next call retries.
  */
 export function optilotus_tryEnsure(): Promise<void> {
-  if (!ready) {
-    ready = init().then(() => {
+  if (loaded) return Promise.resolve();
+  if (ready === null) {
+    const attempt: Promise<void> = init().then(() => {
       loaded = true;
+    });
+    ready = attempt;
+    // Guarded rejection handler: reset only when the failed promise is
+    // still the current attempt. Never resets a newer in-flight attempt,
+    // never touches `loaded` (success path owns it).
+    attempt.catch(() => {
+      if (ready === attempt) {
+        ready = null;
+      }
     });
   }
   return ready;
+}
+
+/** Test-only reset of the init cache (drops success + failure state). */
+export function optilotus_resetInitForTesting(): void {
+  ready = null;
+  loaded = false;
 }
 
 /** Throw an explicit error when called before successful init (P22). */
