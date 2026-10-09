@@ -30,6 +30,8 @@ export function summaryToDraft(cmd: CommandSummary): CommandDraft {
       return { kind: "print", template: cmd.template ?? "" };
     case "return":
       return { kind: "return", expr: cmd.expr ?? "" };
+    case "if":
+      throw new Error("If commands cannot be edited as a simple command draft");
   }
 }
 
@@ -67,6 +69,8 @@ export function commandMainLine(cmd: CommandSummary): string {
       return cmd.template ?? "";
     case "return":
       return `return ${cmd.expr ?? ""}`;
+    case "if":
+      return `if value#${cmd.condition ?? "?"}`;
   }
 }
 
@@ -83,6 +87,8 @@ export function commandSubLine(cmd: CommandSummary): string {
       return "print to output";
     case "return":
       return "ends the function";
+    case "if":
+      return `then: ${cmd.then_body?.length ?? 0} commands, else: ${cmd.else_body?.length ?? 0} commands`;
   }
 }
 

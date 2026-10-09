@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::error::ExecError;
 use crate::expr::{check_var_name, eval_expr, eval_expr_with, render_template, ExprFail};
@@ -73,7 +73,16 @@ pub fn run_function_returning_with_limit(
         let command = function
             .find_command(id)
             .ok_or(ExecError::UnknownCommand { command: id })?;
-        let flow = run_command(command, &mut values, &mut vars, sink, &mut prints)?;
+        let flow = run_command(
+            function,
+            command,
+            &mut values,
+            &mut vars,
+            sink,
+            &mut prints,
+            &mut steps,
+            max_steps,
+        )?;
         current = command.next;
         steps += 1;
         if let Some(value) = flow {
@@ -88,12 +97,16 @@ pub fn run_function_returning_with_limit(
 /// `None` = continue to `next`; `Some(value)` = `Return` requested a stop.
 type Flow = Option<Value>;
 
+#[allow(clippy::too_many_arguments)]
 fn run_command(
+    function: &Function,
     command: &crate::ir::Command,
     values: &mut HashMap<ValueId, Value>,
     vars: &mut HashMap<String, Value>,
     sink: &mut impl PrintSink,
     prints: &mut usize,
+    steps: &mut usize,
+    max_steps: usize,
 ) -> Result<Flow, ExecError> {
     match &command.op {
         Op::Lit(value) => {
@@ -252,6 +265,39 @@ fn run_command(
             let out = eval_expr(expr, vars).map_err(|e| map_expr_fail(e, command.id))?;
             Ok(Some(out))
         }
+        Op::If {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            let body = select_if_body(
+                read_bool_condition(values, command.id, condition)?,
+                then_body,
+                else_body,
+            );
+            let body_set: HashSet<CommandId> = body.iter().copied().collect();
+            let mut body_current = body.first().copied();
+            while let Some(body_id) = body_current {
+                if !body_set.contains(&body_id) {
+                    break;
+                }
+                if *steps >= max_steps {
+                    return Err(ExecError::LoopLimit { limit: max_steps });
+                }
+                let body_cmd = function
+                    .find_command(body_id)
+                    .ok_or(ExecError::UnknownCommand { command: body_id })?;
+                *steps += 1;
+                let flow = run_command(
+                    function, body_cmd, values, vars, sink, prints, steps, max_steps,
+                )?;
+                if let Some(value) = flow {
+                    return Ok(Some(value));
+                }
+                body_current = body_cmd.next;
+            }
+            Ok(None)
+        }
     }
 }
 
@@ -263,6 +309,42 @@ fn read_input(
     values
         .get(&id)
         .ok_or(ExecError::MissingValue { command, value: id })
+}
+
+/// Read an `Op::If` condition as a bool. A missing value and a non-`Bool`
+/// value are typed errors carrying the `If` command's id.
+fn read_bool_condition(
+    values: &HashMap<ValueId, Value>,
+    command: CommandId,
+    condition: &ValueId,
+) -> Result<bool, ExecError> {
+    let cond_value = values.get(condition).ok_or(ExecError::MissingValue {
+        command,
+        value: *condition,
+    })?;
+    if cond_value == &Value::Bool(true) {
+        Ok(true)
+    } else if cond_value == &Value::Bool(false) {
+        Ok(false)
+    } else {
+        Err(ExecError::TypeMismatch {
+            command,
+            detail: format!("if condition must be bool, got {}", cond_value.ty().tag()),
+        })
+    }
+}
+
+/// Pick the taken branch of an `Op::If`: empty when taken without `else`.
+fn select_if_body<'b>(
+    cond: bool,
+    then_body: &'b [CommandId],
+    else_body: &'b Option<Vec<CommandId>>,
+) -> &'b [CommandId] {
+    if cond {
+        then_body
+    } else {
+        else_body.as_ref().map(|v| v.as_slice()).unwrap_or(&[])
+    }
 }
 
 fn map_expr_fail(err: ExprFail, command: CommandId) -> ExecError {
@@ -364,6 +446,7 @@ fn run_func(
             .ok_or(ExecError::UnknownCommand { command: id })?;
         let flow = run_command_with_calls(
             program,
+            function,
             command,
             &mut values,
             &mut vars,
@@ -385,6 +468,7 @@ fn run_func(
 #[allow(clippy::too_many_arguments)]
 fn run_command_with_calls(
     program: &Program,
+    function: &Function,
     command: &crate::ir::Command,
     values: &mut HashMap<ValueId, Value>,
     vars: &mut HashMap<String, Value>,
@@ -456,7 +540,43 @@ fn run_command_with_calls(
                 eval_expr_with(expr, vars, &mut call).map_err(|e| map_expr_fail(e, command.id))?;
             Ok(Some(out))
         }
+        Op::If {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            let body = select_if_body(
+                read_bool_condition(values, command.id, condition)?,
+                then_body,
+                else_body,
+            );
+            let body_set: HashSet<CommandId> = body.iter().copied().collect();
+            let mut body_current = body.first().copied();
+            while let Some(body_id) = body_current {
+                if !body_set.contains(&body_id) {
+                    break;
+                }
+                if *steps >= max_steps {
+                    return Err(ExecError::LoopLimit { limit: max_steps });
+                }
+                let body_cmd = function
+                    .find_command(body_id)
+                    .ok_or(ExecError::UnknownCommand { command: body_id })?;
+                *steps += 1;
+                let flow = run_command_with_calls(
+                    program, function, body_cmd, values, vars, sink, prints, steps, max_steps,
+                    depth,
+                )?;
+                if let Some(value) = flow {
+                    return Ok(Some(value));
+                }
+                body_current = body_cmd.next;
+            }
+            Ok(None)
+        }
         // Non-expression ops behave exactly as the single-function path.
-        _ => run_command(command, values, vars, sink, prints),
+        _ => run_command(
+            function, command, values, vars, sink, prints, steps, max_steps,
+        ),
     }
 }

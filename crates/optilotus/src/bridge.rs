@@ -183,6 +183,25 @@ pub fn package_delete_function(id: u32) -> String {
     })
 }
 
+/// Rename a function by numeric id, preserving its stable id.
+pub fn package_rename_function(id: u32, name: &str) -> String {
+    with_package(
+        |pkg| match pkg.try_rename(crate::ir::FunctionId(id), name) {
+            Ok(()) => {
+                let info = pkg
+                    .get_function(crate::ir::FunctionId(id))
+                    .expect("just renamed");
+                serde_json::json!({
+                    "status": "ok", "id": info.id.0,
+                    "name": info.name, "isMain": info.is_main,
+                })
+                .to_string()
+            }
+            Err(e) => package_fail_json(&e).to_string(),
+        },
+    )
+}
+
 /// Wipe helpers, re-create an empty `main`.
 pub fn package_clear() -> String {
     with_package(|pkg| {
@@ -323,6 +342,13 @@ pub fn js_package_get(id: u32) -> String {
 pub fn js_package_delete(id: u32) -> String {
     init_panic_hook();
     package_delete_function(id)
+}
+
+/// JS: `optilotus_renameFunction(id, name) -> string` (JSON)
+#[wasm_bindgen(js_name = optilotus_renameFunction)]
+pub fn js_package_rename(id: u32, name: &str) -> String {
+    init_panic_hook();
+    package_rename_function(id, name)
 }
 
 /// JS: `optilotus_clearPackage() -> string` (JSON)

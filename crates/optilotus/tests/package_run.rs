@@ -35,3 +35,43 @@ fn run_program_reports_errors_with_command() {
     assert_eq!(out["kind"], "UnknownVariable");
     assert!(out["command"].is_number());
 }
+
+#[test]
+fn assign_math_expression_evaluates_and_stores_result() {
+    let mut pkg = Package::new();
+    pkg.declare(MAIN_ID, "x", "int32", Some("10")).unwrap();
+    pkg.declare(MAIN_ID, "y", "int32", Some("5")).unwrap();
+    pkg.declare(MAIN_ID, "z", "int32", None).unwrap();
+    pkg.assign(MAIN_ID, "z", "{x} + {y}").unwrap();
+    pkg.print(MAIN_ID, "\"{z}\"").unwrap();
+
+    let mut sink = VecSink::default();
+    pkg.run_main(&mut sink).unwrap();
+    assert_eq!(sink.lines, vec!["15".to_string()]);
+}
+
+#[test]
+fn assign_math_expression_with_operators() {
+    let mut pkg = Package::new();
+    pkg.declare(MAIN_ID, "a", "int32", Some("20")).unwrap();
+    pkg.declare(MAIN_ID, "b", "int32", Some("4")).unwrap();
+    pkg.declare(MAIN_ID, "result", "int32", None).unwrap();
+    pkg.assign(MAIN_ID, "result", "{a} * {b} - 2").unwrap();
+    pkg.print(MAIN_ID, "\"{result}\"").unwrap();
+
+    let mut sink = VecSink::default();
+    pkg.run_main(&mut sink).unwrap();
+    assert_eq!(sink.lines, vec!["78".to_string()]);
+}
+
+#[test]
+fn print_template_evaluates_math_expression() {
+    let mut pkg = Package::new();
+    pkg.declare(MAIN_ID, "x", "int32", Some("10")).unwrap();
+    pkg.declare(MAIN_ID, "y", "int32", Some("5")).unwrap();
+    pkg.print(MAIN_ID, "\"{x} + {y}\"").unwrap();
+
+    let mut sink = VecSink::default();
+    pkg.run_main(&mut sink).unwrap();
+    assert_eq!(sink.lines, vec!["15".to_string()]);
+}
