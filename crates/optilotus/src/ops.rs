@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::ir::{CommandId, ValueId};
 use crate::types::Type;
 use crate::value::Value;
 
@@ -29,6 +30,13 @@ pub enum Op {
     /// stop the function. 0 inputs, 0 outputs. The value is used when
     /// another function calls this one in expression text (`name()`).
     Return { expr: String },
+    /// Branch on a Bool condition. 1 input (condition), 0 outputs.
+    /// `then_body` and `else_body` are ordered lists of child command IDs.
+    If {
+        condition: ValueId,
+        then_body: Vec<CommandId>,
+        else_body: Option<Vec<CommandId>>,
+    },
 }
 
 /// Pure arithmetic failure, without command identity.

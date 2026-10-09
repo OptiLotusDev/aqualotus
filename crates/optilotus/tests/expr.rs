@@ -1,14 +1,7 @@
-use std::collections::HashMap;
+mod common;
 
+use common::{eval, vars};
 use optilotus::{check_var_name, eval_expr, render_template, ExprFail, Value};
-
-fn vars(pairs: Vec<(String, Value)>) -> HashMap<String, Value> {
-    pairs.into_iter().collect()
-}
-
-fn eval(expr: &str) -> Result<Value, ExprFail> {
-    eval_expr(expr, &vars(vec![]))
-}
 
 #[test]
 fn precedence_and_parentheses() {
@@ -251,4 +244,76 @@ fn huge_literal_overflows() {
 fn float_var_division() {
     let v = vars(vec![("f".to_string(), Value::Float64(7.5))]);
     assert_eq!(eval_expr("{f} / 2", &v).unwrap(), Value::Float64(3.75));
+}
+
+#[test]
+fn templates_evaluate_arithmetic_expressions() {
+    let v = vars(vec![
+        ("x".to_string(), Value::Int32(10)),
+        ("y".to_string(), Value::Int32(5)),
+    ]);
+    // The core bug: "{x} + {y}" should evaluate to "15", not "10 + 5".
+    assert_eq!(render_template("\"{x} + {y}\"", &v).unwrap(), "15");
+    // Other arithmetic operators.
+    assert_eq!(render_template("\"{x} - {y}\"", &v).unwrap(), "5");
+    assert_eq!(render_template("\"{x} * {y}\"", &v).unwrap(), "50");
+    assert_eq!(render_template("\"{x} / {y}\"", &v).unwrap(), "2");
+    assert_eq!(render_template("\"{x} % {y}\"", &v).unwrap(), "0");
+    // Parenthesized expressions.
+    assert_eq!(render_template("\"{x} + {y} * {y}\"", &v).unwrap(), "35");
+    // Negative results.
+    let v = vars(vec![
+        ("x".to_string(), Value::Int32(3)),
+        ("y".to_string(), Value::Int32(7)),
+    ]);
+    assert_eq!(render_template("\"{x} - {y}\"", &v).unwrap(), "-4");
+    // Float arithmetic.
+    let v = vars(vec![
+        ("a".to_string(), Value::Float64(1.5)),
+        ("b".to_string(), Value::Float64(2.0)),
+    ]);
+    assert_eq!(render_template("\"{a} + {b}\"", &v).unwrap(), "3.5");
+}
+
+#[test]
+fn templates_expression_with_text_falls_back_to_string() {
+    let v = vars(vec![
+        ("x".to_string(), Value::Int32(10)),
+        ("y".to_string(), Value::Int32(5)),
+    ]);
+    // Text around the expression prevents evaluation.
+    assert_eq!(
+        render_template("\"Sum: {x} + {y}\"", &v).unwrap(),
+        "Sum: 10 + 5"
+    );
+    assert_eq!(
+        render_template("\"{x} + {y} items\"", &v).unwrap(),
+        "10 + 5 items"
+    );
+    // Single variable is NOT evaluated as expression (stays string).
+    assert_eq!(render_template("\"{x}\"", &v).unwrap(), "10");
+    // Non-arithmetic strings stay as-is.
+    let v = vars(vec![("name".to_string(), Value::String("Bob".to_string()))]);
+    assert_eq!(render_template("\"{name}\"", &v).unwrap(), "Bob");
+    assert_eq!(
+        render_template("\"Hello {name}!\"", &v).unwrap(),
+        "Hello Bob!"
+    );
+    // Literal-only expressions with no vars still evaluate.
+    assert_eq!(render_template("\"10 + 5\"", &v).unwrap(), "15");
+}
+
+#[test]
+fn templates_expression_concatenation_still_works() {
+    let v = vars(vec![
+        ("x".to_string(), Value::Int32(10)),
+        ("y".to_string(), Value::Int32(5)),
+    ]);
+    // Pieces separated by + are concatenated, not summed.
+    assert_eq!(
+        render_template("\"{x}\" + \" + \" + \"{y}\"", &v).unwrap(),
+        "10 + 5"
+    );
+    // But a single quoted piece with an expression evaluates.
+    assert_eq!(render_template("\"{x} + {y}\"", &v).unwrap(), "15");
 }

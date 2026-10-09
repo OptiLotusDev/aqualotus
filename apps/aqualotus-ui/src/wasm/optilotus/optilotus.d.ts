@@ -57,6 +57,11 @@ export function optilotus_listFunctions(): string;
 export function optilotus_print(fid: number, template: string): string;
 
 /**
+ * JS: `optilotus_renameFunction(id, name) -> string` (JSON)
+ */
+export function optilotus_renameFunction(id: number, name: string): string;
+
+/**
  * JS: `optilotus_return(fid, expr) -> string` (JSON)
  */
 export function optilotus_return(fid: number, expr: string): string;
@@ -96,6 +101,7 @@ export interface InitOutput {
     readonly optilotus_listCommands: (a: number) => [number, number];
     readonly optilotus_listFunctions: () => [number, number];
     readonly optilotus_print: (a: number, b: number, c: number) => [number, number];
+    readonly optilotus_renameFunction: (a: number, b: number, c: number) => [number, number];
     readonly optilotus_return: (a: number, b: number, c: number) => [number, number];
     readonly optilotus_runProgram: () => [number, number];
     readonly optilotus_setEntry: (a: number, b: number) => [number, number];

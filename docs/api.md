@@ -19,14 +19,29 @@ Pure, headless, unit-tested (`cargo test -p optilotus`):
 - `health_check() -> &str` — `"ok"` when linked and running.
 - Package registry (`Package`, one package, many functions, stable `main`):
   - `list_functions()`, `create_function(name)`, `get_function(id)`,
-    `delete_function(id)` (`main` protected), `clear_package()`.
+    `delete_function(id)` (`main` protected), `try_rename(id, new_name)`
+    (name only; stable id untouched), `clear_package()`.
   - Command builders (expand onto existing IR; `return` is `Op::Return`):
     `declare(fid, name, ty, init?)`, `assign(fid, name, expr)`,
     `print(fid, template)`, `return_(fid, expr)`, `list_commands(fid)`,
     `set_entry(fid, entry?)`, `set_next(fid, cmd, next?)`,
     `delete_command(fid, cmd)`.
+  - Branching (`Op::If`, nestable): `eval_cond(fid, expr)` evaluates an
+    expression into a hidden `ValueId` for use as a condition;
+    `if_(fid, condition, then_body, else_body?)` owns ordered child
+    command bodies; `add_raw_command(fid, command)` stages body commands
+    outside the main chain.
   - `run_main(sink)` / `run_main_with_limit(sink, limit)` — runs `main`
     by id only, with `name()` calls + `Return` shared over one step budget.
+- Expression evaluator (`expr` module):
+  - `eval_expr(expr, vars)` — evaluate arithmetic + comparison expression
+    with `{variable}` references. Comparisons (`== != < <= > >=`) and the
+    `true`/`false` literals produce `Bool`; `3 > "hello"` is a `TypeError`.
+  - `eval_expr_with(expr, vars, call)` — evaluate with `name()` call support.
+  - `render_template(template, vars)` — render print template with `{variable}` interpolation
+    and arithmetic expression evaluation.
+  - `check_var_name(raw)` — validate variable names (trimmed, no `{}"` chars).
+  - `MAX_EXPR_DEPTH` — maximum parenthesis nesting (64).
 
 Naming rule: every function in the UI that originates from the Optilotus
 API layer carries the `optilotus_` prefix with a camelCase remainder
@@ -46,6 +61,7 @@ Built with `npm run build:wasm` into `src/wasm/optilotus/`:
 - `optilotus_createFunction(name: string): string`
 - `optilotus_getFunction(id: number): string`
 - `optilotus_deleteFunction(id: number): string`
+- `optilotus_renameFunction(id: number, name: string): string`
 - `optilotus_clearPackage(): string`
 - `optilotus_declare(fid: number, name: string, ty: string, init?: string): string`
 - `optilotus_assign(fid: number, name: string, expr: string): string`
@@ -75,6 +91,9 @@ JSON:
 - `optilotus_createFunction(name): {status:"ok",id,name,isMain} | OptilotusError`
 - `optilotus_getFunction(id): ({status:"ok"} & FunctionInfo) | OptilotusError`
 - `optilotus_deleteFunction(id): {status:"ok",deleted} | OptilotusError`
+- `optilotus_renameFunction(id, name): {status:"ok",id,name,isMain} | OptilotusError`
+- `CommandSummary` gains kind `"if"` with optional `condition`,
+  `then_body`, `else_body` fields.
 - `optilotus_clearPackage(): {status:"ok",cleared}`
 - `optilotus_declare(fid, name, ty: OptilotusType, init?): {status:"ok",id} | OptilotusError`
 - `optilotus_assign(fid, name, expr): {status:"ok",id} | OptilotusError`
@@ -113,6 +132,42 @@ optilotus_listCommands(0);
 
 const result: RunResult = optilotus_runProgram();
 // {status:"ok", steps: 6, prints: 1, printed: ["42"]}
+```
+
+### Expression evaluation in templates
+
+When a print template is a single quoted string containing `{variable}`
+references and arithmetic operators, the interpolated result is evaluated
+as an arithmetic expression before printing:
+
+```ts
+optilotus_declare(0, "x", optilotus_type.int32, "10");
+optilotus_declare(0, "y", optilotus_type.int32, "5");
+optilotus_print(0, '"{x} + {y}"');
+// prints "15" (not "10 + 5")
+```
+
+Rules:
+- The entire quoted string must be a valid arithmetic expression after
+  interpolation. If it is not (e.g. `"Sum: {x} + {y}"`), the literal
+  interpolated string is printed.
+- All arithmetic operators are supported: `+`, `-`, `*`, `/`, `%`.
+- Parentheses and unary minus work as expected.
+- Variables must be declared before use; unknown variables are a typed error.
+- Type rules match `assign`: same-type arithmetic only, literals adopt
+  the variable's type.
+
+### Math expressions in assignment
+
+`assign` evaluates the expression and stores the result:
+
+```ts
+optilotus_declare(0, "x", optilotus_type.int32, "10");
+optilotus_declare(0, "y", optilotus_type.int32, "5");
+optilotus_declare(0, "z", optilotus_type.int32);
+optilotus_assign(0, "z", "{x} + {y}");
+optilotus_print(0, '"{z}"');
+// prints "15"
 ```
 
 - `create_function("main")` and duplicate names are rejected; `main`
