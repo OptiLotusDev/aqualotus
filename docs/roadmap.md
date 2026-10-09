@@ -354,8 +354,8 @@ Deliverables:
 - Agent context pack (this document + Design Principles)
 
 **Exit criteria:** The four foundation models are documented and agreed; codebase conventions are in place.
-
 ### Phase 1 — Headless Vertical Slice
+
 **Goal:** Prove Optilotus is independent of Aqualotus.
 
 ```
@@ -383,6 +383,8 @@ Deliverables:
 - Sequential scheduler
 - Minimal set of pure + effectful primitive commands
 - Headless test suite
+- Expression evaluator with arithmetic, `{variable}` references, and
+  template interpolation (print templates evaluate math expressions)
 
 **Exit criteria:** A program can be defined in IR, written to disk, read back, validated, executed, and produces a predictable result with zero UI code involved.
 

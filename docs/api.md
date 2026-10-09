@@ -27,6 +27,13 @@ Pure, headless, unit-tested (`cargo test -p optilotus`):
     `delete_command(fid, cmd)`.
   - `run_main(sink)` / `run_main_with_limit(sink, limit)` — runs `main`
     by id only, with `name()` calls + `Return` shared over one step budget.
+- Expression evaluator (`expr` module):
+  - `eval_expr(expr, vars)` — evaluate arithmetic expression with `{variable}` references.
+  - `eval_expr_with(expr, vars, call)` — evaluate with `name()` call support.
+  - `render_template(template, vars)` — render print template with `{variable}` interpolation
+    and arithmetic expression evaluation.
+  - `check_var_name(raw)` — validate variable names (trimmed, no `{}"` chars).
+  - `MAX_EXPR_DEPTH` — maximum parenthesis nesting (64).
 
 Naming rule: every function in the UI that originates from the Optilotus
 API layer carries the `optilotus_` prefix with a camelCase remainder
@@ -113,6 +120,42 @@ optilotus_listCommands(0);
 
 const result: RunResult = optilotus_runProgram();
 // {status:"ok", steps: 6, prints: 1, printed: ["42"]}
+```
+
+### Expression evaluation in templates
+
+When a print template is a single quoted string containing `{variable}`
+references and arithmetic operators, the interpolated result is evaluated
+as an arithmetic expression before printing:
+
+```ts
+optilotus_declare(0, "x", optilotus_type.int32, "10");
+optilotus_declare(0, "y", optilotus_type.int32, "5");
+optilotus_print(0, '"{x} + {y}"');
+// prints "15" (not "10 + 5")
+```
+
+Rules:
+- The entire quoted string must be a valid arithmetic expression after
+  interpolation. If it is not (e.g. `"Sum: {x} + {y}"`), the literal
+  interpolated string is printed.
+- All arithmetic operators are supported: `+`, `-`, `*`, `/`, `%`.
+- Parentheses and unary minus work as expected.
+- Variables must be declared before use; unknown variables are a typed error.
+- Type rules match `assign`: same-type arithmetic only, literals adopt
+  the variable's type.
+
+### Math expressions in assignment
+
+`assign` evaluates the expression and stores the result:
+
+```ts
+optilotus_declare(0, "x", optilotus_type.int32, "10");
+optilotus_declare(0, "y", optilotus_type.int32, "5");
+optilotus_declare(0, "z", optilotus_type.int32);
+optilotus_assign(0, "z", "{x} + {y}");
+optilotus_print(0, '"{z}"');
+// prints "15"
 ```
 
 - `create_function("main")` and duplicate names are rejected; `main`

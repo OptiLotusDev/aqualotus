@@ -620,6 +620,7 @@ impl<'a> TemplateParser<'a> {
     ) -> Result<(), ExprFail> {
         let open = self.pos;
         self.bump(); // consume opening quote
+        let mut interpolated = String::new();
         loop {
             match self.peek() {
                 None => {
@@ -629,16 +630,16 @@ impl<'a> TemplateParser<'a> {
                 }
                 Some('"') => {
                     self.bump();
-                    return Ok(());
+                    break;
                 }
                 Some('\\') => {
                     self.bump();
                     match self.peek() {
-                        Some('"') => out.push('"'),
-                        Some('\\') => out.push('\\'),
-                        Some('n') => out.push('\n'),
-                        Some('{') => out.push('{'),
-                        Some('}') => out.push('}'),
+                        Some('"') => interpolated.push('"'),
+                        Some('\\') => interpolated.push('\\'),
+                        Some('n') => interpolated.push('\n'),
+                        Some('{') => interpolated.push('{'),
+                        Some('}') => interpolated.push('}'),
                         Some(c) => {
                             return Err(ExprFail::Parse(format!(
                                 "parse error at {}: unknown escape '\\{c}'; use \\\" \\\\ \\n \\{{ or \\}}",
@@ -656,14 +657,26 @@ impl<'a> TemplateParser<'a> {
                 Some('{') => {
                     let name = self.parse_ref()?;
                     let value = vars.get(&name).ok_or(ExprFail::UnknownVariable(name))?;
-                    out.push_str(&value.to_string());
+                    interpolated.push_str(&value.to_string());
                 }
                 Some(c) => {
-                    out.push(c);
+                    interpolated.push(c);
                     self.bump();
                 }
             }
         }
+        // After interpolation, try evaluating the result as an arithmetic
+        // expression.  If it succeeds and produces a non-string value, use
+        // that; otherwise fall back to the literal interpolated string.
+        match eval_expr(&interpolated, vars) {
+            Ok(value) if !matches!(value, Value::String(_)) => {
+                out.push_str(&value.to_string());
+            }
+            _ => {
+                out.push_str(&interpolated);
+            }
+        }
+        Ok(())
     }
 
     fn parse_ref(&mut self) -> Result<String, ExprFail> {

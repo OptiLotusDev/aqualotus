@@ -92,15 +92,20 @@ We are creating a serious visual language that remains usable both with and with
 
 ```
 Package
- ├── Struct
- └── Function
-      ├── Command
-      ├── Command
-      └── Command
+  ├── Struct
+  └── Function
+       ├── Command
+       ├── Command
+       └── Command
 ```
 
-Classes are deliberately deferred.  
+Classes are deliberately deferred.
 We first prove the execution and data model before adding object-oriented ergonomics.
+
+Expressions use `{variable}` references with full arithmetic support
+(`+ - * / %`, parentheses, unary minus). Print templates with `{variable}`
+interpolation evaluate arithmetic expressions when the interpolated string
+forms a valid expression.
 
 ### 5.2 Explicit Value Flow
 
@@ -210,6 +215,8 @@ By the end of the project we will deliver:
 3. Deployments on Web, Desktop, and Mobile
 4. Clear documentation of the intermediate representation, identity model, and error model
 5. A codebase whose architectural boundaries are explicit and enforceable
+6. Expression evaluation in both assignment and print templates, with
+   arithmetic operator support and type-checked variable references
 
 ---
 
