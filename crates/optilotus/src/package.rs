@@ -129,6 +129,7 @@ pub enum CommandKind {
     Assign,
     Print,
     Return,
+    If,
 }
 
 /// User-facing command row for `list_commands`.
@@ -149,6 +150,12 @@ pub struct CommandSummary {
     pub expr: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub template: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition: Option<ValueId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub then_body: Option<Vec<CommandId>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub else_body: Option<Vec<CommandId>>,
 }
 
 fn default_value(ty: Type) -> Value {
@@ -365,6 +372,37 @@ impl Package {
         Ok(())
     }
 
+    /// Rename a function, preserving its stable `FunctionId`.
+    ///
+    /// Validates the new name (non-empty, no `{}"` chars, not `"main"` unless
+    /// renaming `main` itself, no duplicates). Mutates only the `name` field;
+    /// all IDs, references, and `ValueId`s are untouched.
+    pub fn try_rename(&mut self, id: FunctionId, new_name: &str) -> Result<(), PackageError> {
+        if !self.functions.contains_key(&id) {
+            return Err(PackageError::UnknownFunction(id));
+        }
+        let clean = new_name.trim().to_string();
+        if clean.is_empty() {
+            return Err(PackageError::InvalidName(
+                "function name must not be empty".to_string(),
+            ));
+        }
+        if clean.chars().any(|c| c == '{' || c == '}' || c == '"') {
+            return Err(PackageError::InvalidName(format!(
+                "invalid function name {clean:?}: must not contain '{{', '}}' or '\"'"
+            )));
+        }
+        if clean == MAIN_NAME && id != MAIN_ID {
+            return Err(PackageError::ReservedName(clean));
+        }
+        let current_name = self.functions.get(&id).expect("exists").name.clone();
+        if clean != current_name && self.functions.values().any(|f| f.name == clean) {
+            return Err(PackageError::DuplicateName(clean));
+        }
+        self.functions.get_mut(&id).expect("exists").name = clean;
+        Ok(())
+    }
+
     /// Wipe all but re-create an empty `main`.
     pub fn clear_package(&mut self) {
         self.functions.clear();
@@ -554,6 +592,9 @@ impl Package {
                 ty: Some(ty),
                 expr: init.map(|s| s.to_string()),
                 template: None,
+                condition: None,
+                then_body: None,
+                else_body: None,
             },
         );
         Ok(head_id)
@@ -611,6 +652,9 @@ impl Package {
                 ty: Some(ty),
                 expr: Some(expr.to_string()),
                 template: None,
+                condition: None,
+                then_body: None,
+                else_body: None,
             },
         );
         Ok(head_id)
@@ -649,6 +693,9 @@ impl Package {
                 ty: None,
                 expr: None,
                 template: Some(template.to_string()),
+                condition: None,
+                then_body: None,
+                else_body: None,
             },
         );
         Ok(head_id)
@@ -685,6 +732,107 @@ impl Package {
                 ty: None,
                 expr: Some(expr.to_string()),
                 template: None,
+                condition: None,
+                then_body: None,
+                else_body: None,
+            },
+        );
+        Ok(head_id)
+    }
+
+    /// Add a raw command to a function without linking it into the main chain.
+    ///
+    /// Used for building `if` body commands that are only reachable through
+    /// the parent `Op::If`. The caller is responsible for setting up the
+    /// body command `next` pointers.
+    pub fn add_raw_command(
+        &mut self,
+        fid: FunctionId,
+        command: Command,
+    ) -> Result<(), PackageError> {
+        if !self.functions.contains_key(&fid) {
+            return Err(PackageError::UnknownFunction(fid));
+        }
+        let func = self.function_mut(fid)?;
+        func.commands.push(command);
+        Ok(())
+    }
+
+    /// Evaluate `expr` into a fresh `ValueId`, linked into the main chain.
+    ///
+    /// Hidden intermediate (no user meta): the intended producer for an
+    /// [`Package::if_`] condition. Returns the output `ValueId`.
+    pub fn eval_cond(&mut self, fid: FunctionId, expr: &str) -> Result<ValueId, PackageError> {
+        if !self.functions.contains_key(&fid) {
+            return Err(PackageError::UnknownFunction(fid));
+        }
+        if expr.trim().is_empty() {
+            return Err(PackageError::InvalidCommand(
+                "condition expression must not be empty".to_string(),
+            ));
+        }
+        let vid = self.alloc_value_id();
+        let head_id = self.alloc_command_id();
+        let head = Command {
+            id: head_id,
+            op: Op::Compute {
+                expr: expr.to_string(),
+            },
+            inputs: vec![],
+            outputs: vec![vid],
+            next: None,
+        };
+        self.append_raw(fid, head, None);
+        Ok(vid)
+    }
+
+    /// `if(condition, then_body, else_body?)`: single `Op::If`.
+    ///
+    /// The condition is a `ValueId` that must produce a `Bool` at runtime
+    /// (see [`Package::eval_cond`]).
+    /// `then_body` and `else_body` are ordered lists of command IDs that
+    /// form the branches. The body commands must already exist in the
+    /// function (added via [`Package::add_raw_command`]).
+    pub fn if_(
+        &mut self,
+        fid: FunctionId,
+        condition: ValueId,
+        then_body: Vec<CommandId>,
+        else_body: Option<Vec<CommandId>>,
+    ) -> Result<CommandId, PackageError> {
+        if !self.functions.contains_key(&fid) {
+            return Err(PackageError::UnknownFunction(fid));
+        }
+        let head_id = self.alloc_command_id();
+        let head = Command {
+            id: head_id,
+            op: Op::If {
+                condition,
+                then_body: then_body.clone(),
+                else_body: else_body.clone(),
+            },
+            inputs: vec![],
+            outputs: vec![],
+            next: None,
+        };
+        self.append_raw(fid, head, None);
+        self.meta_mut(fid)?.insert(
+            head_id,
+            CommandSummary {
+                id: head_id,
+                kind: CommandKind::If,
+                next: None,
+                var: None,
+                ty: None,
+                expr: None,
+                template: None,
+                condition: Some(condition),
+                then_body: if then_body.is_empty() {
+                    None
+                } else {
+                    Some(then_body)
+                },
+                else_body: else_body.filter(|b| !b.is_empty()),
             },
         );
         Ok(head_id)
@@ -766,7 +914,7 @@ impl Package {
             .ok_or(PackageError::UnknownFunction(fid))?;
         let summary = meta.get(&head).ok_or(PackageError::UnknownCommand(head))?;
         match summary.kind {
-            CommandKind::Return => Ok(head),
+            CommandKind::Return | CommandKind::If => Ok(head),
             CommandKind::Declare | CommandKind::Assign | CommandKind::Print => {
                 let func = self
                     .functions

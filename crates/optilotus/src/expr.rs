@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -114,7 +115,7 @@ pub fn eval_expr_with(
     if parser.peek().is_none() {
         return Err(ExprFail::Parse("empty expression".to_string()));
     }
-    let out = parser.parse_add(vars)?;
+    let out = parser.parse_cmp(vars)?;
     parser.skip_ws();
     if let Some(c) = parser.peek() {
         return Err(ExprFail::Parse(format!(
@@ -151,6 +152,52 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
     fn parse_error(&self, what: &str) -> ExprFail {
         ExprFail::Parse(format!("parse error at {}: {what}", self.pos))
+    }
+
+    fn parse_cmp(&mut self, vars: &HashMap<String, Value>) -> Result<Partial, ExprFail> {
+        let left = self.parse_add(vars)?;
+        self.skip_ws();
+        let kind = match self.peek() {
+            Some('=') => {
+                self.bump();
+                if self.peek() == Some('=') {
+                    self.bump();
+                    CmpKind::Eq
+                } else {
+                    return Err(self.parse_error("expected '=='"));
+                }
+            }
+            Some('!') => {
+                self.bump();
+                if self.peek() == Some('=') {
+                    self.bump();
+                    CmpKind::Ne
+                } else {
+                    return Err(self.parse_error("expected '!='"));
+                }
+            }
+            Some('<') => {
+                self.bump();
+                if self.peek() == Some('=') {
+                    self.bump();
+                    CmpKind::Le
+                } else {
+                    CmpKind::Lt
+                }
+            }
+            Some('>') => {
+                self.bump();
+                if self.peek() == Some('=') {
+                    self.bump();
+                    CmpKind::Ge
+                } else {
+                    CmpKind::Gt
+                }
+            }
+            _ => return Ok(left),
+        };
+        let right = self.parse_add(vars)?;
+        compare(kind, left, right)
     }
 
     fn parse_add(&mut self, vars: &HashMap<String, Value>) -> Result<Partial, ExprFail> {
@@ -228,7 +275,25 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 let text = self.parse_string(vars)?;
                 Ok(Partial::Val(Value::String(text)))
             }
-            Some(c) if c.is_ascii_alphabetic() || c == '_' => self.parse_call(),
+            Some(c) if c.is_ascii_alphabetic() || c == '_' => {
+                let start = self.pos;
+                while let Some(c) = self.peek() {
+                    if c.is_ascii_alphanumeric() || c == '_' {
+                        self.bump();
+                    } else {
+                        break;
+                    }
+                }
+                let word = &self.text[start..self.pos];
+                match word {
+                    "true" => Ok(Partial::Val(Value::Bool(true))),
+                    "false" => Ok(Partial::Val(Value::Bool(false))),
+                    _ => {
+                        self.pos = start;
+                        self.parse_call()
+                    }
+                }
+            }
             Some(c) => Err(self.parse_error(&format!("unexpected {c:?}"))),
         }
     }
@@ -428,6 +493,112 @@ fn const_as_f64(n: Num) -> f64 {
     match n {
         Num::Int(i) => i as f64,
         Num::Float(f) => f,
+    }
+}
+
+/// Which comparison operation to apply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CmpKind {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+fn compare(kind: CmpKind, left: Partial, right: Partial) -> Result<Partial, ExprFail> {
+    match (left, right) {
+        (Partial::Const(a), Partial::Const(b)) => {
+            compare_const(kind, a, b).map(|b| Partial::Val(Value::Bool(b)))
+        }
+        (Partial::Val(v), Partial::Const(c)) => {
+            let typed = const_into_value(c, v.ty())?;
+            compare_vals(kind, &v, &typed)
+        }
+        (Partial::Const(c), Partial::Val(v)) => {
+            let typed = const_into_value(c, v.ty())?;
+            compare_vals(kind, &typed, &v)
+        }
+        (Partial::Val(a), Partial::Val(b)) => compare_vals(kind, &a, &b),
+    }
+}
+
+fn compare_const(kind: CmpKind, a: Num, b: Num) -> Result<bool, ExprFail> {
+    match (a, b) {
+        (Num::Int(x), Num::Int(y)) => Ok(apply_cmp_int(kind, x, y)),
+        (Num::Float(x), Num::Float(y)) => Ok(apply_cmp_float(kind, x, y)),
+        _ => Err(ExprFail::TypeMismatch(
+            "cannot compare int and float literals".to_string(),
+        )),
+    }
+}
+
+fn apply_cmp_int(kind: CmpKind, a: i128, b: i128) -> bool {
+    match kind {
+        CmpKind::Eq => a == b,
+        CmpKind::Ne => a != b,
+        CmpKind::Lt => a < b,
+        CmpKind::Le => a <= b,
+        CmpKind::Gt => a > b,
+        CmpKind::Ge => a >= b,
+    }
+}
+
+fn apply_cmp_float(kind: CmpKind, a: f64, b: f64) -> bool {
+    match kind {
+        CmpKind::Eq => a == b,
+        CmpKind::Ne => a != b,
+        CmpKind::Lt => a < b,
+        CmpKind::Le => a <= b,
+        CmpKind::Gt => a > b,
+        CmpKind::Ge => a >= b,
+    }
+}
+
+fn compare_vals(kind: CmpKind, left: &Value, right: &Value) -> Result<Partial, ExprFail> {
+    if left.ty() != right.ty() {
+        return Err(ExprFail::TypeMismatch(format!(
+            "cannot compare {:?} with {:?}",
+            left.ty(),
+            right.ty()
+        )));
+    }
+    let Some(ordering) = values_comparable(left, right) else {
+        return Err(ExprFail::TypeMismatch(format!(
+            "comparison not defined for {:?}",
+            left.ty()
+        )));
+    };
+    let result = match kind {
+        CmpKind::Eq => ordering == Ordering::Equal,
+        CmpKind::Ne => ordering != Ordering::Equal,
+        CmpKind::Lt => ordering == Ordering::Less,
+        CmpKind::Le => ordering != Ordering::Greater,
+        CmpKind::Gt => ordering == Ordering::Greater,
+        CmpKind::Ge => ordering != Ordering::Less,
+    };
+    Ok(Partial::Val(Value::Bool(result)))
+}
+
+fn values_comparable(left: &Value, right: &Value) -> Option<Ordering> {
+    match (left, right) {
+        (Value::Int8(a), Value::Int8(b)) => a.partial_cmp(b),
+        (Value::Int16(a), Value::Int16(b)) => a.partial_cmp(b),
+        (Value::Int32(a), Value::Int32(b)) => a.partial_cmp(b),
+        (Value::Int64(a), Value::Int64(b)) => a.partial_cmp(b),
+        (Value::Int128(a), Value::Int128(b)) => a.partial_cmp(b),
+        (Value::Uint8(a), Value::Uint8(b)) => a.partial_cmp(b),
+        (Value::Uint16(a), Value::Uint16(b)) => a.partial_cmp(b),
+        (Value::Uint32(a), Value::Uint32(b)) => a.partial_cmp(b),
+        (Value::Uint64(a), Value::Uint64(b)) => a.partial_cmp(b),
+        (Value::Uint128(a), Value::Uint128(b)) => a.partial_cmp(b),
+        (Value::Float32(a), Value::Float32(b)) => a.partial_cmp(b),
+        (Value::Float64(a), Value::Float64(b)) => a.partial_cmp(b),
+        (Value::String(a), Value::String(b)) => a.partial_cmp(b),
+        (Value::Char(a), Value::Char(b)) => a.partial_cmp(b),
+        (Value::Bool(a), Value::Bool(b)) => a.partial_cmp(b),
+        _ => None,
     }
 }
 

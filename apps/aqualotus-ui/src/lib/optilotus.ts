@@ -10,6 +10,7 @@ import init, {
   optilotus_listCommands as listCommands_wasm,
   optilotus_listFunctions as listFunctions_wasm,
   optilotus_print as print_wasm,
+  optilotus_renameFunction as renameFunction_wasm,
   optilotus_return as return_wasm,
   optilotus_runProgram as runProgram_wasm,
   optilotus_setEntry as setEntry_wasm,
@@ -114,13 +115,17 @@ export type FunctionInfo = {
 
 export type CommandSummary = {
   id: number;
-  kind: "declare" | "assign" | "print" | "return";
+  kind: "declare" | "assign" | "print" | "return" | "if";
   /** Following user command head; `null` at the tail end or when cleared. */
   next: number | null;
   var?: string;
   ty?: OptilotusType;
   expr?: string;
   template?: string;
+  /** `if` only: condition value id, branch bodies (ordered command ids). */
+  condition?: number;
+  then_body?: number[];
+  else_body?: number[];
 };
 
 export type OptilotusError = {
@@ -164,6 +169,16 @@ export function optilotus_deleteFunction(
 ): { status: "ok"; deleted: number } | OptilotusError {
   assertReady();
   return parseBridge(deleteFunction_wasm(id));
+}
+
+export function optilotus_renameFunction(
+  id: number,
+  name: string,
+):
+  | { status: "ok"; id: number; name: string; isMain: boolean }
+  | OptilotusError {
+  assertReady();
+  return parseBridge(renameFunction_wasm(id, name));
 }
 
 export function optilotus_clearPackage(): {

@@ -71,8 +71,8 @@ pub mod value;
 pub use bridge::{
     health_check, package_assign, package_clear, package_create_function, package_declare,
     package_delete_command, package_delete_function, package_get_function, package_list_commands,
-    package_list_functions, package_print, package_return, package_set_entry, package_set_next,
-    run_program, version, VERSION,
+    package_list_functions, package_print, package_rename_function, package_return,
+    package_set_entry, package_set_next, run_program, version, VERSION,
 };
 pub use error::ExecError;
 pub use exec::{
