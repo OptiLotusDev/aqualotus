@@ -1,14 +1,7 @@
-use std::collections::HashMap;
+mod common;
 
+use common::{eval, vars};
 use optilotus::{check_var_name, eval_expr, render_template, ExprFail, Value};
-
-fn vars(pairs: Vec<(String, Value)>) -> HashMap<String, Value> {
-    pairs.into_iter().collect()
-}
-
-fn eval(expr: &str) -> Result<Value, ExprFail> {
-    eval_expr(expr, &vars(vec![]))
-}
 
 #[test]
 fn precedence_and_parentheses() {

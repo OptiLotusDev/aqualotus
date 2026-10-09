@@ -158,6 +158,25 @@ pub struct CommandSummary {
     pub else_body: Option<Vec<CommandId>>,
 }
 
+impl CommandSummary {
+    /// Blank row: identity, kind and linkage only. Builders fill the
+    /// per-kind detail fields, so adding a field touches one place.
+    fn blank(id: CommandId, kind: CommandKind) -> Self {
+        Self {
+            id,
+            kind,
+            next: None,
+            var: None,
+            ty: None,
+            expr: None,
+            template: None,
+            condition: None,
+            then_body: None,
+            else_body: None,
+        }
+    }
+}
+
 fn default_value(ty: Type) -> Value {
     match ty {
         Type::Int8 => Value::Int8(0),
@@ -585,16 +604,10 @@ impl Package {
         self.meta_mut(fid)?.insert(
             head_id,
             CommandSummary {
-                id: head_id,
-                kind: CommandKind::Declare,
-                next: None,
                 var: Some(var),
                 ty: Some(ty),
                 expr: init.map(|s| s.to_string()),
-                template: None,
-                condition: None,
-                then_body: None,
-                else_body: None,
+                ..CommandSummary::blank(head_id, CommandKind::Declare)
             },
         );
         Ok(head_id)
@@ -645,16 +658,10 @@ impl Package {
         self.meta_mut(fid)?.insert(
             head_id,
             CommandSummary {
-                id: head_id,
-                kind: CommandKind::Assign,
-                next: None,
                 var: Some(var),
                 ty: Some(ty),
                 expr: Some(expr.to_string()),
-                template: None,
-                condition: None,
-                then_body: None,
-                else_body: None,
+                ..CommandSummary::blank(head_id, CommandKind::Assign)
             },
         );
         Ok(head_id)
@@ -686,16 +693,8 @@ impl Package {
         self.meta_mut(fid)?.insert(
             head_id,
             CommandSummary {
-                id: head_id,
-                kind: CommandKind::Print,
-                next: None,
-                var: None,
-                ty: None,
-                expr: None,
                 template: Some(template.to_string()),
-                condition: None,
-                then_body: None,
-                else_body: None,
+                ..CommandSummary::blank(head_id, CommandKind::Print)
             },
         );
         Ok(head_id)
@@ -725,16 +724,8 @@ impl Package {
         self.meta_mut(fid)?.insert(
             head_id,
             CommandSummary {
-                id: head_id,
-                kind: CommandKind::Return,
-                next: None,
-                var: None,
-                ty: None,
                 expr: Some(expr.to_string()),
-                template: None,
-                condition: None,
-                then_body: None,
-                else_body: None,
+                ..CommandSummary::blank(head_id, CommandKind::Return)
             },
         );
         Ok(head_id)
@@ -819,13 +810,6 @@ impl Package {
         self.meta_mut(fid)?.insert(
             head_id,
             CommandSummary {
-                id: head_id,
-                kind: CommandKind::If,
-                next: None,
-                var: None,
-                ty: None,
-                expr: None,
-                template: None,
                 condition: Some(condition),
                 then_body: if then_body.is_empty() {
                     None
@@ -833,6 +817,7 @@ impl Package {
                     Some(then_body)
                 },
                 else_body: else_body.filter(|b| !b.is_empty()),
+                ..CommandSummary::blank(head_id, CommandKind::If)
             },
         );
         Ok(head_id)
