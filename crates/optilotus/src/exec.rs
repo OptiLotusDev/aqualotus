@@ -270,21 +270,11 @@ fn run_command(
             then_body,
             else_body,
         } => {
-            let cond_value = values.get(condition).ok_or(ExecError::MissingValue {
-                command: command.id,
-                value: *condition,
-            })?;
-            if !matches!(cond_value, Value::Bool(_)) {
-                return Err(ExecError::TypeMismatch {
-                    command: command.id,
-                    detail: format!("if condition must be bool, got {}", cond_value.ty().tag()),
-                });
-            }
-            let body: &[CommandId] = if cond_value == &Value::Bool(true) {
-                then_body
-            } else {
-                else_body.as_ref().map(|v| v.as_slice()).unwrap_or(&[])
-            };
+            let body = select_if_body(
+                read_bool_condition(values, command.id, condition)?,
+                then_body,
+                else_body,
+            );
             let body_set: HashSet<CommandId> = body.iter().copied().collect();
             let mut body_current = body.first().copied();
             while let Some(body_id) = body_current {
@@ -319,6 +309,42 @@ fn read_input(
     values
         .get(&id)
         .ok_or(ExecError::MissingValue { command, value: id })
+}
+
+/// Read an `Op::If` condition as a bool. A missing value and a non-`Bool`
+/// value are typed errors carrying the `If` command's id.
+fn read_bool_condition(
+    values: &HashMap<ValueId, Value>,
+    command: CommandId,
+    condition: &ValueId,
+) -> Result<bool, ExecError> {
+    let cond_value = values.get(condition).ok_or(ExecError::MissingValue {
+        command,
+        value: *condition,
+    })?;
+    if cond_value == &Value::Bool(true) {
+        Ok(true)
+    } else if cond_value == &Value::Bool(false) {
+        Ok(false)
+    } else {
+        Err(ExecError::TypeMismatch {
+            command,
+            detail: format!("if condition must be bool, got {}", cond_value.ty().tag()),
+        })
+    }
+}
+
+/// Pick the taken branch of an `Op::If`: empty when taken without `else`.
+fn select_if_body<'b>(
+    cond: bool,
+    then_body: &'b [CommandId],
+    else_body: &'b Option<Vec<CommandId>>,
+) -> &'b [CommandId] {
+    if cond {
+        then_body
+    } else {
+        else_body.as_ref().map(|v| v.as_slice()).unwrap_or(&[])
+    }
 }
 
 fn map_expr_fail(err: ExprFail, command: CommandId) -> ExecError {
@@ -519,21 +545,11 @@ fn run_command_with_calls(
             then_body,
             else_body,
         } => {
-            let cond_value = values.get(condition).ok_or(ExecError::MissingValue {
-                command: command.id,
-                value: *condition,
-            })?;
-            if !matches!(cond_value, Value::Bool(_)) {
-                return Err(ExecError::TypeMismatch {
-                    command: command.id,
-                    detail: format!("if condition must be bool, got {}", cond_value.ty().tag()),
-                });
-            }
-            let body: &[CommandId] = if cond_value == &Value::Bool(true) {
-                then_body
-            } else {
-                else_body.as_ref().map(|v| v.as_slice()).unwrap_or(&[])
-            };
+            let body = select_if_body(
+                read_bool_condition(values, command.id, condition)?,
+                then_body,
+                else_body,
+            );
             let body_set: HashSet<CommandId> = body.iter().copied().collect();
             let mut body_current = body.first().copied();
             while let Some(body_id) = body_current {

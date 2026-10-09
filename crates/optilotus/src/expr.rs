@@ -526,26 +526,15 @@ fn compare(kind: CmpKind, left: Partial, right: Partial) -> Result<Partial, Expr
 
 fn compare_const(kind: CmpKind, a: Num, b: Num) -> Result<bool, ExprFail> {
     match (a, b) {
-        (Num::Int(x), Num::Int(y)) => Ok(apply_cmp_int(kind, x, y)),
-        (Num::Float(x), Num::Float(y)) => Ok(apply_cmp_float(kind, x, y)),
+        (Num::Int(x), Num::Int(y)) => Ok(apply_cmp(kind, x, y)),
+        (Num::Float(x), Num::Float(y)) => Ok(apply_cmp(kind, x, y)),
         _ => Err(ExprFail::TypeMismatch(
             "cannot compare int and float literals".to_string(),
         )),
     }
 }
 
-fn apply_cmp_int(kind: CmpKind, a: i128, b: i128) -> bool {
-    match kind {
-        CmpKind::Eq => a == b,
-        CmpKind::Ne => a != b,
-        CmpKind::Lt => a < b,
-        CmpKind::Le => a <= b,
-        CmpKind::Gt => a > b,
-        CmpKind::Ge => a >= b,
-    }
-}
-
-fn apply_cmp_float(kind: CmpKind, a: f64, b: f64) -> bool {
+fn apply_cmp<T: PartialOrd>(kind: CmpKind, a: T, b: T) -> bool {
     match kind {
         CmpKind::Eq => a == b,
         CmpKind::Ne => a != b,
