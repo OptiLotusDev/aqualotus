@@ -630,6 +630,21 @@ p {
   gap: 4px;
 }
 
+.fn-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fn-row .fn-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.fn-rename {
+  flex: none;
+}
+
 .fn-item {
   width: 100%;
   display: flex;

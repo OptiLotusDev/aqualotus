@@ -18,6 +18,7 @@ import {
   optilotus_listCommands,
   optilotus_listFunctions,
   optilotus_print,
+  optilotus_renameFunction,
   optilotus_return,
   optilotus_runProgram,
   optilotus_setEntry,
@@ -184,6 +185,7 @@ export function useProgram(
   selectCommand: (id: CommandId | null) => void;
   refresh: () => void;
   createFunction: (name: string) => void;
+  renameFunction: (id: FunctionId, name: string) => void;
   deleteFunction: (id: FunctionId) => void;
   addCommand: (fid: FunctionId, draft: CommandDraft) => void;
   declareVariable: (fid: FunctionId, name: string) => void;
@@ -745,6 +747,68 @@ export function useProgram(
       createDetached,
       runLinkPlan,
     ],
+  );
+
+  /**
+   * Rename a function in place (stable id, history-backed). The bridge
+   * rejects empty names, `{}"` chars, `"main"` for helpers, and
+   * duplicates; failures surface without recording history.
+   */
+  const renameFunction = useCallback(
+    (id: FunctionId, name: string): void => {
+      try {
+        const trimmed = name.trim();
+        if (trimmed === "") return;
+        const info = optilotus_getFunction(id);
+        if (isOptilotusError(info)) {
+          setSnapshot((prev) => failCommand(prev, info));
+          return;
+        }
+        if (info.name === trimmed) return;
+        const oldName = info.name;
+        setSnapshot((prev) => ({
+          ...prev,
+          busy: true,
+          actionError: "",
+          commandErrorId: null,
+          recoveryVar: null,
+        }));
+        const renamed = optilotus_renameFunction(id, trimmed);
+        if (isOptilotusError(renamed)) {
+          setSnapshot((prev) => failCommand(prev, renamed));
+          return;
+        }
+        load(id);
+        pushHistory({
+          label: `Rename function to ${trimmed}`,
+          undo: () => {
+            setSnapshot((prev) => ({ ...prev, busy: true }));
+            const back = optilotus_renameFunction(id, oldName);
+            if (isOptilotusError(back)) {
+              setSnapshot((prev) => failCommand(prev, back));
+              load(selectedIdRef.current);
+              return false;
+            }
+            load(selectedIdRef.current);
+            return true;
+          },
+          redo: () => {
+            setSnapshot((prev) => ({ ...prev, busy: true }));
+            const again = optilotus_renameFunction(id, trimmed);
+            if (isOptilotusError(again)) {
+              setSnapshot((prev) => failCommand(prev, again));
+              load(selectedIdRef.current);
+              return false;
+            }
+            load(id);
+            return true;
+          },
+        });
+      } catch (e: unknown) {
+        setSnapshot((prev) => failThrown(prev, e));
+      }
+    },
+    [load, pushHistory],
   );
 
   const addCommand = useCallback(
@@ -1709,6 +1773,7 @@ export function useProgram(
     selectCommand,
     refresh,
     createFunction,
+    renameFunction,
     deleteFunction,
     addCommand,
     declareVariable,

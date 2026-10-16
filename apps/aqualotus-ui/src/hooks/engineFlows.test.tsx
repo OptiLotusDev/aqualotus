@@ -28,7 +28,7 @@ async function freshHook(): Promise<{
 }
 
 /** Chain every block head-to-tail in creation order via port drops. */
-function chainInOrder(api: () => Api): void {
+function chainInOrder(api: () => Api, fid = 0): void {
   const ids = api().snapshot.commands.map((c) => c.id);
   for (let i = 1; i < ids.length; i += 1) {
     const list = api().snapshot.commands.map((c) => ({
@@ -41,7 +41,7 @@ function chainInOrder(api: () => Api): void {
     const plan = planDropLink(list, entry, prev, cur, "before");
     expect(plan).not.toBe(null);
     act(() => {
-      api().applyLinks(0, plan!);
+      api().applyLinks(fid, plan!);
     });
   }
 }
@@ -537,5 +537,89 @@ describe("real engine flows", () => {
     });
     expect(api().snapshot.functions).toHaveLength(1);
     expect(api().snapshot.actionError).toBe("");
+  });
+});
+
+describe("bool comparisons, if branches, and renames", () => {
+  it("assigns comparisons into a bool and prints true/false", async () => {
+    const { api } = await freshHook();
+    act(() => {
+      api().addCommand(0, { kind: "declare", name: "c", ty: "bool", init: "" });
+    });
+    act(() => {
+      api().addCommand(0, { kind: "assign", name: "c", expr: "3 > 2" });
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"{c}"' });
+    });
+    chainInOrder(api);
+    act(() => {
+      api().run();
+    });
+    expect(printed(api)).toEqual(["true"]);
+
+    const assignId =
+      api().snapshot.commands.find((c) => c.kind === "assign")?.id ?? -1;
+    act(() => {
+      api().replaceCommand(0, assignId, {
+        kind: "assign",
+        name: "c",
+        expr: "3 < 2",
+      });
+    });
+    act(() => {
+      api().run();
+    });
+    expect(printed(api)).toEqual(["false"]);
+  });
+
+  it("renames a helper and still calls it by the new name", async () => {
+    const { api } = await freshHook();
+    act(() => {
+      api().createFunction("helper");
+    });
+    const helper =
+      api().snapshot.functions.find((f) => f.name === "helper")?.id ?? -1;
+    act(() => {
+      api().selectFunction(helper);
+    });
+    act(() => {
+      api().addCommand(helper, {
+        kind: "declare",
+        name: "v",
+        ty: "int32",
+        init: "41",
+      });
+    });
+    act(() => {
+      api().addCommand(helper, { kind: "return", expr: "{v} + 1" });
+    });
+    // Wire the helper's own chain (creation leaves blocks detached).
+    chainInOrder(api, helper);
+    act(() => {
+      api().renameFunction(helper, "worker");
+    });
+    expect(api().snapshot.actionError).toBe("");
+    expect(
+      api().snapshot.functions.find((f) => f.id === helper)?.name,
+    ).toBe("worker");
+
+    act(() => {
+      api().selectFunction(0);
+    });
+    act(() => {
+      api().addCommand(0, { kind: "declare", name: "n", ty: "int32", init: "0" });
+    });
+    act(() => {
+      api().addCommand(0, { kind: "assign", name: "n", expr: "worker()" });
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"{n}"' });
+    });
+    chainInOrder(api);
+    act(() => {
+      api().run();
+    });
+    expect(printed(api)).toEqual(["42"]);
   });
 });
