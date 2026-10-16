@@ -6,13 +6,12 @@ import { useTheme } from "../hooks/useTheme";
 import type { RuntimeStatus } from "../hooks/useRuntime";
 import type { ProgramSnapshot } from "../hooks/useProgram";
 import type { CommandDraft } from "../lib/program";
-import { freshName } from "../lib/program";
+import { declareEditAffected, freshName } from "../lib/program";
 import type { LinkPlan } from "../lib/graph";
-import { planDropLink } from "../lib/graph";
+import { planChainAll, planDropLink } from "../lib/graph";
 import { findAvailableBlock } from "../lib/blocks";
-import type { LayoutMap } from "../lib/layout";
 import { LAYOUT_ROW_Y, LAYOUT_START_X } from "../lib/layout";
-import type { CommandId, FunctionId } from "../lib/optilotus";
+import type { CommandId, FunctionId, RunResult } from "../lib/optilotus";
 import Inspector from "./Inspector";
 import ProjectNavigator from "./ProjectNavigator";
 import Runner from "./Runner";
@@ -57,17 +56,6 @@ interface AppShellProps {
   readonly onDismissError: () => void;
 }
 
-/** One view-undo unit: block layout and zoom only, never semantics. */
-interface ViewEntry {
-  readonly seq: number;
-  readonly label: string;
-  readonly fid: FunctionId | null;
-  readonly posBefore: LayoutMap;
-  readonly posAfter: LayoutMap;
-  readonly zoomBefore: number;
-  readonly zoomAfter: number;
-}
-
 /** Default name for function blocks created from the library. */
 function nextHelperName(existing: readonly { name: string }[]): string {
   if (!existing.some((f) => f.name === "helper")) return "helper";
@@ -76,6 +64,13 @@ function nextHelperName(existing: readonly { name: string }[]): string {
     n += 1;
   }
   return `helper${n}`;
+}
+
+/** Compact runner pill dot state for the collapsed dock. */
+function pillState(running: boolean, run: RunResult | null): string {
+  if (running) return "busy";
+  if (run === null) return "idle";
+  return run.status === "ok" ? "ready" : "error";
 }
 
 /** Compact runner pill text for the collapsed dock. */
@@ -99,7 +94,7 @@ function runnerSummary(program: ProgramSnapshot): string {
  * to the drawer / sheet / inline patterns via CSS.
  */
 export default function AppShell(props: AppShellProps): ReactElement {
-  const { runtime, program, issueSeq } = props;
+  const { runtime, program } = props;
   const compact = useIsMobile();
   const { theme, toggle: toggleTheme } = useTheme();
   const [navOpen, setNavOpen] = useState<boolean>(false);
@@ -107,6 +102,10 @@ export default function AppShell(props: AppShellProps): ReactElement {
   const [leftOpen, setLeftOpen] = useState<boolean>(false);
   const [inspOpen, setInspOpen] = useState<boolean>(false);
   const [runOpen, setRunOpen] = useState<boolean>(false);
+  // Runs shelved by the collapse arrow: the panel stays hidden for this
+  // exact result until a new run arrives. Without this, auto-opening the
+  // panel on every run would make the ▾ collapse button a no-op.
+  const [shelvedRun, setShelvedRun] = useState<RunResult | null>(null);
 
   const fid = program.selectedId;
   const commandIds = useMemo(
@@ -117,85 +116,54 @@ export default function AppShell(props: AppShellProps): ReactElement {
   // hierarchy owns world layout), so auto-placement chains blocks in a
   // horizontal row matching the left → right ports.
   const layout = useLayout(fid, commandIds, LAYOUT_START_X, LAYOUT_ROW_Y);
-  const { moveBlockIn, replaceAll } = layout;
+  const { moveBlockIn } = layout;
 
   // Edited blocks keep their position: Apply-edit recreates the command
   // under a fresh id, and the capture below hands the old position to
-  // the newcomer once it appears in the refreshed projection.
-  const { captureInherit } = useInheritPosition(
+  // the newcomer once it appears in the refreshed projection. Undo/redo
+  // recreations (fresh ids too) reclaim their remembered spot via the
+  // armed restore in `undoAll`/`redoAll` below.
+  const { capturePositions, armRestore } = useInheritPosition(
     program.commandsByFunction,
     program.busy,
     moveBlockIn,
+    layout.allPositions,
   );
 
-  /** Apply-edit wrapper that preserves the edited block's position. */
+  /** Apply-edit wrapper that preserves the edited blocks' positions. */
   function replaceWithPosition(
     target: FunctionId,
     oldId: CommandId,
     draft: CommandDraft,
   ): void {
     const cmds = program.commandsByFunction[target] ?? [];
-    captureInherit(
+    // A declare type/name edit also rebuilds its dependent assigns (same
+    // variable: their engine types must follow the declaration), so every
+    // affected block hands its spot to its own recreation, in order.
+    const oldCmd = cmds.find((c) => c.id === oldId) ?? null;
+    // A declare-to-declare edit recreates exactly `declareEditAffected`
+    // (the declare, its bound assigns, ref-holding blocks on rename), so
+    // capture spots for that same set, in command order. Anything not
+    // recreated simply never consumes its spot.
+    const affectedIds =
+      oldCmd !== null &&
+      oldCmd.kind === "declare" &&
+      draft.kind === "declare"
+        ? declareEditAffected(cmds, oldId, draft.name)
+        : cmds.some((c) => c.id === oldId)
+          ? [oldId]
+          : [];
+    const allPos = layout.allPositions[target] ?? {};
+    capturePositions(
       target,
-      layout.allPositions[target]?.[oldId] ?? {
-        x: LAYOUT_START_X,
-        y: LAYOUT_ROW_Y,
-      },
+      affectedIds.map(
+        (id) => allPos[id] ?? { x: LAYOUT_START_X, y: LAYOUT_ROW_Y },
+      ),
       cmds.map((c) => c.id),
     );
     props.onReplaceCommand(target, oldId, draft);
   }
 
-  // View-undo stacks (layout + zoom), stored in refs with synced tops
-  // so renders never read refs. Sequenced against semantic history so
-  // one undo/redo pair serves the newest action first.
-  const viewPastRef = useRef<ViewEntry[]>([]);
-  const viewFutureRef = useRef<ViewEntry[]>([]);
-  const [viewTops, setViewTops] = useState<{
-    undoLabel: string | null;
-    redoLabel: string | null;
-    undoSeq: number | null;
-    redoSeq: number | null;
-  }>({ undoLabel: null, redoLabel: null, undoSeq: null, redoSeq: null });
-
-  const syncViewTops = useCallback((): void => {
-    const past = viewPastRef.current;
-    const future = viewFutureRef.current;
-    setViewTops({
-      undoLabel:
-        past.length > 0 ? (past[past.length - 1]?.label ?? null) : null,
-      redoLabel:
-        future.length > 0 ? (future[future.length - 1]?.label ?? null) : null,
-      undoSeq:
-        past.length > 0 ? (past[past.length - 1]?.seq ?? null) : null,
-      redoSeq:
-        future.length > 0 ? (future[future.length - 1]?.seq ?? null) : null,
-    });
-  }, []);
-
-  const pushView = useCallback(
-    (
-      target: FunctionId | null,
-      label: string,
-      posBefore: LayoutMap,
-      posAfter: LayoutMap,
-      zoomBefore: number,
-      zoomAfter: number,
-    ): void => {
-      viewPastRef.current.push({
-        seq: issueSeq(),
-        label,
-        fid: target,
-        posBefore,
-        posAfter,
-        zoomBefore,
-        zoomAfter,
-      });
-      viewFutureRef.current = [];
-      syncViewTops();
-    },
-    [issueSeq, syncViewTops],
-  );
   const zoomCtlRef = useRef<{
     getZoom: () => number;
     setZoom: (z: number) => void;
@@ -228,71 +196,28 @@ export default function AppShell(props: AppShellProps): ReactElement {
   const navVisible = compact && navOpen;
   const sheetVisible = compact && sheetOpen;
 
-  const undoView = useCallback(
-    (entry: ViewEntry, dir: "undo" | "redo"): void => {
-      if (entry.fid !== null) {
-        replaceAll(
-          entry.fid,
-          dir === "undo" ? entry.posBefore : entry.posAfter,
-        );
-      }
-      zoomCtlRef.current?.setZoom(
-        dir === "undo" ? entry.zoomBefore : entry.zoomAfter,
-      );
-    },
-    [replaceAll],
-  );
-
+  // Undo/redo is blocks-only: layout drags, pan, and zoom are visual
+  // state with no undo entries — the buttons replay semantic history
+  // (add / delete / edit / rewire) and nothing else.
   const undoAll = useCallback((): void => {
-    const past = viewPastRef.current;
-    const vTop = past.length > 0 ? past[past.length - 1] : undefined;
-    if (
-      vTop !== undefined &&
-      (props.undoSeq === null || vTop.seq > props.undoSeq)
-    ) {
-      past.pop();
-      undoView(vTop, "undo");
-      viewFutureRef.current.push(vTop);
-      syncViewTops();
-      return;
-    }
+    // Semantic undo recreates blocks under fresh ids: arm the position
+    // memory so the restored block reappears where it was, not at the
+    // row end.
+    armRestore();
     props.onUndo();
-  }, [props, undoView, syncViewTops]);
+  }, [props, armRestore]);
 
   const redoAll = useCallback((): void => {
-    const future = viewFutureRef.current;
-    const vTop = future.length > 0 ? future[future.length - 1] : undefined;
-    if (
-      vTop !== undefined &&
-      (props.redoSeq === null || vTop.seq > props.redoSeq)
-    ) {
-      future.pop();
-      undoView(vTop, "redo");
-      viewPastRef.current.push(vTop);
-      syncViewTops();
-      return;
-    }
+    armRestore();
     props.onRedo();
-  }, [props, undoView, syncViewTops]);
+  }, [props, armRestore]);
 
-  const canUndoAll = props.canUndo || viewTops.undoSeq !== null;
-  const canRedoAll = props.canRedo || viewTops.redoSeq !== null;
+  const canUndoAll = props.canUndo;
+  const canRedoAll = props.canRedo;
   const undoTitle =
-    viewTops.undoLabel !== null &&
-    (props.undoSeq === null ||
-      (viewTops.undoSeq ?? 0) > props.undoSeq)
-      ? `Undo ${viewTops.undoLabel}`
-      : props.undoLabel !== null
-        ? `Undo ${props.undoLabel}`
-        : "Nothing to undo";
+    props.undoLabel !== null ? `Undo ${props.undoLabel}` : "Nothing to undo";
   const redoTitle =
-    viewTops.redoLabel !== null &&
-    (props.redoSeq === null ||
-      (viewTops.redoSeq ?? 0) > props.redoSeq)
-      ? `Redo ${viewTops.redoLabel}`
-      : props.redoLabel !== null
-        ? `Redo ${props.redoLabel}`
-        : "Nothing to redo";
+    props.redoLabel !== null ? `Redo ${props.redoLabel}` : "Nothing to redo";
 
   /** Deleting the selected block closes the inspector with it. */
   const deleteBlock = useCallback(
@@ -372,30 +297,33 @@ export default function AppShell(props: AppShellProps): ReactElement {
     }
     if (def.draft === undefined) return;
     // Friendly defaults keep click-to-add valid: fresh variable names,
-    // a literal template, and a neutral return value. Calls reuse the
-    // first declared variable when one exists; otherwise the runtime
-    // error names the fix ("declare it first"). The bridge still
-    // validates everything; the inspector refines afterwards.
+    // a literal template, and a neutral return value. Assigns and calls
+    // target the most recently declared variable (the one the user most
+    // likely just created); otherwise the runtime error names the fix
+    // ("declare it first"). The bridge still validates everything; the
+    // inspector refines afterwards.
     const targetCommands =
       target === fid ? program.commands : (program.commandsByFunction[target] ?? []);
     const taken = targetCommands.flatMap((c) =>
       c.var === undefined ? [] : [c.var],
     );
-    const firstVar =
-      targetCommands.find((c) => c.kind === "declare")?.var ?? null;
+    const lastVar =
+      [...targetCommands].reverse().find((c) => c.kind === "declare")?.var ??
+      null;
     const draft = def.draft;
     let filled: CommandDraft = draft;
     if (draft.kind === "declare") {
       filled = { ...draft, name: freshName(taken, "x") };
     } else if (draft.kind === "assign") {
-      // Calls target the first declared variable (the callee name is
-      // edited in the inspector); plain assigns keep a typed name.
+      // Calls target the most recently declared variable (the callee
+      // name is edited in the inspector); plain assigns keep a typed
+      // name.
       const name =
         def.kind === "call"
-          ? (firstVar ?? "result")
+          ? (lastVar ?? "result")
           : draft.name !== ""
             ? draft.name
-            : (firstVar ?? "x");
+            : (lastVar ?? "x");
       filled = {
         ...draft,
         name,
@@ -428,6 +356,22 @@ export default function AppShell(props: AppShellProps): ReactElement {
     if (planned === null) return false;
     props.onApplyLinks(target, planned);
     return true;
+  }
+
+  /** One-click wiring: chain every block head-to-tail in list order and
+   * establish the entry point, so a canvas of orphan blocks becomes
+   * runnable without hand-dragging every wire. No-op when there is
+   * nothing to connect. */
+  function connectInOrder(): void {
+    if (fid === null) return;
+    const cmds = program.commandsByFunction[fid] ?? [];
+    const entry = program.selected?.entry ?? null;
+    const planned = planChainAll(
+      cmds.map((c) => ({ id: c.id, next: c.next ?? null })),
+      entry,
+    );
+    if (planned === null) return;
+    props.onApplyLinks(fid, planned);
   }
 
   /** Select a block and bring it into view (run-error handoff). */
@@ -511,36 +455,16 @@ export default function AppShell(props: AppShellProps): ReactElement {
       </div>
     ) : null;
 
-  // The runner panel opens for errors without a sync effect: visibility
-  // derives during render from the manual toggle OR a live error.
-  const runnerVisible = runOpen || program.actionError !== "";
-
-  /** Block drag commit with view-undo recording. */
-  const moveBlockWithHistory = useCallback(
-    (target: FunctionId, id: CommandId, pos: { x: number; y: number }): void => {
-      const before = layout.allPositions[target] ?? {};
-      moveBlockIn(target, id, pos);
-      const ctl = zoomCtlRef.current;
-      const z = ctl?.getZoom() ?? 1;
-      pushView(target, "Move block", before, { ...before, [id]: pos }, z, z);
-    },
-    [layout.allPositions, moveBlockIn, pushView],
-  );
-
-  /** Discrete zoom commit with view-undo recording. */
-  const zoomSettled = useCallback(
-    (before: number, after: number): void => {
-      pushView(
-        fid,
-        "Zoom",
-        { ...layout.positions },
-        { ...layout.positions },
-        before,
-        after,
-      );
-    },
-    [pushView, layout.positions, fid],
-  );
+  // The runner panel opens for errors AND for runs without a sync
+  // effect: visibility derives during render from the manual toggle, a
+  // live error, or an unshelved run result (a successful run must show
+  // its printed output, while the ▾ arrow can still shelve it away
+  // until the next run).
+  const runnerVisible =
+    runOpen ||
+    program.running ||
+    (program.run !== null && program.run !== shelvedRun) ||
+    program.actionError !== "";
 
   const leftPanel = (
     <ProjectNavigator
@@ -593,9 +517,59 @@ export default function AppShell(props: AppShellProps): ReactElement {
     />
   );
 
+  // Blocks outside the entry chain never execute: with several
+  // disconnected rows only the connected chain prints, and with no entry
+  // point the run is a flat no-op. Offer one-click wiring in list order
+  // instead of leaving users to discover port-dragging.
+  const entry = program.selected?.entry ?? null;
+  const orphanCount = (() => {
+    if (fid === null || program.commands.length === 0) return 0;
+    if (entry === null) return program.commands.length;
+    const nextOf = new Map(
+      program.commands.map((c) => [c.id, c.next ?? null]),
+    );
+    const seen = new Set<number>();
+    let cur: number | null = entry;
+    let guard = 0;
+    while (cur !== null && !seen.has(cur) && guard <= nextOf.size) {
+      seen.add(cur);
+      guard += 1;
+      cur = nextOf.get(cur) ?? null;
+    }
+    return program.commands.filter((c) => !seen.has(c.id)).length;
+  })();
+  const entryNotice =
+    fid !== null &&
+    program.selected !== null &&
+    orphanCount > 0 &&
+    !program.running ? (
+      <div className="notice" role="status">
+        <div className="notice-title">
+          {entry === null
+            ? "Blocks aren't connected"
+            : `${orphanCount} of ${program.commands.length} blocks aren't connected`}
+        </div>
+        <div>
+          {entry === null
+            ? "No entry point — the blocks run in list order once connected."
+            : "Only the connected chain runs — the rest never print."}
+        </div>
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          style={{ marginTop: 8 }}
+          disabled={program.busy}
+          onClick={connectInOrder}
+        >
+          Connect blocks in order
+        </button>
+      </div>
+    ) : null;
+
   const runner = (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {errorNotice}
+      {entryNotice}
       <Runner
         run={program.run}
         running={program.running}
@@ -771,14 +745,13 @@ export default function AppShell(props: AppShellProps): ReactElement {
                 onSelectFunction={props.onSelectFunction}
                 onSelectCommand={selectCommandWithPanel}
                 onReconnect={reconnect}
-                onMoveBlock={moveBlockWithHistory}
+                onMoveBlock={moveBlockIn}
                 onDropBlock={(target, kind, pos) => {
                   layout.placeNextAt(pos);
                   addLibraryBlockFor(target, kind);
                 }}
                 onRegisterDrop={registerDrop}
                 onRegisterZoom={registerZoom}
-                onZoomSettled={zoomSettled}
                 toolbarExtra={undoRedoTheme("")}
                 onRequestLibrary={() => {
                   if (compact) {
@@ -827,7 +800,10 @@ export default function AppShell(props: AppShellProps): ReactElement {
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
-                    onClick={() => setRunOpen(false)}
+                    onClick={() => {
+                      setShelvedRun(program.run);
+                      setRunOpen(false);
+                    }}
                     aria-label="Collapse runner"
                   >
                     ▾
@@ -844,15 +820,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
               >
                 <span
                   className="status-dot"
-                  data-state={
-                    program.running
-                      ? "busy"
-                      : program.run === null
-                        ? "idle"
-                        : program.run.status === "ok"
-                          ? "ready"
-                          : "error"
-                  }
+                  data-state={pillState(program.running, program.run)}
                 >
                   <i aria-hidden="true" />
                   {runnerSummary(program)}

@@ -1,6 +1,6 @@
 import { memo, type ReactElement } from "react";
 import type { CommandSummary } from "../lib/optilotus";
-import { commandMainLine } from "../lib/program";
+import { commandMainLine, displayDeclareValue } from "../lib/program";
 import type { Pos } from "../lib/layout";
 
 interface VisualBlockProps {
@@ -63,10 +63,7 @@ function VisualBlock(props: VisualBlockProps): ReactElement {
           <span className="vblock-var">var: {command.var ?? "?"}</span>
           <span className="vblock-type">type: {command.ty ?? "?"}</span>
           <span className="vblock-type">
-            value:{" "}
-            {command.expr !== undefined && command.expr !== ""
-              ? command.expr
-              : "—"}
+            value: {displayDeclareValue(command.ty, command.expr) || "—"}
           </span>
         </>
       ) : (

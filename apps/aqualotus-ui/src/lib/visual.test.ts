@@ -3,6 +3,7 @@ import { BLOCKS, filterBlocks, findAvailableBlock } from "./blocks";
 import {
   edgeEnds,
   edgePath,
+  planChainAll,
   planDropLink,
   planLinkAfter,
   planLinkBefore,
@@ -17,7 +18,7 @@ describe("filterBlocks", () => {
     expect(filterBlocks("   ").length).toBe(BLOCKS.length);
   });
 
-  it("matches labels and aliases exactly", () => {
+  it("matches substrings of labels and aliases", () => {
     expect(filterBlocks("declare variable").some((b) => b.kind === "declare")).toBe(
       true,
     );
@@ -26,11 +27,19 @@ describe("filterBlocks", () => {
     expect(filterBlocks("no-such-block")).toEqual([]);
   });
 
-  it("finds nothing for partial or category-only queries", () => {
-    // "function" is an exact label hit; "program" names no block.
-    expect(filterBlocks("function").map((b) => b.kind)).toEqual(["function"]);
+  it("finds blocks by partial text, not by category", () => {
+    // "fun"/"func" match Function and Call Function; "decl" matches
+    // Declare Variable; "program" names no block.
+    expect(filterBlocks("fun").map((b) => b.kind)).toEqual([
+      "function",
+      "call",
+    ]);
+    expect(filterBlocks("func").map((b) => b.kind)).toEqual([
+      "function",
+      "call",
+    ]);
+    expect(filterBlocks("decl").map((b) => b.kind)).toEqual(["declare"]);
     expect(filterBlocks("program")).toEqual([]);
-    expect(filterBlocks("decl")).toEqual([]);
   });
 
   it("lists exactly the api.md surface — nothing invented", () => {
@@ -98,14 +107,14 @@ describe("edgePath", () => {
 });
 
 describe("edgeEnds", () => {
-  it("routes stacked blocks vertically", () => {
+  it("anchors stacked blocks on the port dots", () => {
     const ends = edgeEnds(
       { x: 0, y: 0, w: 100, h: 50 },
       { x: 0, y: 200, w: 100, h: 50 },
     );
-    expect(ends.horizontal).toBe(false);
-    expect([ends.x1, ends.y1]).toEqual([50, 50]);
-    expect([ends.x2, ends.y2]).toEqual([50, 200]);
+    expect(ends.horizontal).toBe(true);
+    expect([ends.x1, ends.y1]).toEqual([100, 25]);
+    expect([ends.x2, ends.y2]).toEqual([0, 225]);
   });
 
   it("routes side-by-side blocks horizontally", () => {
@@ -118,14 +127,14 @@ describe("edgeEnds", () => {
     expect([ends.x2, ends.y2]).toEqual([300, 25]);
   });
 
-  it("routes upward links top-to-bottom", () => {
+  it("anchors upward links on the port dots too", () => {
     const ends = edgeEnds(
       { x: 0, y: 200, w: 100, h: 50 },
       { x: 0, y: 0, w: 100, h: 50 },
     );
-    expect(ends.horizontal).toBe(false);
-    expect([ends.x1, ends.y1]).toEqual([50, 200]);
-    expect([ends.x2, ends.y2]).toEqual([50, 50]);
+    expect(ends.horizontal).toBe(true);
+    expect([ends.x1, ends.y1]).toEqual([100, 225]);
+    expect([ends.x2, ends.y2]).toEqual([0, 25]);
   });
 });
 
@@ -327,5 +336,84 @@ describe("predecessorsOf", () => {
         { id: 2, next: null },
       ]).get(2),
     ).toBe(1);
+  });
+});
+
+describe("null-entry wiring", () => {
+  it("body drops establish the head when no entry exists", () => {
+    const cmds = [
+      { id: 1, next: null },
+      { id: 2, next: null },
+    ];
+    expect(planLinkAfter(cmds, null, 1, 2)).toEqual({
+      edits: [
+        { id: 1, next: 2 },
+        { id: 2, next: null },
+      ],
+      entry: { type: "set", entry: 1 },
+    });
+  });
+
+  it("mid-chain inserts establish the head when no entry exists", () => {
+    const cmds = [
+      { id: 1, next: 2 },
+      { id: 2, next: 3 },
+      { id: 3, next: null },
+    ];
+    // Move 3 right before 2 in 1->2->3 with a cleared entry: the result
+    // 1->3->2 keeps head 1, which becomes the entry.
+    const plan = planLinkBefore(cmds, null, 2, 3);
+    expect(plan?.entry).toEqual({ type: "set", entry: 1 });
+  });
+
+  it("leaves a live entry untouched", () => {
+    const cmds = [
+      { id: 1, next: 2 },
+      { id: 2, next: 3 },
+      { id: 3, next: null },
+      { id: 4, next: null },
+    ];
+    expect(planLinkAfter(cmds, 1, 1, 4)?.entry).toEqual({ type: "keep" });
+  });
+});
+
+describe("planChainAll", () => {
+  it("chains orphans in order and sets the entry", () => {
+    expect(
+      planChainAll(
+        [
+          { id: 1, next: null },
+          { id: 2, next: null },
+          { id: 3, next: null },
+        ],
+        null,
+      ),
+    ).toEqual({
+      edits: [
+        { id: 1, next: 2 },
+        { id: 2, next: 3 },
+      ],
+      entry: { type: "set", entry: 1 },
+    });
+  });
+
+  it("establishes the entry for a single block", () => {
+    expect(planChainAll([{ id: 1, next: null }], null)).toEqual({
+      edits: [],
+      entry: { type: "set", entry: 1 },
+    });
+  });
+
+  it("is a no-op when already chained with a live entry", () => {
+    expect(
+      planChainAll(
+        [
+          { id: 1, next: 2 },
+          { id: 2, next: null },
+        ],
+        1,
+      ),
+    ).toBe(null);
+    expect(planChainAll([], null)).toBe(null);
   });
 });

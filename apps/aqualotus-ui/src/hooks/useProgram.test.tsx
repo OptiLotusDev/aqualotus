@@ -632,6 +632,128 @@ describe("useProgram history and error semantics", () => {
     const omitted = api().snapshot.commands.find((c) => c.var === "v0");
     expect(omitttedExpr(omitted)).toBe(undefined);
   });
+
+  it("edits a declare to a new type and keeps it", () => {
+    const { result } = setup();
+    const api = (): ReturnType<typeof useProgram> => result.current;
+    act(() => {
+      api().addCommand(0, declareDraft("x"));
+    });
+    const x = api().snapshot.commands[0]?.id ?? -1;
+    act(() => {
+      api().replaceCommand(0, x, {
+        kind: "declare",
+        name: "x",
+        ty: "string",
+        init: "hi",
+      });
+    });
+    expect(api().snapshot.actionError).toBe("");
+    expect(api().snapshot.commands).toHaveLength(1);
+    expect(api().snapshot.commands[0]?.ty).toBe("string");
+    // Undo restores the old type in place; redo reapplies the new one.
+    act(() => {
+      api().undo();
+    });
+    expect(api().snapshot.commands[0]?.ty).toBe("int32");
+    act(() => {
+      api().redo();
+    });
+    expect(api().snapshot.commands[0]?.ty).toBe("string");
+  });
+
+  it("keeps the old declare when the new type rejects the kept value", () => {
+    const { result } = setup();
+    const api = (): ReturnType<typeof useProgram> => result.current;
+    act(() => {
+      api().addCommand(0, declareDraft("x"));
+    });
+    const x = api().snapshot.commands[0]?.id ?? -1;
+    // "1" is not a bool literal: the edit fails and the int32 block
+    // survives untouched instead of being deleted.
+    act(() => {
+      api().replaceCommand(0, x, {
+        kind: "declare",
+        name: "x",
+        ty: "bool",
+        init: "1",
+      });
+    });
+    expect(api().snapshot.actionError).not.toBe("");
+    expect(api().snapshot.commands).toHaveLength(1);
+    expect(api().snapshot.commands[0]?.ty).toBe("int32");
+  });
+
+  it("ignores no-op applies without history churn", () => {
+    const { result } = setup();
+    const api = (): ReturnType<typeof useProgram> => result.current;
+    act(() => {
+      api().addCommand(0, declareDraft("x"));
+    });
+    expect(api().canUndo).toBe(true);
+    const x = api().snapshot.commands[0]?.id ?? -1;
+    // Identical re-apply: no churn, no history entry — the next undo
+    // removes the block itself instead of "undoing" a phantom edit.
+    act(() => {
+      api().replaceCommand(0, x, declareDraft("x"));
+    });
+    expect(api().snapshot.actionError).toBe("");
+    act(() => {
+      api().undo();
+    });
+    expect(api().snapshot.commands).toHaveLength(0);
+    expect(api().canUndo).toBe(false);
+  });
+
+  it("rebuilds dependent assigns when a declare type changes", () => {
+    const { result } = setup();
+    const api = (): ReturnType<typeof useProgram> => result.current;
+    act(() => {
+      api().addCommand(0, declareDraft("x"));
+    });
+    act(() => {
+      api().addCommand(0, { kind: "assign", name: "x", expr: "{x} + 1" });
+    });
+    const before = api().snapshot.commands.map((c) => c.id);
+    expect(before).toHaveLength(2);
+    const declareId = api().snapshot.commands[0]?.id ?? -1;
+
+    // int32 -> string: the declare swaps AND the assign is rebuilt so
+    // its baked-in engine type follows (no stale TypeMismatch at run).
+    act(() => {
+      api().replaceCommand(0, declareId, {
+        kind: "declare",
+        name: "x",
+        ty: "string",
+        init: "hi",
+      });
+    });
+    expect(api().snapshot.actionError).toBe("");
+    const cmds = api().snapshot.commands;
+    expect(cmds).toHaveLength(2);
+    expect(cmds.map((c) => c.kind)).toEqual(["declare", "assign"]);
+    expect(cmds[0]?.ty).toBe("string");
+    expect(cmds[1]).toMatchObject({ var: "x", expr: "{x} + 1" });
+    // Both blocks were recreated under fresh ids (deleted ids stay dead).
+    expect(cmds[0]?.id).not.toBe(before[0]);
+    expect(cmds[1]?.id).not.toBe(before[1]);
+
+    // One atomic undo restores the old declare and the old assign.
+    act(() => {
+      api().undo();
+    });
+    expect(api().snapshot.actionError).toBe("");
+    const undone = api().snapshot.commands;
+    expect(undone).toHaveLength(2);
+    expect(undone[0]?.ty).toBe("int32");
+    expect(undone[1]).toMatchObject({ var: "x", expr: "{x} + 1" });
+
+    act(() => {
+      api().redo();
+    });
+    expect(api().snapshot.commands[0]?.ty).toBe("string");
+    expect(api().snapshot.commands).toHaveLength(2);
+  });
 });
 
 function omitttedExpr(

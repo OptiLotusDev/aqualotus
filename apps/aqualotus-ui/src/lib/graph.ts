@@ -103,10 +103,16 @@ export function planLinkAfter(
   edits.push({ id: targetId, next: sOld });
   if (p !== null) edits.push({ id: p, next: tOld });
   const kept = edits.filter((e) => e.id !== e.next);
+  // A successful wire with no entry point must make the chain runnable:
+  // without this, body-drop wiring of orphan blocks forms a chain the
+  // runner can never reach (entry stays `null` → no output). Establishing
+  // the head here never disturbs a live entry (`keep` otherwise).
   const entryUpdate: EntryUpdate =
     entry === targetId
       ? { type: "set", entry: headOf(predsAfter(cmds, kept), sourceId) }
-      : { type: "keep" };
+      : entry === null
+        ? { type: "set", entry: headOf(predsAfter(cmds, kept), sourceId) }
+        : { type: "keep" };
   return { edits: kept, entry: entryUpdate };
 }
 
@@ -137,12 +143,18 @@ export function planLinkBefore(
   if (ps !== null) edits.push({ id: ps, next: targetId });
   if (p !== null) edits.push({ id: p, next: tOld });
   const kept = edits.filter((e) => e.id !== e.next);
+  // Like `planLinkAfter`: wiring with no entry point establishes the
+  // post-edit head so the chain becomes runnable (`ps === null` already
+  // covers prepending; the `null` branch covers mid-chain inserts onto
+  // a cleared entry). A live entry is untouched.
   const entryUpdate: EntryUpdate =
     ps === null
       ? { type: "set", entry: targetId }
       : entry === targetId
         ? { type: "set", entry: headOf(predsAfter(cmds, kept), sourceId) }
-        : { type: "keep" };
+        : entry === null
+          ? { type: "set", entry: headOf(predsAfter(cmds, kept), sourceId) }
+          : { type: "keep" };
   return { edits: kept, entry: entryUpdate };
 }
 
@@ -250,55 +262,58 @@ export interface EdgeEnds {
   readonly horizontal: boolean;
 }
 
-function sidePoint(rect: BlockRect, side: BlockSide): { x: number; y: number } {
-  switch (side) {
-    case "top":
-      return { x: rect.x + rect.w / 2, y: rect.y };
-    case "bottom":
-      return { x: rect.x + rect.w / 2, y: rect.y + rect.h };
-    case "left":
-      return { x: rect.x, y: rect.y + rect.h / 2 };
-    case "right":
-      return { x: rect.x + rect.w, y: rect.y + rect.h / 2 };
-  }
+/**
+ * Port-anchored geometry (P3/P17): every edge exits the source's right
+ * out-port and enters the target's left in-port, so arrows always start
+ * and end on the visible port dots — never on a block middle, top, or
+ * bottom edge. Blocks carry exactly two ports (left in, right out) and
+ * chains run left → right; presentation only, semantics still come from
+ * `next` pointers alone.
+ */
+export function edgeEnds(a: BlockRect, b: BlockRect): EdgeEnds {
+  return {
+    x1: a.x + a.w,
+    y1: a.y + a.h / 2,
+    x2: b.x,
+    y2: b.y + b.h / 2,
+    horizontal: true,
+  };
 }
 
 /**
- * Honest geometry (P3): pick the exit/entry sides facing each other
- * from block centers, so edges route vertically for stacked blocks and
- * horizontally for side-by-side blocks. Pure coordinates — semantics
- * still come from `next` pointers alone.
+ * Chain every given command head-to-tail in the given order (one-click
+ * "connect in order" for orphan blocks). The caller passes the display
+ * order (`list_commands` order: reachable chain first, then orphans by
+ * id). A missing entry is established at the first id; a live entry is
+ * kept while orphans are appended after the tail. Returns `null` only
+ * when there is nothing to connect.
  */
-export function edgeEnds(a: BlockRect, b: BlockRect): EdgeEnds {
-  const acx = a.x + a.w / 2;
-  const acy = a.y + a.h / 2;
-  const bcx = b.x + b.w / 2;
-  const bcy = b.y + b.h / 2;
-  const dx = bcx - acx;
-  const dy = bcy - acy;
-  let exit: BlockSide;
-  let entry: BlockSide;
-  let horizontal: boolean;
-  if (Math.abs(dy) >= Math.abs(dx)) {
-    horizontal = false;
-    if (dy >= 0) {
-      exit = "bottom";
-      entry = "top";
-    } else {
-      exit = "top";
-      entry = "bottom";
-    }
-  } else {
-    horizontal = true;
-    if (dx >= 0) {
-      exit = "right";
-      entry = "left";
-    } else {
-      exit = "left";
-      entry = "right";
-    }
+export function planChainAll(
+  cmds: readonly Linked[],
+  entry: number | null,
+): LinkPlan | null {
+  const ids = cmds.map((c) => c.id);
+  if (ids.length === 0) return null;
+  if (ids.length === 1) {
+    const only = ids[0] as number;
+    if (entry === only) return null;
+    return { edits: [], entry: { type: "set", entry: only } };
   }
-  const p1 = sidePoint(a, exit);
-  const p2 = sidePoint(b, entry);
-  return { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, horizontal };
+  const links = linksOf(cmds);
+  const edits: LinkEdit[] = [];
+  ids.forEach((id, i) => {
+    const next = i + 1 < ids.length ? (ids[i + 1] as number) : null;
+    if ((links.get(id) ?? null) !== next) {
+      edits.push({ id, next });
+    }
+  });
+  const liveEntry = entry !== null && links.has(entry) ? entry : null;
+  if (edits.length === 0 && liveEntry === ids[0]) return null;
+  return {
+    edits,
+    entry:
+      liveEntry === null
+        ? { type: "set", entry: ids[0] as number }
+        : { type: "keep" },
+  };
 }

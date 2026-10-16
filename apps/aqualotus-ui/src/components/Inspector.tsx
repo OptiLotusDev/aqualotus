@@ -2,7 +2,11 @@ import { useState, type ReactElement } from "react";
 import type { CommandId, CommandSummary } from "../lib/optilotus";
 import type { FunctionInfo } from "../lib/optilotus";
 import { optilotus_type, type OptilotusType } from "../lib/optilotus";
-import { summaryToDraft, type CommandDraft } from "../lib/program";
+import {
+  summaryToDraft,
+  validateDeclareValue,
+  type CommandDraft,
+} from "../lib/program";
 import {
   PACKAGE_NAME,
   PRESENTATION_STRUCT_NAME,
@@ -34,13 +38,111 @@ const TYPES: readonly OptilotusType[] = (
   Object.values(optilotus_type) as OptilotusType[]
 ).filter((t) => t !== optilotus_type.void);
 
+/**
+ * Per-type value demo for the declare editor (P17: UI vocabulary only).
+ * Each entry shows the exact literal shape the Optilotus engine parses
+ * for that type — the bridge still validates, this only teaches it.
+ * Notably: integers/floats take bare numbers (no quotes), `bool` is
+ * lowercase-only (`true`/`false`), `char` is one bare character, and
+ * `string` is raw text (typed quotes become part of the string).
+ */
+function declareValueHint(ty: OptilotusType): {
+  placeholder: string;
+  hint: string;
+  inputMode: "text" | "numeric" | "decimal";
+} {
+  switch (ty) {
+    case optilotus_type.int8:
+      return {
+        placeholder: "e.g. 41",
+        hint: "Whole number from −128 to 127, no quotes.",
+        inputMode: "numeric",
+      };
+    case optilotus_type.int16:
+      return {
+        placeholder: "e.g. 41",
+        hint: "Whole number from −32,768 to 32,767, no quotes.",
+        inputMode: "numeric",
+      };
+    case optilotus_type.int32:
+      return {
+        placeholder: "e.g. 41",
+        hint: "Whole number, no quotes.",
+        inputMode: "numeric",
+      };
+    case optilotus_type.int64:
+    case optilotus_type.int128:
+      return {
+        placeholder: "e.g. 41",
+        hint: "Whole number of any size, no quotes.",
+        inputMode: "numeric",
+      };
+    case optilotus_type.uint8:
+      return {
+        placeholder: "e.g. 41",
+        hint: "Number from 0 to 255, no quotes or minus sign.",
+        inputMode: "numeric",
+      };
+    case optilotus_type.uint16:
+      return {
+        placeholder: "e.g. 41",
+        hint: "Number from 0 to 65,535, no quotes or minus sign.",
+        inputMode: "numeric",
+      };
+    case optilotus_type.uint32:
+    case optilotus_type.uint64:
+    case optilotus_type.uint128:
+      return {
+        placeholder: "e.g. 41",
+        hint: "Zero or more, no quotes or minus sign.",
+        inputMode: "numeric",
+      };
+    case optilotus_type.float32:
+    case optilotus_type.float64:
+      return {
+        placeholder: "e.g. 2.0",
+        hint: "A decimal number — stored exactly as typed.",
+        inputMode: "decimal",
+      };
+    case optilotus_type.bool:
+      return {
+        placeholder: "true",
+        hint: "true or false — True/False are fixed to lowercase.",
+        inputMode: "text",
+      };
+    case optilotus_type.char:
+      return {
+        placeholder: "'a'",
+        hint: "'single quotes' required, e.g. 'a'.",
+        inputMode: "text",
+      };
+    case optilotus_type.string:
+      return {
+        placeholder: '"hello"',
+        hint: '"double quotes" required, e.g. "hello".',
+        inputMode: "text",
+      };
+    default:
+      return {
+        placeholder: "41 — empty uses the type default",
+        hint: "Empty uses the type default.",
+        inputMode: "text",
+      };
+  }
+}
+
 function KindFields(props: {
   draft: CommandDraft;
   onChange: (next: CommandDraft) => void;
 }): ReactElement {
   const { draft, onChange } = props;
   switch (draft.kind) {
-    case "declare":
+    case "declare": {
+      const valueHint = declareValueHint(draft.ty);
+      // String/char literals must be quoted (`"hi"`, `'a'`); anything
+      // else is rejected here with a message instead of reaching the
+      // engine. Other types are engine-validated on Apply.
+      const valueError = validateDeclareValue(draft.ty, draft.init);
       return (
         <>
           <div className="field">
@@ -62,9 +164,20 @@ function KindFields(props: {
             <select
               id="in-type"
               value={draft.ty}
-              onChange={(e) =>
-                onChange({ ...draft, ty: e.target.value as OptilotusType })
-              }
+              onChange={(e) => {
+                const nextTy = e.target.value as OptilotusType;
+                // A literal typed for the old type is usually invalid for
+                // the new one (e.g. "41" kept while switching to `bool`),
+                // and the engine would reject the edit — leaving the block
+                // visibly "frozen" on the old type. Reset to empty (the
+                // engine default, valid for every type) on an actual type
+                // switch; the name is untouched.
+                onChange(
+                  nextTy === draft.ty
+                    ? { ...draft, ty: nextTy }
+                    : { ...draft, ty: nextTy, init: "" },
+                );
+              }}
             >
               {TYPES.map((t) => (
                 <option key={t} value={t}>
@@ -81,12 +194,28 @@ function KindFields(props: {
               id="in-value"
               value={draft.init}
               onChange={(e) => onChange({ ...draft, init: e.target.value })}
-              placeholder="41 — empty uses the type default"
+              placeholder={valueHint.placeholder}
               autoComplete="off"
+              inputMode={valueHint.inputMode}
+              aria-describedby="in-value-hint"
+              aria-invalid={valueError !== null}
             />
+            <div className="field-hint" id="in-value-hint">
+              {valueHint.hint} Empty uses the type default.
+            </div>
+            {valueError !== null ? (
+              <div
+                className="field-hint field-hint-error"
+                role="alert"
+                data-testid="declare-value-error"
+              >
+                {valueError}
+              </div>
+            ) : null}
           </div>
         </>
       );
+    }
     case "assign":
       return (
         <>
@@ -184,6 +313,11 @@ export default function Inspector(props: InspectorProps): ReactElement {
   }
 
   if (selected !== null && edit !== null) {
+    // An unquotable string/char value blocks Apply with the field-level
+    // message instead of failing at the engine.
+    const editBlocked =
+      edit.kind === "declare" &&
+      validateDeclareValue(edit.ty, edit.init) !== null;
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div className="pane-title">Inspector</div>
@@ -237,7 +371,16 @@ export default function Inspector(props: InspectorProps): ReactElement {
           }}
         >
           <KindFields draft={edit} onChange={setEdit} />
-          <button type="submit" className="btn btn-primary" disabled={busy}>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={busy || editBlocked}
+            title={
+              editBlocked
+                ? "Fix the value error first (see above)"
+                : undefined
+            }
+          >
             Apply edit
           </button>
         </form>

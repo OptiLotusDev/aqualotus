@@ -16,16 +16,22 @@
 export class HistoryIdMap {
   private readonly forward = new Map<number, number>();
 
-  /** Record that `oldId` now lives on as `newId` (follows chains). */
+  /**
+   * Record that `oldId` now lives on as `newId`. Lineages are EXTENDED,
+   * never overwritten: when `oldId` already resolves to a terminal
+   * (e.g. an undo restored it under another id), the new link is
+   * appended at that terminal, so every historical id — the original,
+   * every intermediate recreation, and every box pointer — converges on
+   * the one live incarnation. Overwriting instead orphans the other
+   * entries' pointers on dead ids, and their redo then fails with
+   * `unknown command` while the block goes missing.
+   */
   track(oldId: number, newId: number): void {
     if (oldId === newId) return;
     const target = this.resolve(newId);
-    for (const [key, value] of this.forward) {
-      if (value === oldId) {
-        this.forward.set(key, target);
-      }
-    }
-    this.forward.set(oldId, target);
+    const terminal = this.resolve(oldId);
+    if (terminal === target) return;
+    this.forward.set(terminal, target);
   }
 
   /** Resolve an id recorded earlier to its live replacement. */
