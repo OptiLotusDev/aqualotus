@@ -42,6 +42,20 @@ describe("HistoryIdMap", () => {
     expect(map.resolve(1)).toBe(9);
   });
 
+  it("extends a lineage instead of orphaning intermediate ids", () => {
+    // The interleaved undo/redo shape: 3 -> 5 (edit), 5 -> 7 (undo),
+    // then a redo recreates from 3 as 9. Every historical id must
+    // converge on 9 — overwriting 3 -> 9 would strand 5 and 7 on dead
+    // ids and their redo would miss its blocks.
+    const map = new HistoryIdMap();
+    map.track(3, 5);
+    map.track(5, 7);
+    map.track(3, 9);
+    expect(map.resolve(3)).toBe(9);
+    expect(map.resolve(5)).toBe(9);
+    expect(map.resolve(7)).toBe(9);
+  });
+
   it("models the a → b → c double-delete sequence", () => {
     // Delete b (id 2), then c (id 3). Undo restores c' (id 4), then the
     // older entry for b must resolve its stale next=3 to the live 4.
