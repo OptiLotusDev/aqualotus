@@ -19,10 +19,18 @@ import VisualEditor from "./VisualEditor";
 import { breadcrumbPath } from "../lib/workspace";
 
 /**
- * Aqualotus UI release version shown in the status pill. The live
- * bridge version/health stay available on hover for diagnostics.
+ * Displayed app version: the live engine version once the bridge is
+ * ready, else the build-time version read from the engine's
+ * `Cargo.toml` — a `Cargo.toml` bump reaches the pill with no UI edit.
  */
-const APP_VERSION = "0.3.1";
+function displayVersion(runtimeVersion: string): string {
+  if (runtimeVersion !== "") return runtimeVersion;
+  try {
+    return __OPTILOTUS_VERSION__;
+  } catch {
+    return "?";
+  }
+}
 const APP_NAME = "OptiLotus";
 
 interface AppShellProps {
@@ -40,6 +48,7 @@ interface AppShellProps {
   readonly onSelectFunction: (id: FunctionId | null) => void;
   readonly onSelectCommand: (id: CommandId | null) => void;
   readonly onCreateFunction: (name: string) => void;
+  readonly onRenameFunction: (id: FunctionId, name: string) => void;
   readonly onDeleteFunction: (id: FunctionId) => void;
   readonly onAddCommand: (fid: FunctionId, draft: CommandDraft) => void;
   readonly onDeclareVariable: (fid: FunctionId, name: string) => void;
@@ -476,6 +485,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
         setNavOpen(false);
       }}
       onDelete={props.onDeleteFunction}
+      onRenameFunction={props.onRenameFunction}
       libraryBusy={program.busy || fid === null}
       onAddBlock={addLibraryBlock}
       onClearPackage={props.onClearPackage}
@@ -513,6 +523,9 @@ export default function AppShell(props: AppShellProps): ReactElement {
       }}
       onClearEntry={() => {
         if (fid !== null) props.onClearEntry(fid);
+      }}
+      onRenameFunction={(name) => {
+        if (fid !== null) props.onRenameFunction(fid, name);
       }}
     />
   );
@@ -662,7 +675,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
         >
           <i aria-hidden="true" />
           {runtime.phase === "ready"
-            ? `${APP_NAME} ${APP_VERSION}`
+            ? `${APP_NAME} ${displayVersion(runtime.version)}`
             : runtime.phase === "loading"
               ? "Connecting…"
               : "Runtime unavailable"}

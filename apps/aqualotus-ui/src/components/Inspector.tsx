@@ -24,6 +24,7 @@ interface InspectorProps {
   readonly onDeleteFunction: () => void;
   readonly onClearEntry: () => void;
   readonly onDeclareVariable?: (name: string) => void;
+  readonly onRenameFunction?: (name: string) => void;
 }
 
 /**
@@ -107,7 +108,7 @@ function declareValueHint(ty: OptilotusType): {
     case optilotus_type.bool:
       return {
         placeholder: "true",
-        hint: "true or false — True/False are fixed to lowercase.",
+        hint: "true or false here — comparisons live in Assign: declare a bool, then assign it e.g. 3 > 2 or {x} == 2.",
         inputMode: "text",
       };
     case optilotus_type.char:
@@ -241,7 +242,13 @@ function KindFields(props: {
               onChange={(e) => onChange({ ...draft, expr: e.target.value })}
               placeholder="{n} + 1"
               autoComplete="off"
+              aria-describedby="in-value-hint"
             />
+            <div className="field-hint" id="in-value-hint">
+              Math (`+ - * / %`) and comparisons (`== != &lt; &lt;= &gt;
+              &gt;=`, e.g. `3 &gt; 2`) produce values — assign a
+              comparison into a bool variable for true/false.
+            </div>
           </div>
         </>
       );
@@ -278,6 +285,41 @@ function KindFields(props: {
   }
 }
 
+/** Inline function rename (function view). Remounted per function id. */
+function FunctionRenameForm(props: {
+  readonly name: string;
+  readonly busy: boolean;
+  readonly onRename: (name: string) => void;
+}): ReactElement {
+  const { name, busy, onRename } = props;
+  const [value, setValue] = useState<string>(name);
+  return (
+    <form
+      aria-label="Rename function"
+      style={{ display: "flex", gap: 8 }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        onRename(value);
+      }}
+    >
+      <input
+        aria-label="Function name"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="function name"
+        autoComplete="off"
+        style={{ flex: 1, minWidth: 0 }}
+      />
+      <button
+        type="submit"
+        className="btn btn-primary btn-sm"
+        disabled={busy || value.trim() === "" || value.trim() === name}
+      >
+        Rename
+      </button>
+    </form>
+  );
+}
 /**
  * Contextual block inspector (evolved from the command editor). Shows
  * function properties when nothing is selected, per-kind block
@@ -296,6 +338,7 @@ export default function Inspector(props: InspectorProps): ReactElement {
     onDeleteFunction,
     onClearEntry,
     onDeclareVariable,
+    onRenameFunction,
   } = props;
   // Edit draft derived from the selection during render (not synced in
   // an effect): when a different block is selected, the draft resets to
@@ -417,6 +460,14 @@ export default function Inspector(props: InspectorProps): ReactElement {
           {func.name}
           {func.isMain ? " · MAIN" : ""}
         </div>
+        {onRenameFunction !== undefined ? (
+          <FunctionRenameForm
+            key={func.id}
+            name={func.name}
+            busy={busy}
+            onRename={onRenameFunction}
+          />
+        ) : null}
         <dl className="props">
           <div>
             <dt>Function</dt>

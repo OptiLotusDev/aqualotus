@@ -185,6 +185,22 @@ vi.mock("../lib/optilotus", () => ({
     db.entries.delete(id);
     return ok({ deleted: id });
   }),
+  optilotus_renameFunction: vi.fn((id: number, name: string) => {
+    const f = db.functions.get(id);
+    if (f === undefined) return err(null, `unknown function ${id}`);
+    const clean = name.trim();
+    if (clean === "") return err(null, "function name must not be empty");
+    if (clean === "main" && id !== 0) {
+      return err(null, 'cannot create function "main": "main" is reserved');
+    }
+    for (const other of db.functions.values()) {
+      if (other.id !== id && other.name === clean) {
+        return err(null, `function ${JSON.stringify(clean)} already exists`);
+      }
+    }
+    f.name = clean;
+    return ok({ id, name: clean, isMain: id === 0 });
+  }),
   optilotus_clearPackage: vi.fn(() => ({ status: "ok", cleared: 0 })),
   optilotus_declare: vi.fn(
     (fid: number, name: string, ty: string, init?: string) => {
@@ -761,3 +777,59 @@ function omitttedExpr(
 ): string | undefined {
   return row?.expr;
 }
+
+describe("useProgram rename function", () => {
+  beforeEach(() => {
+    resetDb();
+    seq = 0;
+  });
+
+  function setup(): ReturnType<typeof renderHook<ReturnType<typeof useProgram>, unknown>> {
+    return renderHook(() => useProgram(true, issueSeq));
+  }
+
+  it("renames a function with undo/redo and rejects duplicates", () => {
+    const { result } = setup();
+    const api = (): ReturnType<typeof useProgram> => result.current;
+    act(() => {
+      api().createFunction("helper");
+    });
+    expect(api().snapshot.functions.map((f) => f.name)).toEqual([
+      "main",
+      "helper",
+    ]);
+    const helper = api().snapshot.functions.find((f) => f.name === "helper")?.id ?? -1;
+
+    act(() => {
+      api().renameFunction(helper, "worker");
+    });
+    expect(api().snapshot.actionError).toBe("");
+    expect(api().snapshot.functions.find((f) => f.id === helper)?.name).toBe(
+      "worker",
+    );
+
+    act(() => {
+      api().undo();
+    });
+    expect(api().snapshot.functions.find((f) => f.id === helper)?.name).toBe(
+      "helper",
+    );
+    act(() => {
+      api().redo();
+    });
+    expect(api().snapshot.functions.find((f) => f.id === helper)?.name).toBe(
+      "worker",
+    );
+
+    // Duplicates fail honestly and record no history entry.
+    const canUndo = api().canUndo;
+    act(() => {
+      api().renameFunction(helper, "main");
+    });
+    expect(api().snapshot.actionError).not.toBe("");
+    expect(api().snapshot.functions.find((f) => f.id === helper)?.name).toBe(
+      "worker",
+    );
+    expect(api().canUndo).toBe(canUndo);
+  });
+});
