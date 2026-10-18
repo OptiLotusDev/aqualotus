@@ -24,7 +24,7 @@ fn compute_print_chain_prints_sum() {
         ],
     );
     let mut sink = VecSink::default();
-    let report = run_function(&f, &mut sink).unwrap();
+    let report = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(sink.lines, vec!["5".to_string()]);
     assert_eq!(report.steps, 2);
     assert_eq!(report.prints, 1);
@@ -70,7 +70,7 @@ fn mixed_int_types_are_a_mismatch() {
         ],
     );
     let mut sink = VecSink::default();
-    let err = run_function(&f, &mut sink).unwrap_err();
+    let err = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err();
     assert!(matches!(err, ExecError::TypeMismatch { .. }));
 }
 
@@ -103,7 +103,7 @@ fn overflow_is_reported() {
         ],
     );
     let mut sink = VecSink::default();
-    let err = run_function(&f, &mut sink).unwrap_err();
+    let err = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err();
     assert_eq!(
         err,
         ExecError::Overflow {
@@ -145,7 +145,7 @@ fn three_prints_yield_three_sink_entries() {
         ],
     );
     let mut sink = VecSink::default();
-    let report = run_function(&f, &mut sink).unwrap();
+    let report = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(
         sink.lines,
         vec!["a".to_string(), "b".to_string(), "c".to_string()]
@@ -170,7 +170,8 @@ fn cycle_hits_loop_limit() {
         ],
     );
     let mut sink = VecSink::default();
-    let err = run_function_with_limit(&f, &mut sink, 10).unwrap_err();
+    let err = run_function_with_limit(&f, &mut sink, &mut optilotus::VecSource::default(), 10)
+        .unwrap_err();
     assert_eq!(err, ExecError::LoopLimit { limit: 10 });
 }
 
@@ -178,7 +179,7 @@ fn cycle_hits_loop_limit() {
 fn empty_function_runs_nothing() {
     let f = fun(None, vec![]);
     let mut sink = VecSink::default();
-    let report = run_function(&f, &mut sink).unwrap();
+    let report = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(report.steps, 0);
     assert_eq!(report.prints, 0);
     assert!(sink.lines.is_empty());
@@ -214,7 +215,7 @@ fn set_get_compute_print_chain() {
         ],
     );
     let mut sink = VecSink::default();
-    let report = run_function(&f, &mut sink).unwrap();
+    let report = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(sink.lines, vec!["42".to_string()]);
     assert_eq!(report.steps, 4);
     assert_eq!(report.prints, 1);
@@ -246,7 +247,7 @@ fn set_rejects_wrong_type() {
         ],
     );
     let mut sink = VecSink::default();
-    let err = run_function(&f, &mut sink).unwrap_err();
+    let err = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err();
     assert!(matches!(err, ExecError::TypeMismatch { .. }));
 }
 
@@ -287,7 +288,7 @@ fn set_rejects_type_change() {
         ],
     );
     let mut sink = VecSink::default();
-    let err = run_function(&f, &mut sink).unwrap_err();
+    let err = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err();
     assert!(matches!(err, ExecError::TypeMismatch { .. }));
 }
 
@@ -321,7 +322,7 @@ fn get_returns_set_value() {
         ],
     );
     let mut sink = VecSink::default();
-    let report = run_function(&f, &mut sink).unwrap();
+    let report = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(sink.lines, vec!["7".to_string()]);
     assert_eq!(report.prints, 1);
 }
@@ -341,7 +342,7 @@ fn get_unknown_variable_fails() {
         )],
     );
     let mut sink = VecSink::default();
-    let err = run_function(&f, &mut sink).unwrap_err();
+    let err = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err();
     assert_eq!(
         err,
         ExecError::UnknownVariable {
@@ -381,7 +382,7 @@ fn compute_with_variables_in_chain() {
         ],
     );
     let mut sink = VecSink::default();
-    let report = run_function(&f, &mut sink).unwrap();
+    let report = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(sink.lines, vec!["1".to_string()]);
     assert_eq!(report.prints, 1);
 }
@@ -401,7 +402,7 @@ fn compute_bad_syntax_is_expr_error() {
         )],
     );
     let mut sink = VecSink::default();
-    let err = run_function(&f, &mut sink).unwrap_err();
+    let err = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err();
     assert!(matches!(err, ExecError::ExprError { .. }));
 }
 
@@ -420,7 +421,7 @@ fn compute_div_by_zero() {
         )],
     );
     let mut sink = VecSink::default();
-    let err = run_function(&f, &mut sink).unwrap_err();
+    let err = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err();
     assert_eq!(
         err,
         ExecError::DivByZero {
@@ -463,7 +464,7 @@ fn print_template_concat_and_interpolation() {
         ],
     );
     let mut sink = VecSink::default();
-    let report = run_function(&f, &mut sink).unwrap();
+    let report = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(sink.lines, vec!["Hello Bob AAA".to_string()]);
     assert_eq!(report.prints, 1);
 }
@@ -484,7 +485,7 @@ fn print_template_unknown_variable_fails() {
         ],
     );
     let mut sink = VecSink::default();
-    let err = run_function(&f, &mut sink).unwrap_err();
+    let err = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err();
     assert!(matches!(err, ExecError::UnknownVariable { .. }));
 }
 
@@ -521,8 +522,8 @@ fn variables_do_not_leak_between_functions() {
         )],
     );
     let mut sink = VecSink::default();
-    run_function(&setter, &mut sink).unwrap();
-    let err = run_function(&reader, &mut sink).unwrap_err();
+    run_function(&setter, &mut sink, &mut optilotus::VecSource::default()).unwrap();
+    let err = run_function(&reader, &mut sink, &mut optilotus::VecSource::default()).unwrap_err();
     assert!(matches!(err, ExecError::UnknownVariable { .. }));
 }
 
@@ -543,7 +544,8 @@ fn self_loop_hits_loop_limit() {
         ],
     );
     let mut sink = VecSink::default();
-    let err = run_function_with_limit(&f, &mut sink, 5).unwrap_err();
+    let err = run_function_with_limit(&f, &mut sink, &mut optilotus::VecSource::default(), 5)
+        .unwrap_err();
     assert_eq!(err, ExecError::LoopLimit { limit: 5 });
     assert_eq!(sink.lines.len(), 4);
 }
@@ -573,7 +575,8 @@ fn three_node_cycle_hits_loop_limit() {
         ],
     );
     let mut sink = VecSink::default();
-    let err = run_function_with_limit(&f, &mut sink, 7).unwrap_err();
+    let err = run_function_with_limit(&f, &mut sink, &mut optilotus::VecSource::default(), 7)
+        .unwrap_err();
     assert_eq!(err, ExecError::LoopLimit { limit: 7 });
     assert_eq!(sink.lines.len(), 4);
 }
@@ -620,7 +623,8 @@ fn counter_loop_stops_only_at_limit() {
         ],
     );
     let mut sink = VecSink::default();
-    let err = run_function_with_limit(&f, &mut sink, 10).unwrap_err();
+    let err = run_function_with_limit(&f, &mut sink, &mut optilotus::VecSource::default(), 10)
+        .unwrap_err();
     assert_eq!(err, ExecError::LoopLimit { limit: 10 });
 }
 
@@ -673,7 +677,7 @@ fn cascaded_compute_pipeline() {
         ],
     );
     let mut sink = VecSink::default();
-    let report = run_function(&f, &mut sink).unwrap();
+    let report = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(sink.lines, vec!["20".to_string()]);
     assert_eq!(report.steps, 8);
 }
@@ -741,7 +745,7 @@ fn reassignment_in_sequence() {
     commands.push(cmd(13, Op::Print, vec![2], vec![], None));
     let f = fun(Some(1), commands);
     let mut sink = VecSink::default();
-    let report = run_function(&f, &mut sink).unwrap();
+    let report = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(sink.lines, vec!["3".to_string()]);
     assert_eq!(report.steps, 13);
 }
@@ -781,7 +785,7 @@ fn mid_chain_failure_keeps_earlier_prints() {
         ],
     );
     let mut sink = VecSink::default();
-    let err = run_function(&f, &mut sink).unwrap_err();
+    let err = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err();
     assert!(matches!(err, ExecError::ExprError { .. }));
     assert_eq!(sink.lines, vec!["first".to_string(), "second".to_string()]);
 }
@@ -794,7 +798,7 @@ fn unknown_command_mid_chain() {
         vec![cmd(1, Op::Lit(Value::Int32(1)), vec![], vec![1], Some(99))],
     );
     let mut sink = VecSink::default();
-    let err = run_function(&f, &mut sink).unwrap_err();
+    let err = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err();
     assert_eq!(
         err,
         ExecError::UnknownCommand {
@@ -813,7 +817,7 @@ fn dangling_entry_fails() {
         commands: f.commands,
     };
     let mut sink = VecSink::default();
-    let err = run_function(&dangling, &mut sink).unwrap_err();
+    let err = run_function(&dangling, &mut sink, &mut optilotus::VecSource::default()).unwrap_err();
     assert_eq!(
         err,
         ExecError::UnknownCommand {
@@ -827,7 +831,7 @@ fn missing_value_print_fails() {
     // Print names a ValueId no command ever produced.
     let f = fun(Some(1), vec![cmd(1, Op::Print, vec![7], vec![], None)]);
     let mut sink = VecSink::default();
-    let err = run_function(&f, &mut sink).unwrap_err();
+    let err = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err();
     assert_eq!(
         err,
         ExecError::MissingValue {
@@ -855,7 +859,7 @@ fn arity_violations_are_reported() {
     );
     let mut sink = VecSink::default();
     assert!(matches!(
-        run_function(&f, &mut sink).unwrap_err(),
+        run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err(),
         ExecError::Arity { .. }
     ));
 
@@ -873,7 +877,7 @@ fn arity_violations_are_reported() {
         )],
     );
     assert!(matches!(
-        run_function(&f, &mut sink).unwrap_err(),
+        run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err(),
         ExecError::Arity { .. }
     ));
 
@@ -891,14 +895,14 @@ fn arity_violations_are_reported() {
         )],
     );
     assert!(matches!(
-        run_function(&f, &mut sink).unwrap_err(),
+        run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err(),
         ExecError::Arity { .. }
     ));
 
     // Print with an output.
     let f = fun(Some(1), vec![cmd(1, Op::Print, vec![1], vec![2], None)]);
     assert!(matches!(
-        run_function(&f, &mut sink).unwrap_err(),
+        run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err(),
         ExecError::Arity { .. }
     ));
 }
@@ -923,7 +927,7 @@ fn set_void_type_rejected() {
     );
     let mut sink = VecSink::default();
     assert!(matches!(
-        run_function(&f, &mut sink).unwrap_err(),
+        run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err(),
         ExecError::TypeMismatch { .. }
     ));
 }
@@ -944,7 +948,7 @@ fn empty_template_prints_empty_line() {
         ],
     );
     let mut sink = VecSink::default();
-    let report = run_function(&f, &mut sink).unwrap();
+    let report = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(sink.lines, vec!["".to_string()]);
     assert_eq!(report.prints, 1);
 }
@@ -1000,7 +1004,7 @@ fn adjacent_refs_and_multi_concat() {
         ],
     );
     let mut sink = VecSink::default();
-    run_function(&f, &mut sink).unwrap();
+    run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(sink.lines, vec!["xy-x".to_string()]);
 }
 
@@ -1029,7 +1033,7 @@ fn compute_all_operators_end_to_end() {
     commands.extend(compute_print(9, "2 * (3 + 4)", 5, None));
     let f = fun(Some(1), commands);
     let mut sink = VecSink::default();
-    let report = run_function(&f, &mut sink).unwrap();
+    let report = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(
         sink.lines,
         vec![
@@ -1078,7 +1082,7 @@ fn string_var_in_arithmetic_fails() {
     );
     let mut sink = VecSink::default();
     assert!(matches!(
-        run_function(&f, &mut sink).unwrap_err(),
+        run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err(),
         ExecError::TypeMismatch { .. }
     ));
 }

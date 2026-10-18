@@ -23,7 +23,7 @@ Pure, headless, unit-tested (`cargo test -p optilotus`):
     (name only; stable id untouched), `clear_package()`.
   - Command builders (expand onto existing IR; `return` is `Op::Return`):
     `declare(fid, name, ty, init?)`, `assign(fid, name, expr)`,
-    `print(fid, template)`, `return_(fid, expr)`, `list_commands(fid)`,
+    `print(fid, template)`, `input(fid, ty)`, `return_(fid, expr)`, `list_commands(fid)`,
     `set_entry(fid, entry?)`, `set_next(fid, cmd, next?)`,
     `delete_command(fid, cmd)`.
   - Branching (`Op::If`, nestable): `eval_cond(fid, expr)` evaluates an
@@ -98,12 +98,15 @@ JSON:
 - `optilotus_declare(fid, name, ty: OptilotusType, init?): {status:"ok",id} | OptilotusError`
 - `optilotus_assign(fid, name, expr): {status:"ok",id} | OptilotusError`
 - `optilotus_print(fid, template): {status:"ok",id} | OptilotusError`
+- `optilotus_input(fid, ty): {status:"ok",id} | OptilotusError`
 - `optilotus_return(fid, expr): {status:"ok",id} | OptilotusError`
 - `optilotus_listCommands(fid): {status:"ok",commands: CommandSummary[]} | OptilotusError`
 - `optilotus_setEntry(fid, cmd: number | null): {status:"ok"} | OptilotusError`
 - `optilotus_setNext(fid, cmd, next?): {status:"ok"} | OptilotusError`
 - `optilotus_deleteCommand(fid, cmd): {status:"ok",deleted} | OptilotusError`
 - `optilotus_runProgram(): RunResult` — runs `main` by id only.
+- `optilotus_runProgramWithInputs(inputs: string[]): RunResult` — runs `main`
+  consuming the supplied lines in order.
 
 ## Package API (the only API)
 
@@ -177,7 +180,7 @@ optilotus_print(0, '"{z}"');
   declared name (type is taken from the declaration); `print` takes a
   template; `return` takes an expression and stops the function.
 - `list_commands` returns user kinds (`declare` | `assign` | `print` |
-  `return`), never raw `Lit`/`Get`/`Compute`.
+  `input` | `return`), never raw `Lit`/`Get`/`Compute`.
 - Calls live in expression text: `helper()` runs the helper with fresh
   variables, shared steps/prints, and uses its `Return` value. Unknown
   names are `UnknownFunction`, missing `Return` is `MissingReturn`,

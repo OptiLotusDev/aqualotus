@@ -118,7 +118,7 @@ fn entry_next_chain_runs_with_existing_path() {
 
     let func = pkg.function(MAIN_ID).unwrap().clone();
     let mut sink = VecSink::default();
-    let report = run_function(&func, &mut sink).unwrap();
+    let report = run_function(&func, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(sink.lines, vec!["42".to_string()]);
     assert_eq!(report.prints, 1);
 }
@@ -148,7 +148,7 @@ fn set_entry_set_next_delete_command() {
     pkg.set_next(MAIN_ID, a, Some(c)).unwrap();
     let func = pkg.function(MAIN_ID).unwrap().clone();
     let mut sink = VecSink::default();
-    run_function(&func, &mut sink).unwrap();
+    run_function(&func, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     // declare has no print; b skipped so only "done" prints
     assert_eq!(sink.lines, vec!["done".to_string()]);
 
@@ -161,7 +161,7 @@ fn set_entry_set_next_delete_command() {
     let func = pkg.function(MAIN_ID).unwrap().clone();
     assert_eq!(func.entry, Some(c));
     let mut sink = VecSink::default();
-    run_function(&func, &mut sink).unwrap();
+    run_function(&func, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(sink.lines, vec!["done".to_string()]);
 }
 
@@ -179,7 +179,9 @@ fn return_builder_lists_and_stops() {
     // Return stops before `after`
     let func = pkg.function(MAIN_ID).unwrap().clone();
     let mut sink = VecSink::default();
-    let (report, returned) = optilotus::run_function_returning(&func, &mut sink).unwrap();
+    let (report, returned) =
+        optilotus::run_function_returning(&func, &mut sink, &mut optilotus::VecSource::default())
+            .unwrap();
     assert_eq!(report.prints, 0);
     assert_eq!(returned, Some(optilotus::Value::Int32(1)));
     let _ = after;

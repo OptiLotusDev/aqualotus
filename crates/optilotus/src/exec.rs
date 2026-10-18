@@ -1,10 +1,11 @@
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
 use crate::error::ExecError;
 use crate::expr::{check_var_name, eval_expr, eval_expr_with, render_template, ExprFail};
 use crate::ir::{CommandId, Function, Program, ValueId};
 use crate::ops::{print_text, Op};
-use crate::sink::PrintSink;
+use crate::sink::{InputSource, PrintSink};
 use crate::types::Type;
 use crate::value::Value;
 
@@ -26,8 +27,9 @@ pub struct ExecReport {
 pub fn run_function(
     function: &Function,
     sink: &mut impl PrintSink,
+    input: &mut impl InputSource,
 ) -> Result<ExecReport, ExecError> {
-    run_function_with_limit(function, sink, MAX_STEPS)
+    run_function_with_limit(function, sink, input, MAX_STEPS)
 }
 
 /// Same as [`run_function`] with an explicit step cap (tests use this
@@ -35,9 +37,10 @@ pub fn run_function(
 pub fn run_function_with_limit(
     function: &Function,
     sink: &mut impl PrintSink,
+    input: &mut impl InputSource,
     max_steps: usize,
 ) -> Result<ExecReport, ExecError> {
-    run_function_returning_with_limit(function, sink, max_steps).map(|(report, _)| report)
+    run_function_returning_with_limit(function, sink, input, max_steps).map(|(report, _)| report)
 }
 
 /// Run and also capture an optional `Return` value. `Return` evaluates its
@@ -47,14 +50,16 @@ pub fn run_function_with_limit(
 pub fn run_function_returning(
     function: &Function,
     sink: &mut impl PrintSink,
+    input: &mut impl InputSource,
 ) -> Result<(ExecReport, Option<Value>), ExecError> {
-    run_function_returning_with_limit(function, sink, MAX_STEPS)
+    run_function_returning_with_limit(function, sink, input, MAX_STEPS)
 }
 
 /// Same as [`run_function_returning`] with an explicit step cap.
 pub fn run_function_returning_with_limit(
     function: &Function,
     sink: &mut impl PrintSink,
+    input: &mut impl InputSource,
     max_steps: usize,
 ) -> Result<(ExecReport, Option<Value>), ExecError> {
     let mut values: HashMap<ValueId, Value> = HashMap::new();
@@ -79,6 +84,7 @@ pub fn run_function_returning_with_limit(
             &mut values,
             &mut vars,
             sink,
+            input,
             &mut prints,
             &mut steps,
             max_steps,
@@ -98,12 +104,13 @@ pub fn run_function_returning_with_limit(
 type Flow = Option<Value>;
 
 #[allow(clippy::too_many_arguments)]
-fn run_command(
+pub fn run_command(
     function: &Function,
     command: &crate::ir::Command,
     values: &mut HashMap<ValueId, Value>,
     vars: &mut HashMap<String, Value>,
     sink: &mut impl PrintSink,
+    input: &mut impl InputSource,
     prints: &mut usize,
     steps: &mut usize,
     max_steps: usize,
@@ -155,6 +162,66 @@ fn run_command(
             };
             sink.print(&text);
             *prints += 1;
+            Ok(None)
+        }
+        Op::Input { ty } => {
+            if !command.inputs.is_empty() {
+                return Err(ExecError::Arity {
+                    command: command.id,
+                    expected: "0 inputs".to_string(),
+                    found: command.inputs.len(),
+                });
+            }
+            if command.outputs.len() != 1 {
+                return Err(ExecError::Arity {
+                    command: command.id,
+                    expected: "1 output".to_string(),
+                    found: command.outputs.len(),
+                });
+            }
+            // Resumable runner support: pause without reading.
+            if PAUSE_ON_INPUT.with(|c| c.get()) {
+                PENDING_INPUT.with(|p| *p.borrow_mut() = Some((command.id, *ty)));
+                return Err(ExecError::Paused);
+            }
+            if let Some(v) = RESUME_VALUE.with(|r| r.borrow_mut().take()) {
+                values.insert(command.outputs[0], v);
+                return Ok(None);
+            }
+            let line = input.read_line().ok_or(ExecError::InputEof {
+                command: command.id,
+            })?;
+            let value = crate::ops::parse_input_line(&line, *ty).map_err(|detail| {
+                ExecError::InputParse {
+                    command: command.id,
+                    detail,
+                }
+            })?;
+            values.insert(command.outputs[0], value);
+            Ok(None)
+        }
+        Op::Cast { to } => {
+            if command.inputs.len() != 1 {
+                return Err(ExecError::Arity {
+                    command: command.id,
+                    expected: "1 input".to_string(),
+                    found: command.inputs.len(),
+                });
+            }
+            if command.outputs.len() != 1 {
+                return Err(ExecError::Arity {
+                    command: command.id,
+                    expected: "1 output".to_string(),
+                    found: command.outputs.len(),
+                });
+            }
+            let input = read_input(command.id, values, command.inputs[0])?;
+            let value =
+                crate::ops::cast_value(input, *to).map_err(|detail| ExecError::TypeMismatch {
+                    command: command.id,
+                    detail,
+                })?;
+            values.insert(command.outputs[0], value);
             Ok(None)
         }
         Op::Set { var, ty } => {
@@ -289,7 +356,7 @@ fn run_command(
                     .ok_or(ExecError::UnknownCommand { command: body_id })?;
                 *steps += 1;
                 let flow = run_command(
-                    function, body_cmd, values, vars, sink, prints, steps, max_steps,
+                    function, body_cmd, values, vars, sink, input, prints, steps, max_steps,
                 )?;
                 if let Some(value) = flow {
                     return Ok(Some(value));
@@ -357,6 +424,7 @@ fn map_expr_fail(err: ExprFail, command: CommandId) -> ExecError {
         ExprFail::UnknownFunction(name) => ExecError::UnknownFunction { command, name },
         ExprFail::MissingReturn(function) => ExecError::MissingReturn { command, function },
         ExprFail::Callee(inner) => *inner,
+        ExprFail::Paused => ExecError::Paused,
     }
 }
 
@@ -367,14 +435,19 @@ fn map_expr_fail(err: ExprFail, command: CommandId) -> ExecError {
 /// Run the `main` function of a `Program` (id 0, fallback by name).
 /// Helper calls (`name()`) share the step cap, sink and depth budget;
 /// each call gets fresh variables. `main` itself cannot be called.
-pub fn run_program(program: &Program, sink: &mut impl PrintSink) -> Result<ExecReport, ExecError> {
-    run_program_with_limit(program, sink, MAX_STEPS)
+pub fn run_program(
+    program: &Program,
+    sink: &mut impl PrintSink,
+    input: &mut impl InputSource,
+) -> Result<ExecReport, ExecError> {
+    run_program_with_limit(program, sink, input, MAX_STEPS)
 }
 
 /// Same as [`run_program`] with an explicit step cap.
 pub fn run_program_with_limit(
     program: &Program,
     sink: &mut impl PrintSink,
+    input: &mut impl InputSource,
     max_steps: usize,
 ) -> Result<ExecReport, ExecError> {
     let mut steps: usize = 0;
@@ -383,7 +456,16 @@ pub fn run_program_with_limit(
         command: CommandId(0),
         name: "main".to_string(),
     })?;
-    run_func(program, main, sink, &mut steps, &mut prints, max_steps, 0)?;
+    run_func(
+        program,
+        main,
+        sink,
+        input,
+        &mut steps,
+        &mut prints,
+        max_steps,
+        0,
+    )?;
     Ok(ExecReport { steps, prints })
 }
 
@@ -391,14 +473,16 @@ pub fn run_program_with_limit(
 pub fn run_program_returning(
     program: &Program,
     sink: &mut impl PrintSink,
+    input: &mut impl InputSource,
 ) -> Result<(ExecReport, Option<Value>), ExecError> {
-    run_program_returning_with_limit(program, sink, MAX_STEPS)
+    run_program_returning_with_limit(program, sink, input, MAX_STEPS)
 }
 
 /// Same as [`run_program_returning`] with an explicit step cap.
 pub fn run_program_returning_with_limit(
     program: &Program,
     sink: &mut impl PrintSink,
+    input: &mut impl InputSource,
     max_steps: usize,
 ) -> Result<(ExecReport, Option<Value>), ExecError> {
     let mut steps: usize = 0;
@@ -407,11 +491,20 @@ pub fn run_program_returning_with_limit(
         command: CommandId(0),
         name: "main".to_string(),
     })?;
-    let returned = run_func(program, main, sink, &mut steps, &mut prints, max_steps, 0)?;
+    let returned = run_func(
+        program,
+        main,
+        sink,
+        input,
+        &mut steps,
+        &mut prints,
+        max_steps,
+        0,
+    )?;
     Ok((ExecReport { steps, prints }, returned))
 }
 
-fn find_main(program: &Program) -> Option<&Function> {
+pub fn find_main(program: &Program) -> Option<&Function> {
     program
         .functions
         .iter()
@@ -428,6 +521,7 @@ fn run_func(
     program: &Program,
     function: &Function,
     sink: &mut impl PrintSink,
+    input: &mut impl InputSource,
     steps: &mut usize,
     prints: &mut usize,
     max_steps: usize,
@@ -451,6 +545,7 @@ fn run_func(
             &mut values,
             &mut vars,
             sink,
+            input,
             prints,
             steps,
             max_steps,
@@ -473,6 +568,7 @@ fn run_command_with_calls(
     values: &mut HashMap<ValueId, Value>,
     vars: &mut HashMap<String, Value>,
     sink: &mut impl PrintSink,
+    input: &mut impl InputSource,
     prints: &mut usize,
     steps: &mut usize,
     max_steps: usize,
@@ -493,7 +589,16 @@ fn run_command_with_calls(
         let Some(callee) = find_by_name(program, name) else {
             return Err(ExprFail::UnknownFunction(name.to_string()));
         };
-        match run_func(program, callee, sink, steps, prints, max_steps, depth + 1) {
+        match run_func(
+            program,
+            callee,
+            sink,
+            input,
+            steps,
+            prints,
+            max_steps,
+            depth + 1,
+        ) {
             Ok(Some(value)) => Ok(value),
             Ok(None) => Err(ExprFail::MissingReturn(name.to_string())),
             Err(e) => Err(ExprFail::Callee(Box::new(e))),
@@ -564,8 +669,8 @@ fn run_command_with_calls(
                     .ok_or(ExecError::UnknownCommand { command: body_id })?;
                 *steps += 1;
                 let flow = run_command_with_calls(
-                    program, function, body_cmd, values, vars, sink, prints, steps, max_steps,
-                    depth,
+                    program, function, body_cmd, values, vars, sink, input, prints, steps,
+                    max_steps, depth,
                 )?;
                 if let Some(value) = flow {
                     return Ok(Some(value));
@@ -576,7 +681,34 @@ fn run_command_with_calls(
         }
         // Non-expression ops behave exactly as the single-function path.
         _ => run_command(
-            function, command, values, vars, sink, prints, steps, max_steps,
+            function, command, values, vars, sink, input, prints, steps, max_steps,
         ),
     }
+}
+
+#[doc(hidden)]
+pub fn map_expr_fail_pub(
+    err: crate::expr::ExprFail,
+    command: crate::ir::CommandId,
+) -> crate::error::ExecError {
+    map_expr_fail(err, command)
+}
+
+thread_local! {
+    pub static PAUSE_ON_INPUT: Cell<bool> = const { Cell::new(false) };
+    pub static PENDING_INPUT: RefCell<Option<(crate::ir::CommandId, crate::types::Type)>> =
+        const { RefCell::new(None) };
+    pub static RESUME_VALUE: RefCell<Option<crate::value::Value>> = const { RefCell::new(None) };
+}
+
+pub fn set_pause_on_input(value: bool) {
+    PAUSE_ON_INPUT.with(|c| c.set(value));
+}
+
+pub fn take_pending_input() -> Option<(crate::ir::CommandId, crate::types::Type)> {
+    PENDING_INPUT.with(|p| p.borrow_mut().take())
+}
+
+pub fn set_resume_value(value: Option<crate::value::Value>) {
+    RESUME_VALUE.with(|r| *r.borrow_mut() = value);
 }

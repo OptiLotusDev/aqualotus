@@ -7,6 +7,11 @@
 export function optilotus_assign(fid: number, name: string, expr: string): string;
 
 /**
+ * JS: `optilotus_cast(fid, name, to, expr) -> string` (JSON)
+ */
+export function optilotus_cast(fid: number, name: string, to: string, expr: string): string;
+
+/**
  * JS: `optilotus_clearPackage() -> string` (JSON)
  */
 export function optilotus_clearPackage(): string;
@@ -42,6 +47,11 @@ export function optilotus_getFunction(id: number): string;
 export function optilotus_health(): string;
 
 /**
+ * JS: `optilotus_input(fid, ty) -> string` (JSON)
+ */
+export function optilotus_input(fid: number, ty: string): string;
+
+/**
  * JS: `optilotus_listCommands(fid) -> string` (JSON)
  */
 export function optilotus_listCommands(fid: number): string;
@@ -72,6 +82,46 @@ export function optilotus_return(fid: number, expr: string): string;
 export function optilotus_runProgram(): string;
 
 /**
+ * JS: `optilotus_runProgramCancel() -> void`
+ */
+export function optilotus_runProgramCancel(): void;
+
+/**
+ * JS: `optilotus_runProgramProvideInput(value) -> string`
+ */
+export function optilotus_runProgramProvideInput(value: string): string;
+
+/**
+ * JS: `optilotus_runProgramResumableCancel() -> void`
+ */
+export function optilotus_runProgramResumableCancel(): void;
+
+/**
+ * JS: `optilotus_runProgramResumableProvideInput(value) -> string`
+ */
+export function optilotus_runProgramResumableProvideInput(value: string): string;
+
+/**
+ * JS: `optilotus_runProgramResumableStart() -> string`
+ */
+export function optilotus_runProgramResumableStart(): string;
+
+/**
+ * JS: `optilotus_runProgramStart() -> string`
+ */
+export function optilotus_runProgramStart(): string;
+
+/**
+ * JS: `optilotus_runProgramStatus() -> string`
+ */
+export function optilotus_runProgramStatus(): string;
+
+/**
+ * JS: `optilotus_runProgramWithInputs(inputs_json) -> string` (JSON)
+ */
+export function optilotus_runProgramWithInputs(inputs_json: string): string;
+
+/**
  * JS: `optilotus_setEntry(fid, cmd?) -> string` (JSON, `null` clears)
  */
 export function optilotus_setEntry(fid: number, cmd?: number | null): string;
@@ -91,6 +141,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly optilotus_assign: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+    readonly optilotus_cast: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly optilotus_clearPackage: () => [number, number];
     readonly optilotus_createFunction: (a: number, b: number) => [number, number];
     readonly optilotus_declare: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
@@ -98,12 +149,21 @@ export interface InitOutput {
     readonly optilotus_deleteFunction: (a: number) => [number, number];
     readonly optilotus_getFunction: (a: number) => [number, number];
     readonly optilotus_health: () => [number, number];
+    readonly optilotus_input: (a: number, b: number, c: number) => [number, number];
     readonly optilotus_listCommands: (a: number) => [number, number];
     readonly optilotus_listFunctions: () => [number, number];
     readonly optilotus_print: (a: number, b: number, c: number) => [number, number];
     readonly optilotus_renameFunction: (a: number, b: number, c: number) => [number, number];
     readonly optilotus_return: (a: number, b: number, c: number) => [number, number];
     readonly optilotus_runProgram: () => [number, number];
+    readonly optilotus_runProgramCancel: () => void;
+    readonly optilotus_runProgramProvideInput: (a: number, b: number) => [number, number];
+    readonly optilotus_runProgramResumableCancel: () => void;
+    readonly optilotus_runProgramResumableProvideInput: (a: number, b: number) => [number, number];
+    readonly optilotus_runProgramResumableStart: () => [number, number];
+    readonly optilotus_runProgramStart: () => [number, number];
+    readonly optilotus_runProgramStatus: () => [number, number];
+    readonly optilotus_runProgramWithInputs: (a: number, b: number) => [number, number];
     readonly optilotus_setEntry: (a: number, b: number) => [number, number];
     readonly optilotus_setNext: (a: number, b: number, c: number) => [number, number];
     readonly optilotus_version: () => [number, number];

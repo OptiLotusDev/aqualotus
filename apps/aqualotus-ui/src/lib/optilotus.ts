@@ -1,5 +1,6 @@
 import init, {
   optilotus_assign as assign_wasm,
+  optilotus_cast as cast_wasm,
   optilotus_clearPackage as clearPackage_wasm,
   optilotus_createFunction as createFunction_wasm,
   optilotus_declare as declare_wasm,
@@ -7,12 +8,17 @@ import init, {
   optilotus_deleteFunction as deleteFunction_wasm,
   optilotus_getFunction as getFunction_wasm,
   optilotus_health as health_wasm,
+  optilotus_input as input_wasm,
   optilotus_listCommands as listCommands_wasm,
   optilotus_listFunctions as listFunctions_wasm,
   optilotus_print as print_wasm,
   optilotus_renameFunction as renameFunction_wasm,
   optilotus_return as return_wasm,
   optilotus_runProgram as runProgram_wasm,
+  optilotus_runProgramResumableStart as runProgramResumableStart_wasm,
+  optilotus_runProgramResumableProvideInput as runProgramResumableProvideInput_wasm,
+  optilotus_runProgramResumableCancel as runProgramResumableCancel_wasm,
+  optilotus_runProgramWithInputs as runProgramWithInputs_wasm,
   optilotus_setEntry as setEntry_wasm,
   optilotus_setNext as setNext_wasm,
   optilotus_version as version_wasm,
@@ -140,7 +146,7 @@ export type FunctionInfo = {
 
 export type CommandSummary = {
   id: number;
-  kind: "declare" | "assign" | "print" | "return" | "if";
+  kind: "declare" | "assign" | "print" | "input" | "cast" | "return" | "if";
   /** Following user command head; `null` at the tail end or when cleared. */
   next: number | null;
   var?: string;
@@ -249,6 +255,24 @@ export function optilotus_return(
   return parseBridge(return_wasm(fid, expr));
 }
 
+export function optilotus_input(
+  fid: number,
+  ty: OptilotusType,
+): { status: "ok"; id: number } | OptilotusError {
+  assertReady();
+  return parseBridge(input_wasm(fid, ty));
+}
+
+export function optilotus_cast(
+  fid: number,
+  name: string,
+  to: OptilotusType,
+  expr: string,
+): { status: "ok"; id: number } | OptilotusError {
+  assertReady();
+  return parseBridge(cast_wasm(fid, name, to, expr));
+}
+
 export function optilotus_listCommands(
   fid: number,
 ):
@@ -301,6 +325,12 @@ export type RunErr = {
 
 export type RunResult = RunOk | RunErr;
 
+export type RunStatus =
+  | { status: "waiting_input"; command: number; ty: OptilotusType }
+  | RunOk
+  | RunErr;
+
+
 /**
  * Run `main` by id only — no IR JSON crosses the boundary.
  * Returns the parsed `RunResult` (JSON stays inside the bridge).
@@ -309,4 +339,24 @@ export type RunResult = RunOk | RunErr;
 export function optilotus_runProgram(): RunResult {
   assertReady();
   return JSON.parse(runProgram_wasm()) as RunResult;
+}
+
+export function optilotus_runProgramWithInputs(inputs: string[]): RunResult {
+  assertReady();
+  return JSON.parse(runProgramWithInputs_wasm(JSON.stringify(inputs))) as RunResult;
+}
+
+export function optilotus_runProgramResumableStart(): RunStatus {
+  assertReady();
+  return JSON.parse(runProgramResumableStart_wasm()) as RunStatus;
+}
+
+export function optilotus_runProgramResumableProvideInput(value: string): RunStatus {
+  assertReady();
+  return JSON.parse(runProgramResumableProvideInput_wasm(value)) as RunStatus;
+}
+
+export function optilotus_runProgramResumableCancel(): void {
+  assertReady();
+  runProgramResumableCancel_wasm();
 }

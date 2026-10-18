@@ -25,6 +25,33 @@ export function optilotus_assign(fid, name, expr) {
 }
 
 /**
+ * JS: `optilotus_cast(fid, name, to, expr) -> string` (JSON)
+ * @param {number} fid
+ * @param {string} name
+ * @param {string} to
+ * @param {string} expr
+ * @returns {string}
+ */
+export function optilotus_cast(fid, name, to, expr) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(to, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(expr, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.optilotus_cast(fid, ptr0, len0, ptr1, len1, ptr2, len2);
+        deferred4_0 = ret[0];
+        deferred4_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+
+/**
  * JS: `optilotus_clearPackage() -> string` (JSON)
  * @returns {string}
  */
@@ -161,6 +188,27 @@ export function optilotus_health() {
 }
 
 /**
+ * JS: `optilotus_input(fid, ty) -> string` (JSON)
+ * @param {number} fid
+ * @param {string} ty
+ * @returns {string}
+ */
+export function optilotus_input(fid, ty) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(ty, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.optilotus_input(fid, ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * JS: `optilotus_listCommands(fid) -> string` (JSON)
  * @param {number} fid
  * @returns {string}
@@ -272,6 +320,131 @@ export function optilotus_runProgram() {
         return getStringFromWasm0(ret[0], ret[1]);
     } finally {
         wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * JS: `optilotus_runProgramCancel() -> void`
+ */
+export function optilotus_runProgramCancel() {
+    wasm.optilotus_runProgramCancel();
+}
+
+/**
+ * JS: `optilotus_runProgramProvideInput(value) -> string`
+ * @param {string} value
+ * @returns {string}
+ */
+export function optilotus_runProgramProvideInput(value) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.optilotus_runProgramProvideInput(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * JS: `optilotus_runProgramResumableCancel() -> void`
+ */
+export function optilotus_runProgramResumableCancel() {
+    wasm.optilotus_runProgramResumableCancel();
+}
+
+/**
+ * JS: `optilotus_runProgramResumableProvideInput(value) -> string`
+ * @param {string} value
+ * @returns {string}
+ */
+export function optilotus_runProgramResumableProvideInput(value) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.optilotus_runProgramResumableProvideInput(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * JS: `optilotus_runProgramResumableStart() -> string`
+ * @returns {string}
+ */
+export function optilotus_runProgramResumableStart() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.optilotus_runProgramResumableStart();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * JS: `optilotus_runProgramStart() -> string`
+ * @returns {string}
+ */
+export function optilotus_runProgramStart() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.optilotus_runProgramStart();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * JS: `optilotus_runProgramStatus() -> string`
+ * @returns {string}
+ */
+export function optilotus_runProgramStatus() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.optilotus_runProgramStatus();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * JS: `optilotus_runProgramWithInputs(inputs_json) -> string` (JSON)
+ * @param {string} inputs_json
+ * @returns {string}
+ */
+export function optilotus_runProgramWithInputs(inputs_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(inputs_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.optilotus_runProgramWithInputs(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
     }
 }
 

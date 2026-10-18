@@ -78,6 +78,22 @@ fn exec_error_json(err: &crate::error::ExecError) -> serde_json::Value {
             "status": "error", "kind": "MissingReturn",
             "command": command.0, "message": message, "function": function,
         }),
+        E::InputEof { command } => serde_json::json!({
+            "status": "error", "kind": "InputEof",
+            "command": command.0, "message": message,
+        }),
+        E::InputParse { command, detail } => serde_json::json!({
+            "status": "error", "kind": "InputParse",
+            "command": command.0, "message": message, "detail": detail,
+        }),
+        E::Paused => serde_json::json!({
+            "status": "error", "kind": "Paused",
+            "command": null, "message": message,
+        }),
+        E::InvalidState => serde_json::json!({
+            "status": "error", "kind": "InvalidState",
+            "command": null, "message": message,
+        }),
     }
 }
 
@@ -115,6 +131,8 @@ pub fn js_health() -> String {
 thread_local! {
     static PACKAGE: RefCell<crate::package::Package> =
         RefCell::new(crate::package::Package::new());
+    static RUN: RefCell<Option<crate::run_resumable::RunSession>> =
+        const { RefCell::new(None) };
 }
 
 fn with_package<T>(f: impl FnOnce(&mut crate::package::Package) -> T) -> T {
@@ -241,6 +259,24 @@ pub fn package_print(fid: u32, template: &str) -> String {
     )
 }
 
+/// `input(fid, ty)` -> `{"status":"ok","id"}`.
+pub fn package_input(fid: u32, ty: &str) -> String {
+    with_package(|pkg| match pkg.input(crate::ir::FunctionId(fid), ty) {
+        Ok(id) => serde_json::json!({"status": "ok", "id": id.0}).to_string(),
+        Err(e) => package_fail_json(&e).to_string(),
+    })
+}
+
+/// `cast(fid, name, to, expr)` -> `{"status":"ok","id"}`.
+pub fn package_cast(fid: u32, name: &str, to: &str, expr: &str) -> String {
+    with_package(
+        |pkg| match pkg.cast(crate::ir::FunctionId(fid), name, to, expr) {
+            Ok(id) => serde_json::json!({"status": "ok", "id": id.0}).to_string(),
+            Err(e) => package_fail_json(&e).to_string(),
+        },
+    )
+}
+
 /// `return(fid, expr)` -> `{"status":"ok","id"}`.
 pub fn package_return(fid: u32, expr: &str) -> String {
     with_package(|pkg| match pkg.return_(crate::ir::FunctionId(fid), expr) {
@@ -316,6 +352,31 @@ pub fn run_program() -> String {
     })
 }
 
+/// Run `main` consuming the supplied input lines (JSON array of strings).
+pub fn run_program_with_inputs(inputs_json: &str) -> String {
+    let lines: Vec<String> = serde_json::from_str(inputs_json).unwrap_or_default();
+    with_package(|pkg| {
+        let mut sink = crate::sink::VecSink::default();
+        match pkg.run_main_with_input_lines(&mut sink, lines) {
+            Ok(report) => serde_json::json!({
+                "status": "ok",
+                "steps": report.steps,
+                "prints": report.prints,
+                "printed": sink.lines,
+            })
+            .to_string(),
+            Err(e) => exec_error_json(&e).to_string(),
+        }
+    })
+}
+
+/// JS: `optilotus_runProgramWithInputs(inputs_json) -> string` (JSON)
+#[wasm_bindgen(js_name = optilotus_runProgramWithInputs)]
+pub fn js_run_program_with_inputs(inputs_json: &str) -> String {
+    init_panic_hook();
+    run_program_with_inputs(inputs_json)
+}
+
 /// JS: `optilotus_listFunctions() -> string` (JSON)
 #[wasm_bindgen(js_name = optilotus_listFunctions)]
 pub fn js_package_list() -> String {
@@ -379,6 +440,20 @@ pub fn js_package_print(fid: u32, template: &str) -> String {
     package_print(fid, template)
 }
 
+/// JS: `optilotus_input(fid, ty) -> string` (JSON)
+#[wasm_bindgen(js_name = optilotus_input)]
+pub fn js_package_input(fid: u32, ty: &str) -> String {
+    init_panic_hook();
+    package_input(fid, ty)
+}
+
+/// JS: `optilotus_cast(fid, name, to, expr) -> string` (JSON)
+#[wasm_bindgen(js_name = optilotus_cast)]
+pub fn js_package_cast(fid: u32, name: &str, to: &str, expr: &str) -> String {
+    init_panic_hook();
+    package_cast(fid, name, to, expr)
+}
+
 /// JS: `optilotus_return(fid, expr) -> string` (JSON)
 #[wasm_bindgen(js_name = optilotus_return)]
 pub fn js_package_return(fid: u32, expr: &str) -> String {
@@ -412,6 +487,136 @@ pub fn js_package_set_next(fid: u32, cmd: u32, next: Option<u32>) -> String {
 pub fn js_package_delete_command(fid: u32, cmd: u32) -> String {
     init_panic_hook();
     package_delete_command(fid, cmd)
+}
+
+fn run_status_json(status: crate::run_resumable::RunStatus) -> String {
+    use crate::run_resumable::RunStatus;
+    match status {
+        RunStatus::WaitingInput { command, ty } => serde_json::json!({
+            "status": "waiting_input",
+            "command": command.0,
+            "ty": ty.tag(),
+        })
+        .to_string(),
+        RunStatus::Finished {
+            steps,
+            prints,
+            printed,
+            returned,
+        } => serde_json::json!({
+            "status": "ok",
+            "steps": steps,
+            "prints": prints,
+            "printed": printed,
+            "returned": returned,
+        })
+        .to_string(),
+        RunStatus::Error(e) => exec_error_json(&e).to_string(),
+    }
+}
+
+pub fn run_program_start() -> String {
+    init_panic_hook();
+    RUN.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        *cell = None;
+        let pkg = PACKAGE.with(|p| p.borrow().clone());
+        let run = crate::run_resumable::RunSession::start(pkg.as_program());
+        let status = run.status();
+        *cell = Some(run);
+        run_status_json(status)
+    })
+}
+
+pub fn run_program_provide_input(value: &str) -> String {
+    init_panic_hook();
+    RUN.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        if let Some(run) = cell.as_mut() {
+            run_status_json(run.provide_input(value))
+        } else {
+            serde_json::json!({"status":"error","kind":"NoRun","message":"no active run"})
+                .to_string()
+        }
+    })
+}
+
+pub fn run_program_cancel() {
+    init_panic_hook();
+    RUN.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+}
+
+pub fn run_program_status() -> String {
+    init_panic_hook();
+    RUN.with(|cell| {
+        if let Some(run) = cell.borrow().as_ref() {
+            run_status_json(run.status())
+        } else {
+            serde_json::json!({"status":"idle"}).to_string()
+        }
+    })
+}
+
+// Compatibility aliases (old names).
+pub fn run_program_resumable_start() -> String {
+    run_program_start()
+}
+pub fn run_program_resumable_provide_input(value: &str) -> String {
+    run_program_provide_input(value)
+}
+pub fn run_program_resumable_cancel() {
+    run_program_cancel()
+}
+
+/// JS: `optilotus_runProgramStart() -> string`
+#[wasm_bindgen(js_name = optilotus_runProgramStart)]
+pub fn js_run_program_start() -> String {
+    init_panic_hook();
+    run_program_start()
+}
+
+/// JS: `optilotus_runProgramProvideInput(value) -> string`
+#[wasm_bindgen(js_name = optilotus_runProgramProvideInput)]
+pub fn js_run_program_provide_input(value: &str) -> String {
+    init_panic_hook();
+    run_program_provide_input(value)
+}
+
+/// JS: `optilotus_runProgramCancel() -> void`
+#[wasm_bindgen(js_name = optilotus_runProgramCancel)]
+pub fn js_run_program_cancel() {
+    init_panic_hook();
+    run_program_cancel()
+}
+
+/// JS: `optilotus_runProgramStatus() -> string`
+#[wasm_bindgen(js_name = optilotus_runProgramStatus)]
+pub fn js_run_program_status() -> String {
+    init_panic_hook();
+    run_program_status()
+}
+
+/// JS: `optilotus_runProgramResumableStart() -> string`
+#[wasm_bindgen(js_name = optilotus_runProgramResumableStart)]
+pub fn js_run_program_resumable_start() -> String {
+    init_panic_hook();
+    run_program_resumable_start()
+}
+
+/// JS: `optilotus_runProgramResumableProvideInput(value) -> string`
+#[wasm_bindgen(js_name = optilotus_runProgramResumableProvideInput)]
+pub fn js_run_program_resumable_provide_input(value: &str) -> String {
+    init_panic_hook();
+    run_program_resumable_provide_input(value)
+}
+
+/// JS: `optilotus_runProgramResumableCancel() -> void`
+#[wasm_bindgen(js_name = optilotus_runProgramResumableCancel)]
+pub fn js_run_program_resumable_cancel() {
+    init_panic_hook();
+    run_program_resumable_cancel()
 }
 
 /// JS: `optilotus_runProgram() -> string` (JSON report, no JSON input)

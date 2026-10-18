@@ -20,7 +20,7 @@ fn rename_helper_preserves_identity_and_commands() {
     assert_eq!(before.name, "renamed");
 
     let mut sink = VecSink::default();
-    optilotus::run_function(&before, &mut sink).unwrap();
+    optilotus::run_function(&before, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(sink.lines, vec!["7".to_string()]);
 }
 

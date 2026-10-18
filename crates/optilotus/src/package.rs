@@ -128,6 +128,8 @@ pub enum CommandKind {
     Declare,
     Assign,
     Print,
+    Input,
+    Cast,
     Return,
     If,
 }
@@ -700,6 +702,113 @@ impl Package {
         Ok(head_id)
     }
 
+    /// `input(ty)`: single `Op::Input` producing one typed value.
+    pub fn input(&mut self, fid: FunctionId, ty_tag: &str) -> Result<CommandId, PackageError> {
+        if !self.functions.contains_key(&fid) {
+            return Err(PackageError::UnknownFunction(fid));
+        }
+        let Some(ty) = Type::parse_tag(ty_tag) else {
+            return Err(PackageError::UnknownType(ty_tag.to_string()));
+        };
+        if ty == Type::Void {
+            return Err(PackageError::InvalidCommand(
+                "cannot read a value of type void".to_string(),
+            ));
+        }
+        let vid = self.alloc_value_id();
+        let head_id = self.alloc_command_id();
+        let head = Command {
+            id: head_id,
+            op: Op::Input { ty },
+            inputs: vec![],
+            outputs: vec![vid],
+            next: None,
+        };
+        self.append_raw(fid, head, None);
+        self.meta_mut(fid)?.insert(
+            head_id,
+            CommandSummary {
+                ty: Some(ty),
+                ..CommandSummary::blank(head_id, CommandKind::Input)
+            },
+        );
+        Ok(head_id)
+    }
+
+    /// `cast(name, to, expr)`: declare `name` of type `to` initialized by
+    /// casting `expr` to `to`. Expands to `Compute` -> `Cast` -> `Set`.
+    pub fn cast(
+        &mut self,
+        fid: FunctionId,
+        name: &str,
+        to_tag: &str,
+        expr: &str,
+    ) -> Result<CommandId, PackageError> {
+        let var = check_var_name(name).map_err(|e| PackageError::InvalidName(e.to_string()))?;
+        let Some(to) = Type::parse_tag(to_tag) else {
+            return Err(PackageError::UnknownType(to_tag.to_string()));
+        };
+        if to == Type::Void {
+            return Err(PackageError::InvalidCommand(
+                "cannot cast to void".to_string(),
+            ));
+        }
+        if !self.functions.contains_key(&fid) {
+            return Err(PackageError::UnknownFunction(fid));
+        }
+        if self.declared_type(fid, &var).is_some() {
+            return Err(PackageError::DuplicateVariable(var));
+        }
+        if expr.trim().is_empty() {
+            return Err(PackageError::InvalidCommand(
+                "cast expression must not be empty".to_string(),
+            ));
+        }
+        let temp = self.alloc_value_id();
+        let result = self.alloc_value_id();
+        let compute_id = self.alloc_command_id();
+        let cast_id = self.alloc_command_id();
+        let set_id = self.alloc_command_id();
+        let compute = Command {
+            id: compute_id,
+            op: Op::Compute {
+                expr: expr.to_string(),
+            },
+            inputs: vec![],
+            outputs: vec![temp],
+            next: Some(cast_id),
+        };
+        let cast = Command {
+            id: cast_id,
+            op: Op::Cast { to },
+            inputs: vec![temp],
+            outputs: vec![result],
+            next: Some(set_id),
+        };
+        let set = Command {
+            id: set_id,
+            op: Op::Set {
+                var: var.clone(),
+                ty: to,
+            },
+            inputs: vec![result],
+            outputs: vec![],
+            next: None,
+        };
+        self.append_raw(fid, compute, Some(cast));
+        self.append_raw(fid, set, None);
+        self.meta_mut(fid)?.insert(
+            set_id,
+            CommandSummary {
+                var: Some(var),
+                ty: Some(to),
+                expr: Some(expr.to_string()),
+                ..CommandSummary::blank(set_id, CommandKind::Cast)
+            },
+        );
+        Ok(set_id)
+    }
+
     /// `return(expr)`: single `Op::Return`.
     pub fn return_(&mut self, fid: FunctionId, expr: &str) -> Result<CommandId, PackageError> {
         if !self.functions.contains_key(&fid) {
@@ -899,7 +1008,9 @@ impl Package {
             .ok_or(PackageError::UnknownFunction(fid))?;
         let summary = meta.get(&head).ok_or(PackageError::UnknownCommand(head))?;
         match summary.kind {
-            CommandKind::Return | CommandKind::If => Ok(head),
+            CommandKind::Return | CommandKind::If | CommandKind::Input | CommandKind::Cast => {
+                Ok(head)
+            }
             CommandKind::Declare | CommandKind::Assign | CommandKind::Print => {
                 let func = self
                     .functions
@@ -976,6 +1087,34 @@ impl Package {
             .find_command(tail)
             .ok_or(PackageError::UnknownCommand(tail))?
             .next;
+        // Collect hidden commands that belong to a `Cast` group so they are
+        // removed together with the user-visible head.
+        let mut hidden: Vec<CommandId> = Vec::new();
+        let is_cast = self
+            .meta
+            .get(&fid)
+            .and_then(|m| m.get(&command))
+            .map(|s| s.kind == CommandKind::Cast)
+            .unwrap_or(false);
+        if is_cast {
+            // cast_id is the command whose `next` points at the user head.
+            let cast_id = func
+                .commands
+                .iter()
+                .find(|c| c.next == Some(command))
+                .map(|c| c.id);
+            if let Some(cid) = cast_id {
+                hidden.push(cid);
+                let compute_id = func
+                    .commands
+                    .iter()
+                    .find(|c| c.next == Some(cid))
+                    .map(|c| c.id);
+                if let Some(xid) = compute_id {
+                    hidden.push(xid);
+                }
+            }
+        }
         // Repair every edge pointing at the deleted head (cycles/orphans
         // can leave several); the internal head->pair edge dies with the
         // group and needs no repair.
@@ -995,11 +1134,12 @@ impl Package {
         if entry_points_at_head {
             func.entry = successor;
         }
-        if tail == command {
-            func.commands.retain(|c| c.id != command);
-        } else {
-            func.commands.retain(|c| c.id != command && c.id != tail);
+        let mut to_delete = vec![command];
+        if tail != command {
+            to_delete.push(tail);
         }
+        to_delete.extend(hidden);
+        func.commands.retain(|c| !to_delete.contains(&c.id));
         if let Some(m) = self.meta.get_mut(&fid) {
             m.remove(&command);
         }
@@ -1027,7 +1167,45 @@ impl Package {
         sink: &mut impl PrintSink,
         max_steps: usize,
     ) -> Result<crate::exec::ExecReport, crate::error::ExecError> {
-        crate::exec::run_program_with_limit(&self.as_program(), sink, max_steps)
+        let mut source = crate::sink::VecSource::default();
+        crate::exec::run_program_with_limit(&self.as_program(), sink, &mut source, max_steps)
+    }
+
+    /// Same as [`Package::run_main`] but reads from the supplied input source.
+    pub fn run_main_with_input(
+        &self,
+        sink: &mut impl PrintSink,
+        input: &mut impl crate::sink::InputSource,
+    ) -> Result<crate::exec::ExecReport, crate::error::ExecError> {
+        self.run_main_with_input_with_limit(sink, input, crate::exec::MAX_STEPS)
+    }
+
+    /// Same as [`Package::run_main_with_limit`] but reads from the supplied input source.
+    pub fn run_main_with_input_with_limit(
+        &self,
+        sink: &mut impl PrintSink,
+        input: &mut impl crate::sink::InputSource,
+        max_steps: usize,
+    ) -> Result<crate::exec::ExecReport, crate::error::ExecError> {
+        crate::exec::run_program_with_limit(&self.as_program(), sink, input, max_steps)
+    }
+
+    /// Run `main` reading successive lines from `lines`.
+    pub fn run_main_with_input_lines(
+        &self,
+        sink: &mut impl PrintSink,
+        lines: Vec<String>,
+    ) -> Result<crate::exec::ExecReport, crate::error::ExecError> {
+        let mut source = crate::sink::VecSource {
+            lines,
+            ..crate::sink::VecSource::default()
+        };
+        crate::exec::run_program_with_limit(
+            &self.as_program(),
+            sink,
+            &mut source,
+            crate::exec::MAX_STEPS,
+        )
     }
 
     /// Same as [`Package::run_main`] but also captures `main`'s `Return`.
@@ -1035,15 +1213,17 @@ impl Package {
         &self,
         sink: &mut impl PrintSink,
     ) -> Result<(crate::exec::ExecReport, Option<Value>), crate::error::ExecError> {
+        let mut source = crate::sink::VecSource::default();
         crate::exec::run_program_returning_with_limit(
             &self.as_program(),
             sink,
+            &mut source,
             crate::exec::MAX_STEPS,
         )
     }
 
     /// Snapshot the registry as a `Program` for the call-aware executor.
-    fn as_program(&self) -> crate::ir::Program {
+    pub fn as_program(&self) -> crate::ir::Program {
         let mut functions: Vec<Function> = self.functions.values().cloned().collect();
         functions.sort_by_key(|f| f.id.0);
         crate::ir::Program {
