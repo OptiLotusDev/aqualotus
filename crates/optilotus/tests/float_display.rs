@@ -43,8 +43,8 @@ fn fractional_floats_are_unchanged() {
 #[test]
 fn float32_keeps_its_shortest_round_trip_form() {
     // Regression: formatting an f32 via `as f64` produced
-    // "3.141590118408203" instead of "3.14159".
-    assert_eq!(Value::Float32(3.14159).to_string(), "3.14159");
+    // "1.2345678806304932" instead of "1.2345679".
+    assert_eq!(Value::Float32(1.2345679).to_string(), "1.2345679");
     assert_eq!(Value::Float32(0.1).to_string(), "0.1");
     assert_eq!(Value::Float32(1.5).to_string(), "1.5");
 }

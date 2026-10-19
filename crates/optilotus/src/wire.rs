@@ -139,7 +139,9 @@ pub struct IdleResponse {
 
 impl Default for IdleResponse {
     fn default() -> Self {
-        Self { status: STATUS_IDLE }
+        Self {
+            status: STATUS_IDLE,
+        }
     }
 }
 

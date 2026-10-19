@@ -7,7 +7,7 @@
 
 use optilotus::wire::{
     exec_error_response, ClearedResponse, CommandIdResponse, DeletedResponse, ErrorResponse,
-    FunctionInfoResponse, FunctionRow, FunctionResponse, IdleResponse, ListCommandsResponse,
+    FunctionInfoResponse, FunctionResponse, FunctionRow, IdleResponse, ListCommandsResponse,
     ListFunctionsResponse, OkResponse, RunOkResponse, WaitingInputResponse,
 };
 use optilotus::{CommandId, ExecError, FunctionId, FunctionInfo, Type, Value, ValueId};
@@ -45,10 +45,7 @@ fn function_row_uses_camel_case_is_main() {
         name: "main".to_string(),
         is_main: true,
     };
-    assert_eq!(
-        json_of(&row),
-        r#"{"id":0,"name":"main","isMain":true}"#
-    );
+    assert_eq!(json_of(&row), r#"{"id":0,"name":"main","isMain":true}"#);
 }
 
 #[test]
