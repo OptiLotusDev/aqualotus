@@ -83,7 +83,8 @@ fn cast_changes_variable_type() {
     pkg.print(MAIN_ID, "\"{f}\"").unwrap();
 
     let (_res, lines) = run(&pkg);
-    assert_eq!(lines, vec!["41".to_string()]);
+    // `f` is a float64, so its printed form keeps the decimal point.
+    assert_eq!(lines, vec!["41.0".to_string()]);
 }
 
 #[test]

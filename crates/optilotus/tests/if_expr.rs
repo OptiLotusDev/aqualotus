@@ -255,5 +255,6 @@ fn if_with_cast_in_body() {
         .unwrap();
 
     let (_res, lines) = run(&pkg);
-    assert_eq!(lines, vec!["10".to_string()]);
+    // `y` is a float64, so its printed form keeps the decimal point.
+    assert_eq!(lines, vec!["10.0".to_string()]);
 }

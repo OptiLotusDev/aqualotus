@@ -16,7 +16,9 @@ fn cast_int_to_float() {
     let mut sink = VecSink::default();
     let mut source = VecSource::default();
     run_function(&f, &mut sink, &mut source).unwrap();
-    assert_eq!(sink.lines, vec!["42".to_string()]);
+    // The cast produced a float, so the printed form keeps the decimal
+    // point: `42` would be indistinguishable from the int32 it came from.
+    assert_eq!(sink.lines, vec!["42.0".to_string()]);
 }
 
 #[test]

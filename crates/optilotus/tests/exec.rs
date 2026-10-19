@@ -1039,7 +1039,8 @@ fn compute_all_operators_end_to_end() {
         vec![
             "1".to_string(),
             "3".to_string(),
-            "10".to_string(),
+            // `2.5 * 4` is a float, so it keeps the decimal point.
+            "10.0".to_string(),
             "-3".to_string(),
             "14".to_string(),
         ]
