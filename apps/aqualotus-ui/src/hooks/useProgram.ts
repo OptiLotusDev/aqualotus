@@ -13,6 +13,7 @@ import {
   optilotus_clearPackage,
   optilotus_createFunction,
   optilotus_declare,
+  optilotus_declareWithAccess,
   optilotus_deleteCommand,
   optilotus_deleteFunction,
   optilotus_getFunction,
@@ -395,10 +396,11 @@ export function useProgram(
           // naturally write literals (`"hi"`, `'a'`, `True`, `2` for a
           // float) before the engine validates.
           const normalized = normalizeDeclareInit(draft.ty, draft.init);
-          return optilotus_declare(
+          return optilotus_declareWithAccess(
             fid,
             draft.name,
             draft.ty,
+            draft.access ?? "private",
             normalized === "" ? undefined : normalized,
           );
         }

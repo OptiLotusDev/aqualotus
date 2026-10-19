@@ -242,6 +242,7 @@ the wire types above.
 
 **Command builders** (all take `fid: number`)
 - `optilotus_declare(fid, name, ty: string, init?: string): string`
+- `optilotus_declareWithAccess(fid, name, ty: string, access: string, init?: string): string`
 - `optilotus_assign(fid, name, expr: string): string`
 - `optilotus_print(fid, template: string): string`
 - `optilotus_input(fid, ty: string): string`
@@ -287,7 +288,7 @@ throw an explicit error before init (P22).
 The types are **re-exports of the generated bindings** — this module no
 longer declares them, so they cannot drift from the engine:
 
-- `FunctionId`, `CommandId`, `ValueId`, `CommandKind`, `CommandSpec`,
+- `FunctionId`, `CommandId`, `ValueId`, `Access`, `CommandKind`, `CommandSpec`,
   `CommandSummary`, `FunctionInfo`, `FunctionSummary`, `OptilotusType`,
   `Value`, `PendingInput`, `OptilotusError` (the generated `ErrorResponse`),
   `RunOk` (the generated `RunOkResponse`).
@@ -308,6 +309,7 @@ Call sites never parse JSON — `JSON.parse` exists only inside this module:
 - `optilotus_renameFunction(id, name): {status:"ok",id,name,isMain} | OptilotusError`
 - `optilotus_clearPackage(): {status:"ok",cleared}`
 - `optilotus_declare(fid, name, ty: OptilotusType, init?): {status:"ok",id} | OptilotusError`
+- `optilotus_declareWithAccess(fid, name, ty: OptilotusType, access: Access, init?): {status:"ok",id} | OptilotusError`
 - `optilotus_assign(fid, name, expr): {status:"ok",id} | OptilotusError`
 - `optilotus_print(fid, template): {status:"ok",id} | OptilotusError`
 - `optilotus_input(fid, ty): {status:"ok",id} | OptilotusError`
@@ -332,7 +334,8 @@ Call sites never parse JSON — `JSON.parse` exists only inside this module:
 - `optilotus_debugMode(enable): void`
 
 `CommandSummary` kind `"if"` carries optional `condition`, `then_body`,
-`else_body` fields.
+`else_body` fields; kind `"declare"` carries an optional `access`
+(`public` | `protected` | `private`).
 
 ## Package API (the only API)
 
@@ -484,6 +487,53 @@ optilotus_assign(0, "z", "{x} + {y}");
 optilotus_print(0, '"{z}"');
 // prints "15"
 ```
+
+### Variable access modifiers
+
+`declare` accepts an optional visibility: `public`, `protected` or
+`private`. It is recorded on the command summary and surfaced in the UI.
+
+```ts
+optilotus_declare(0, "x", optilotus_type.int32, "41");
+// defaults to `private`
+
+optilotus_declareWithAccess(0, "y", optilotus_type.int32, "public", "1");
+// {status:"ok", id: 3}  — the user-facing head id, not a raw command id
+
+optilotus_listCommands(0);
+// {status:"ok", commands: [
+//   {id, kind:"declare", var:"y", ty:"int32", access:"public", expr:"1", ...},
+// ]}
+```
+
+| Modifier | Intended scope | Scope today |
+|---|---|---|
+| `public` | every package (global) | same as `protected` |
+| `protected` | the declaring package | same as `public` |
+| `private` | the declaring scope (function, or class once classes exist) | the declaring function — the default |
+
+**Access is recorded and surfaced, but not yet enforced.** There is
+exactly one package and there are no classes, so `public` and `protected`
+currently mean the same thing (every function is in the same package),
+and `private` matches the runtime's existing behaviour: each call gets a
+fresh variable scope, so a variable is never visible outside the function
+that declares it. The distinction exists so the language has a place for
+it; enforcement becomes observable when classes and multiple packages
+land.
+
+Rules:
+- The default is `private`, which preserves the behaviour of programs
+  written before access existed. A summary with no `access` field reads
+  as `private`.
+- Only `declare` carries access. Every other kind omits the field.
+- An unknown modifier is a typed `UnknownAccess` error, never a silent
+  fallback to the default.
+- A non-default modifier on an **if-body** declare is rejected: a body
+  variable is branch-scoped and never appears in `listCommands`, so a
+  wider visibility would have nothing to mean yet.
+- Access does not affect execution today. `tests/access.rs` pins that
+  explicitly, so the test that must change when enforcement lands is
+  obvious.
 
 ### Package rules
 

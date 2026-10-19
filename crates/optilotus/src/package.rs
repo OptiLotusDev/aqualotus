@@ -140,6 +140,56 @@ pub enum CommandKind {
     If,
 }
 
+/// Visibility of a declared variable.
+///
+/// Scope today: there is exactly one package and no classes, so `public`
+/// and `protected` currently mean the same thing — the variable is usable
+/// by every function in the package. `private` restricts a variable to
+/// the function that declares it, which is also the current runtime
+/// behaviour for every variable (each call gets a fresh scope).
+///
+/// The distinction is recorded and surfaced now so the language has a
+/// place for it; enforcement becomes observable when classes and
+/// multiple packages exist. See `docs/api.md` for the current limits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "ts-bindings", ts(export))]
+pub enum Access {
+    /// Visible to every package (global scope). Currently equivalent to
+    /// `Protected`, because only one package can exist.
+    Public,
+    /// Visible within the declaring package. Currently equivalent to
+    /// `Public`; becomes distinct once multiple packages exist.
+    Protected,
+    /// Visible only inside the declaring scope: the function today, and
+    /// the class once classes exist. This is the default, and it matches
+    /// the runtime's existing per-call variable scope.
+    #[default]
+    Private,
+}
+
+impl Access {
+    /// Parse a wire tag (`"public"` / `"protected"` / `"private"`).
+    pub fn parse_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "public" => Some(Access::Public),
+            "protected" => Some(Access::Protected),
+            "private" => Some(Access::Private),
+            _ => None,
+        }
+    }
+
+    /// Wire tag for this access level.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Access::Public => "public",
+            Access::Protected => "protected",
+            Access::Private => "private",
+        }
+    }
+}
+
 /// User-level command spec: the frontend-facing shape for building `if`
 /// bodies. A flat struct with a `kind` tag so it serializes exactly like
 /// the TS `CommandSpec` union — the bridge passes it as a native JS
@@ -153,6 +203,9 @@ pub struct CommandSpec {
     pub kind: CommandKind,
     pub var: Option<String>,
     pub ty: Option<Type>,
+    /// `declare` only: the variable's visibility (defaults to `private`).
+    #[serde(default)]
+    pub access: Option<Access>,
     #[serde(default)]
     pub init: Option<String>,
     pub expr: Option<String>,
@@ -167,6 +220,7 @@ impl CommandSpec {
             kind: CommandKind::Declare,
             var: Some(var.to_string()),
             ty: Some(ty),
+            access: None,
             init,
             expr: None,
             template: None,
@@ -178,6 +232,7 @@ impl CommandSpec {
             kind: CommandKind::Assign,
             var: Some(var.to_string()),
             ty: None,
+            access: None,
             init: None,
             expr: Some(expr.to_string()),
             template: None,
@@ -189,6 +244,7 @@ impl CommandSpec {
             kind: CommandKind::Print,
             var: None,
             ty: None,
+            access: None,
             init: None,
             expr: None,
             template: Some(template.to_string()),
@@ -199,6 +255,7 @@ impl CommandSpec {
         Self {
             kind: CommandKind::Input,
             var: None,
+            access: None,
             ty: Some(ty),
             init: None,
             expr: None,
@@ -211,6 +268,7 @@ impl CommandSpec {
             kind: CommandKind::Cast,
             var: Some(var.to_string()),
             ty: None,
+            access: None,
             init: None,
             expr: Some(expr.to_string()),
             template: None,
@@ -237,6 +295,12 @@ pub struct CommandSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub ty: Option<Type>,
+    /// `declare` only: the variable's visibility. Omitted for every other
+    /// kind, and for declarations made before access existed (which read
+    /// as `private`, the historical behaviour).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
+    pub access: Option<Access>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub expr: Option<String>,
@@ -264,6 +328,7 @@ impl CommandSummary {
             next: None,
             var: None,
             ty: None,
+            access: None,
             expr: None,
             template: None,
             condition: None,
@@ -731,6 +796,23 @@ impl Package {
         ty_tag: &str,
         init: Option<&str>,
     ) -> Result<CommandId, PackageError> {
+        self.declare_with_access(fid, name, ty_tag, init, Access::default())
+    }
+
+    /// `declare` with an explicit visibility.
+    ///
+    /// Access is recorded and surfaced but not yet enforced: with one
+    /// package and no classes, `public` and `protected` are equivalent,
+    /// and `private` matches the runtime's existing per-call variable
+    /// scope. See [`Access`].
+    pub fn declare_with_access(
+        &mut self,
+        fid: FunctionId,
+        name: &str,
+        ty_tag: &str,
+        init: Option<&str>,
+        access: Access,
+    ) -> Result<CommandId, PackageError> {
         let var = check_var_name(name).map_err(|e| PackageError::InvalidName(e.to_string()))?;
         let Some(ty) = Type::parse_tag(ty_tag) else {
             return Err(PackageError::UnknownType(ty_tag.to_string()));
@@ -759,6 +841,7 @@ impl Package {
             CommandSummary {
                 var: Some(var),
                 ty: Some(ty),
+                access: Some(access),
                 expr: init.map(|s| s.to_string()),
                 ..CommandSummary::blank(head.id, CommandKind::Declare)
             },
@@ -1177,6 +1260,20 @@ impl Package {
                 if let Some(text) = &spec.init {
                     parse_value(ty, text)
                         .map_err(|e| PackageError::InvalidCommand(e.to_string()))?;
+                }
+                // Access is accepted here for shape-compatibility with a
+                // top-level `declare`, but a body variable is scoped to
+                // the branch and never appears in `listCommands`, so
+                // there is nothing for a wider visibility to mean yet.
+                // Reject a non-default value rather than silently
+                // dropping it (P22: fail explicitly).
+                if let Some(access) = spec.access {
+                    if access != Access::default() {
+                        return Err(PackageError::InvalidCommand(format!(
+                            "access '{}' is not supported on an if-body declare",
+                            access.tag()
+                        )));
+                    }
                 }
                 Ok(())
             }

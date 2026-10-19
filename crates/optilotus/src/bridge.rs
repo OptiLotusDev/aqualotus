@@ -191,6 +191,37 @@ pub fn package_declare(fid: u32, name: &str, ty: &str, init: Option<String>) -> 
     )
 }
 
+/// `declareWithAccess(fid, name, ty, access, init?)` -> `{"status":"ok","id"}`.
+///
+/// Declares a variable with an explicit visibility. An unknown access tag
+/// is a typed error rather than a silent fallback to the default (P22).
+pub fn package_declare_with_access(
+    fid: u32,
+    name: &str,
+    ty: &str,
+    access: &str,
+    init: Option<String>,
+) -> String {
+    let Some(access) = crate::package::Access::parse_tag(access) else {
+        return to_json(&ErrorResponse::new(
+            "UnknownAccess",
+            format!("unknown access modifier {access:?}: expected public, protected or private"),
+        ));
+    };
+    with_package(|pkg| {
+        match pkg.declare_with_access(
+            crate::ir::FunctionId(fid),
+            name,
+            ty,
+            init.as_deref(),
+            access,
+        ) {
+            Ok(id) => to_json(&CommandIdResponse::new(id)),
+            Err(e) => to_json(&package_fail(&e)),
+        }
+    })
+}
+
 /// `assign(fid, name, expr)` -> `{"status":"ok","id"}`.
 pub fn package_assign(fid: u32, name: &str, expr: &str) -> String {
     with_package(
@@ -412,6 +443,19 @@ pub fn js_package_clear() -> String {
 pub fn js_package_declare(fid: u32, name: &str, ty: &str, init: Option<String>) -> String {
     init_panic_hook();
     package_declare(fid, name, ty, init)
+}
+
+/// JS: `optilotus_declareWithAccess(fid, name, ty, access, init?) -> string` (JSON)
+#[wasm_bindgen(js_name = optilotus_declareWithAccess)]
+pub fn js_package_declare_with_access(
+    fid: u32,
+    name: &str,
+    ty: &str,
+    access: &str,
+    init: Option<String>,
+) -> String {
+    init_panic_hook();
+    package_declare_with_access(fid, name, ty, access, init)
 }
 
 /// JS: `optilotus_assign(fid, name, expr) -> string` (JSON)

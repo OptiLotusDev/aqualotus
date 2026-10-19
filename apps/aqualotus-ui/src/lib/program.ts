@@ -1,4 +1,4 @@
-import type { CommandSpec, CommandSummary, OptilotusError } from "./optilotus";
+import type { Access, CommandSpec, CommandSummary, OptilotusError } from "./optilotus";
 import { optilotus_type, type OptilotusType } from "./optilotus";
 
 /** Command kinds the editor supports (mirrors the bridge). */
@@ -13,7 +13,19 @@ export type CommandKind = CommandSummary["kind"];
  * nested specs because that is the shape `optilotus_if` accepts.
  */
 export type CommandDraft =
-  | { kind: "declare"; name: string; ty: OptilotusType; init: string }
+  | {
+      kind: "declare";
+      name: string;
+      ty: OptilotusType;
+      /**
+       * Visibility. Optional so existing call sites (and drafts built
+       * before access existed) keep compiling; an absent value means
+       * `private`, which is the engine default and the historical
+       * behaviour.
+       */
+      access?: Access;
+      init: string;
+    }
   | { kind: "assign"; name: string; expr: string }
   | { kind: "print"; template: string }
   | { kind: "input"; ty: OptilotusType }
@@ -55,6 +67,9 @@ export function summaryToDraft(cmd: CommandSummary): CommandDraft {
         kind: "declare",
         name: cmd.var ?? "",
         ty: (cmd.ty ?? optilotus_type.int32) as OptilotusType,
+        // Summaries written before access existed omit it; those
+        // variables behaved as `private`, which is also the default.
+        access: cmd.access ?? "private",
         init: displayDeclareValue(cmd.ty, cmd.expr),
       };
     case "assign":
@@ -121,6 +136,10 @@ export function commandDraftEqual(
         next.kind === "declare" &&
         next.name === current.name &&
         next.ty === current.ty &&
+        // An absent modifier means `private` (the engine default), so
+        // compare the resolved values: otherwise re-applying a draft that
+        // omits `access` would look like an edit and churn history.
+        (next.access ?? "private") === (current.access ?? "private") &&
         next.init === current.init
       );
     case "assign":

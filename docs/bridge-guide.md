@@ -107,6 +107,25 @@ Worked example: adding `CommandKind::Loop`.
 2. Return it from the bridge via `to_json(&response)`.
 3. Regenerate, typecheck, and add a `wire_format.rs` case.
 
+### Add a variable access modifier
+
+Access levels are a closed set (`public`/`protected`/`private`), so this
+is rarer than adding a command kind. The pattern:
+
+1. Add the variant to `Access` in `crates/optilotus/src/package.rs`.
+2. Update `Access::parse_tag` and `Access::tag` — the compiler will not
+   force this, so both need a deliberate edit.
+3. Regenerate and typecheck. The generated `Access` union gains the
+   variant, and any UI `switch` over it must handle it.
+4. Decide whether the new level is enforceable. If not, document it as
+   recorded-but-not-enforced in `docs/api.md` rather than implying
+   behaviour that does not exist.
+
+Note the current state: access is **stored and surfaced but not
+enforced**, because there is one package and no classes. `tests/access.rs`
+pins `access_does_not_change_execution` so the test that must change when
+enforcement lands is obvious.
+
 ## Compatibility (P18)
 
 The wire format is a stable interface. **Serialized output may grow but

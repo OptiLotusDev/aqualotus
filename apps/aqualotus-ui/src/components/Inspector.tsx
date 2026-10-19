@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from "react";
-import type { CommandId, CommandSummary } from "../lib/optilotus";
+import type { Access, CommandId, CommandSummary } from "../lib/optilotus";
 import type { FunctionInfo } from "../lib/optilotus";
 import { optilotus_type, type OptilotusType } from "../lib/optilotus";
 import {
@@ -38,6 +38,28 @@ interface InspectorProps {
 const TYPES: readonly OptilotusType[] = (
   Object.values(optilotus_type) as OptilotusType[]
 ).filter((t) => t !== optilotus_type.void);
+
+/** Access modifiers offered for a variable declaration. */
+const ACCESS_LEVELS: readonly Access[] = ["private", "protected", "public"];
+
+/**
+ * Explain what the selected modifier means *today*.
+ *
+ * The language has one package and no classes, so `public` and
+ * `protected` are currently equivalent and `private` matches the
+ * runtime's existing per-call variable scope. Saying so plainly is
+ * better than implying an enforcement that does not exist yet.
+ */
+function accessHint(access: Access): string {
+  switch (access) {
+    case "public":
+      return "Visible to every package. Currently the same as protected: only one package exists.";
+    case "protected":
+      return "Visible within this package. Currently the same as public: all functions are in one package.";
+    case "private":
+      return "Visible only inside the function that declares it (the default).";
+  }
+}
 
 /**
  * Exhaustiveness guard for the per-kind editor. A new `CommandDraft`
@@ -197,6 +219,25 @@ function KindFields(props: {
                 </option>
               ))}
             </select>
+          </div>
+          <div className="field">
+            <span>
+              <label htmlFor="in-access">Access</label>
+            </span>
+            <select
+              id="in-access"
+              value={draft.access ?? "private"}
+              onChange={(e) =>
+                onChange({ ...draft, access: e.target.value as Access })
+              }
+            >
+              {ACCESS_LEVELS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+            <div className="hint">{accessHint(draft.access ?? "private")}</div>
           </div>
           <div className="field">
             <span>

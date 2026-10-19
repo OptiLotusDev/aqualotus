@@ -219,6 +219,7 @@ fn if_invalid_spec_rejected_before_mutation() {
         kind: optilotus::CommandKind::Declare,
         var: Some("y".to_string()),
         ty: None,
+        access: None,
         init: None,
         expr: None,
         template: None,

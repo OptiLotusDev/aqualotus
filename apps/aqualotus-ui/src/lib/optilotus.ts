@@ -4,6 +4,7 @@ import init, {
   optilotus_clearPackage as clearPackage_wasm,
   optilotus_createFunction as createFunction_wasm,
   optilotus_declare as declare_wasm,
+  optilotus_declareWithAccess as declareWithAccess_wasm,
   optilotus_deleteCommand as deleteCommand_wasm,
   optilotus_deleteFunction as deleteFunction_wasm,
   optilotus_getFunction as getFunction_wasm,
@@ -115,6 +116,7 @@ export function optilotus_health(): string {
 export type { CommandId } from "../wasm/optilotus/bindings/CommandId";
 export type { FunctionId } from "../wasm/optilotus/bindings/FunctionId";
 export type { ValueId } from "../wasm/optilotus/bindings/ValueId";
+export type { Access } from "../wasm/optilotus/bindings/Access";
 export type { CommandKind } from "../wasm/optilotus/bindings/CommandKind";
 export type { CommandSpec } from "../wasm/optilotus/bindings/CommandSpec";
 export type { CommandSummary } from "../wasm/optilotus/bindings/CommandSummary";
@@ -126,6 +128,7 @@ export type { Type as OptilotusType } from "../wasm/optilotus/bindings/Type";
 export type { Value } from "../wasm/optilotus/bindings/Value";
 export type { WaitingInputResponse as PendingInput } from "../wasm/optilotus/bindings/WaitingInputResponse";
 
+import type { Access } from "../wasm/optilotus/bindings/Access";
 import type { CommandSpec } from "../wasm/optilotus/bindings/CommandSpec";
 import type { CommandSummary } from "../wasm/optilotus/bindings/CommandSummary";
 import type { ErrorResponse as OptilotusError } from "../wasm/optilotus/bindings/ErrorResponse";
@@ -229,6 +232,26 @@ export function optilotus_declare(
 ): { status: "ok"; id: number } | OptilotusError {
   assertReady();
   return parseBridge(declare_wasm(fid, name, ty, init));
+}
+
+/**
+ * `declare` with an explicit variable visibility.
+ *
+ * Access is recorded and surfaced but not yet enforced: with one package
+ * and no classes, `public` and `protected` are equivalent, and `private`
+ * matches the runtime's existing per-call variable scope. See `Access`.
+ */
+export function optilotus_declareWithAccess(
+  fid: number,
+  name: string,
+  ty: OptilotusType,
+  access: Access,
+  init?: string,
+): { status: "ok"; id: number } | OptilotusError {
+  assertReady();
+  return parseBridge(
+    declareWithAccess_wasm(fid, name, ty, access, init),
+  );
 }
 
 export function optilotus_assign(

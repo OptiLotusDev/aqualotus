@@ -91,8 +91,8 @@ pub use expr::{
 pub use ir::{Command, CommandId, Function, FunctionId, Program, ValueId};
 pub use ops::{apply_arith, cast_value, parse_input_line, print_text, ArithKind, Op, OpError};
 pub use package::{
-    CommandKind, CommandSpec, CommandSummary, FunctionInfo, FunctionSummary, Package, PackageError,
-    MAIN_ID, MAIN_NAME, PACKAGE_NAME,
+    Access, CommandKind, CommandSpec, CommandSummary, FunctionInfo, FunctionSummary, Package,
+    PackageError, MAIN_ID, MAIN_NAME, PACKAGE_NAME,
 };
 pub use resumable::ResumableRun;
 pub use run_resumable::{PendingInput, RunSession, RunStatus};

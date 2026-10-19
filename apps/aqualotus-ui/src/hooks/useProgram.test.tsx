@@ -20,6 +20,7 @@ type Row = {
   next: number | null;
   var?: string;
   ty?: string;
+  access?: string;
   expr?: string;
   template?: string;
 };
@@ -130,6 +131,44 @@ function append(fid: number, row: Row): void {
   }
 }
 
+/**
+ * Shared declare logic for the mock bridge. Mirrors the engine's
+ * validation and records the access modifier on the stored summary.
+ */
+function declareInMock(
+  fid: number,
+  name: string,
+  ty: string,
+  access: string,
+  init?: string,
+) {
+  if (!db.functions.has(fid)) return err(null, `unknown function ${fid}`);
+  if (!ALL_TAGS.includes(ty)) return err(null, `unknown type ${ty}`);
+  if (ty === "void")
+    return err(null, "cannot declare a variable of type void");
+  if (!["public", "protected", "private"].includes(access)) {
+    return err(null, `unknown access modifier ${JSON.stringify(access)}`);
+  }
+  const list = rows(fid);
+  if (list.some((r) => r.kind === "declare" && r.var === name)) {
+    return err(null, `variable ${JSON.stringify(name)} is already declared`);
+  }
+  if (init !== undefined && !parseInit(ty, init)) {
+    return err(null, `invalid ${ty} literal ${JSON.stringify(init)}`);
+  }
+  const id = db.nextCommandId++;
+  append(fid, {
+    id,
+    kind: "declare",
+    next: null,
+    var: name,
+    ty,
+    access,
+    expr: init,
+  });
+  return ok({ id });
+}
+
 vi.mock("../lib/optilotus", () => ({
   optilotus_type: {
     int8: "int8",
@@ -203,29 +242,19 @@ vi.mock("../lib/optilotus", () => ({
   }),
   optilotus_clearPackage: vi.fn(() => ({ status: "ok", cleared: 0 })),
   optilotus_declare: vi.fn(
-    (fid: number, name: string, ty: string, init?: string) => {
-      if (!db.functions.has(fid)) return err(null, `unknown function ${fid}`);
-      if (!ALL_TAGS.includes(ty)) return err(null, `unknown type ${ty}`);
-      if (ty === "void")
-        return err(null, "cannot declare a variable of type void");
-      const list = rows(fid);
-      if (list.some((r) => r.kind === "declare" && r.var === name)) {
-        return err(null, `variable ${JSON.stringify(name)} is already declared`);
-      }
-      if (init !== undefined && !parseInit(ty, init)) {
-        return err(null, `invalid ${ty} literal ${JSON.stringify(init)}`);
-      }
-      const id = db.nextCommandId++;
-      append(fid, {
-        id,
-        kind: "declare",
-        next: null,
-        var: name,
-        ty,
-        expr: init,
-      });
-      return ok({ id });
-    },
+    (fid: number, name: string, ty: string, init?: string) =>
+      declareInMock(fid, name, ty, "private", init),
+  ),
+  // The UI now declares through the access-aware entry point; the mock
+  // mirrors the engine by recording the modifier on the summary.
+  optilotus_declareWithAccess: vi.fn(
+    (
+      fid: number,
+      name: string,
+      ty: string,
+      access: string,
+      init?: string,
+    ) => declareInMock(fid, name, ty, access, init),
   ),
   optilotus_assign: vi.fn((fid: number, name: string, expr: string) => {
     if (!db.functions.has(fid)) return err(null, `unknown function ${fid}`);
