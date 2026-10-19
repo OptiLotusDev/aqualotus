@@ -34,6 +34,17 @@ const TYPES: readonly OptilotusType[] = (
   Object.values(optilotus_type) as OptilotusType[]
 ).filter((t) => t !== optilotus_type.void);
 
+/**
+ * Exhaustiveness guard for the per-kind editor. A new `CommandDraft`
+ * kind must get an editor here; reaching this means one was added
+ * without UI, so fail loudly instead of rendering nothing.
+ */
+function assertNeverKind(draft: never): never {
+  throw new Error(
+    `Unhandled draft kind in inspector: ${String((draft as { kind?: string }).kind)}`,
+  );
+}
+
 function KindFields(props: {
   draft: CommandDraft;
   onChange: (next: CommandDraft) => void;
@@ -131,6 +142,74 @@ function KindFields(props: {
           />
         </div>
       );
+    case "input":
+      return (
+        <div className="field">
+          <span>
+            <label htmlFor="in-type">Type</label>
+          </span>
+          <select
+            id="in-type"
+            value={draft.ty}
+            onChange={(e) =>
+              onChange({ ...draft, ty: e.target.value as OptilotusType })
+            }
+          >
+            {TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    case "cast":
+      return (
+        <>
+          <div className="field">
+            <span>
+              <label htmlFor="in-name">Name</label>
+            </span>
+            <input
+              id="in-name"
+              value={draft.name}
+              onChange={(e) => onChange({ ...draft, name: e.target.value })}
+              placeholder="y"
+              autoComplete="off"
+            />
+          </div>
+          <div className="field">
+            <span>
+              <label htmlFor="in-type">To type</label>
+            </span>
+            <select
+              id="in-type"
+              value={draft.to}
+              onChange={(e) =>
+                onChange({ ...draft, to: e.target.value as OptilotusType })
+              }
+            >
+              {TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <span>
+              <label htmlFor="in-value">Value</label>
+            </span>
+            <input
+              id="in-value"
+              value={draft.expr}
+              onChange={(e) => onChange({ ...draft, expr: e.target.value })}
+              placeholder="{x}"
+              autoComplete="off"
+            />
+          </div>
+        </>
+      );
     case "return":
       return (
         <div className="field">
@@ -146,6 +225,30 @@ function KindFields(props: {
           />
         </div>
       );
+    case "if":
+      // Branch bodies are raw command ids in the summary and the bridge
+      // exposes no body→spec projection, so an `if` cannot be rebuilt
+      // as an editable draft. Show the condition read-only rather than
+      // pretending the branches are editable (editing would drop them).
+      return (
+        <div className="field">
+          <span>
+            <label htmlFor="in-cond">Condition (read-only)</label>
+          </span>
+          <input
+            id="in-cond"
+            value={draft.condition}
+            readOnly
+            placeholder="{x} > 5"
+            autoComplete="off"
+          />
+          <div className="hint">
+            Branch bodies cannot be edited from the inspector yet.
+          </div>
+        </div>
+      );
+    default:
+      return assertNeverKind(draft);
   }
 }
 

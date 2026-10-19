@@ -9,12 +9,15 @@ import type {
 } from "../lib/optilotus";
 import {
   optilotus_assign,
+  optilotus_cast,
   optilotus_clearPackage,
   optilotus_createFunction,
   optilotus_declare,
   optilotus_deleteCommand,
   optilotus_deleteFunction,
   optilotus_getFunction,
+  optilotus_if,
+  optilotus_input,
   optilotus_listCommands,
   optilotus_listFunctions,
   optilotus_print,
@@ -121,6 +124,17 @@ function isUndeclaredError(raw: unknown): boolean {
   const result = raw as { status: string } & Record<string, unknown>;
   if (!isOptilotusError(result)) return false;
   return result.message.includes("declare it first");
+}
+
+/**
+ * Exhaustiveness guard for `CommandDraft`. A new draft kind must be
+ * wired to a bridge call in `runBuilder`; reaching here means one was
+ * added without that wiring, so fail loudly instead of creating nothing.
+ */
+function assertNeverDraft(draft: never): never {
+  throw new Error(
+    `Unhandled command draft kind: ${String((draft as { kind?: string }).kind)}`,
+  );
 }
 
 /** Read exact links + entry straight from the bridge. */
@@ -384,8 +398,23 @@ export function useProgram(
           return optilotus_assign(fid, draft.name, draft.expr);
         case "print":
           return optilotus_print(fid, draft.template);
+        case "input":
+          return optilotus_input(fid, draft.ty);
+        case "cast":
+          return optilotus_cast(fid, draft.name, draft.to, draft.expr);
         case "return":
           return optilotus_return(fid, draft.expr);
+        case "if":
+          return optilotus_if(
+            fid,
+            draft.condition,
+            [...draft.then],
+            draft.else === null ? null : [...draft.else],
+          );
+        default:
+          // Exhaustiveness: a new draft kind must be wired to a bridge
+          // call here, not silently create nothing.
+          return assertNeverDraft(draft);
       }
     },
     [],

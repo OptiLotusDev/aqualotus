@@ -108,4 +108,46 @@ describe("summaryToDraft", () => {
       summaryToDraft({ id: 4, kind: "return", next: null, expr: "0" }),
     ).toEqual({ kind: "return", expr: "0" });
   });
+
+  // Regression: these three kinds were absent from `CommandDraft`, so
+  // `summaryToDraft` fell off the end of the switch and returned
+  // `undefined` — silently losing the block on undo/redo.
+  it("rebuilds input and cast drafts instead of returning undefined", () => {
+    expect(
+      summaryToDraft({ id: 5, kind: "input", next: null, ty: "int32" }),
+    ).toEqual({ kind: "input", ty: "int32" });
+    expect(
+      summaryToDraft({
+        id: 6,
+        kind: "cast",
+        next: null,
+        var: "y",
+        ty: "int64",
+        expr: "{x}",
+      }),
+    ).toEqual({ kind: "cast", name: "y", to: "int64", expr: "{x}" });
+  });
+
+  it("defaults a missing type to int32 rather than undefined", () => {
+    expect(summaryToDraft({ id: 7, kind: "input", next: null })).toEqual({
+      kind: "input",
+      ty: "int32",
+    });
+  });
+
+  // An `if` summary carries raw command ids for its branches, which the
+  // bridge cannot project back to specs. Failing loudly is deliberate:
+  // restoring a block with silently empty branches would corrupt it.
+  it("refuses to rebuild an if draft rather than dropping its branches", () => {
+    expect(() =>
+      summaryToDraft({
+        id: 8,
+        kind: "if",
+        next: null,
+        condition: 3,
+        then_body: [4, 5],
+        else_body: [6],
+      }),
+    ).toThrow(/Cannot rebuild a draft for 'if'/);
+  });
 });

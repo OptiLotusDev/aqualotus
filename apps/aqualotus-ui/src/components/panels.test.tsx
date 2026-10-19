@@ -110,7 +110,7 @@ describe("Runner", () => {
     rerender(
       <Runner
         {...runnerProps()}
-        run={{ status: "ok", steps: 6, prints: 1, printed: ["42"] }}
+        run={{ status: "ok", steps: 6, prints: 1, printed: ["42"], returned: null }}
         durationMs={4.2}
       />,
     );
@@ -145,7 +145,7 @@ describe("Runner", () => {
     render(
       <Runner
         {...runnerProps()}
-        run={{ status: "ok", steps: 2, prints: 0, printed: [] }}
+        run={{ status: "ok", steps: 2, prints: 0, printed: [], returned: null }}
         durationMs={1.5}
       />,
     );
