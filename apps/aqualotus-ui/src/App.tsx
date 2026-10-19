@@ -68,6 +68,7 @@ function App(): ReactElement {
       onSelectFunction={program.selectFunction}
       onSelectCommand={program.selectCommand}
       onCreateFunction={program.createFunction}
+      onRenameFunction={program.renameFunction}
       onDeleteFunction={program.deleteFunction}
       onAddCommand={program.addCommand}
       onDeclareVariable={program.declareVariable}

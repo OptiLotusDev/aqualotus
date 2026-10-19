@@ -42,6 +42,11 @@ function unreachableKind(kind: never): never {
  * Total over `CommandSummary["kind"]`: the `default` branch is a
  * compile-time error if a kind is unhandled, so undo can never capture
  * `undefined` for a block it is supposed to restore.
+ *
+ * String/char initializers display quoted (`"hi"`, `'a'`) — the input
+ * rectangle and the block always show the literal form; the bridge
+ * layer unwraps it again on replay (`normalizeDeclareInit`), so
+ * undo/redo round-trips are stable.
  */
 export function summaryToDraft(cmd: CommandSummary): CommandDraft {
   switch (cmd.kind) {
@@ -50,7 +55,7 @@ export function summaryToDraft(cmd: CommandSummary): CommandDraft {
         kind: "declare",
         name: cmd.var ?? "",
         ty: (cmd.ty ?? optilotus_type.int32) as OptilotusType,
-        init: cmd.expr ?? "",
+        init: displayDeclareValue(cmd.ty, cmd.expr),
       };
     case "assign":
       return { kind: "assign", name: cmd.var ?? "", expr: cmd.expr ?? "" };
@@ -81,6 +86,106 @@ export function summaryToDraft(cmd: CommandSummary): CommandDraft {
     default:
       return unreachableKind(cmd.kind);
   }
+}
+
+/**
+ * How a stored declare value reads on screen (input rectangle and
+ * block): string/char values wear their quotes (`"hi"`, `'a'`), empty
+ * stays empty, everything else is byte-identical. Presentation only —
+ * the engine keeps the unwrapped text.
+ */
+export function displayDeclareValue(
+  ty: OptilotusType | undefined,
+  expr: string | undefined,
+): string {
+  if (expr === undefined || expr === "") return "";
+  if (ty === optilotus_type.string) return `"${expr}"`;
+  if (ty === optilotus_type.char) return `'${expr}'`;
+  return expr;
+}
+
+/**
+ * `true` when an edit draft changes nothing about the stored command.
+ * Lets `replaceCommand` skip no-op Applies (no churn, no history entry)
+ * — with quoted display, re-applying an untouched string/char block
+ * must not rebuild the world.
+ */
+export function commandDraftEqual(
+  current: CommandDraft,
+  next: CommandDraft,
+): boolean {
+  if (current.kind !== next.kind) return false;
+  switch (current.kind) {
+    case "declare":
+      return (
+        next.kind === "declare" &&
+        next.name === current.name &&
+        next.ty === current.ty &&
+        next.init === current.init
+      );
+    case "assign":
+      return (
+        next.kind === "assign" &&
+        next.name === current.name &&
+        next.expr === current.expr
+      );
+    case "print":
+      return next.kind === "print" && next.template === current.template;
+    case "input":
+      return next.kind === "input" && next.ty === current.ty;
+    case "cast":
+      return (
+        next.kind === "cast" &&
+        next.name === current.name &&
+        next.to === current.to &&
+        next.expr === current.expr
+      );
+    case "return":
+      return next.kind === "return" && next.expr === current.expr;
+    case "if":
+      return (
+        next.kind === "if" &&
+        next.condition === current.condition &&
+        commandSpecListEqual(next.then, current.then) &&
+        commandSpecListEqual(next.else, current.else)
+      );
+    default:
+      return unreachableDraft(current);
+  }
+}
+
+/**
+ * Exhaustiveness guard for `commandDraftEqual`. Takes the whole draft
+ * because the `kind` field is already narrowed to `never` by the
+ * preceding `kind` comparison.
+ */
+function unreachableDraft(draft: never): never {
+  throw new Error(
+    `Unhandled command draft kind: ${String((draft as { kind?: string }).kind)}`,
+  );
+}
+
+/** Structural equality for `if` branch bodies (specs are flat objects). */
+function commandSpecListEqual(
+  a: readonly CommandSpec[] | null,
+  b: readonly CommandSpec[] | null,
+): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.length !== b.length) return false;
+  return a.every((spec, i) => {
+    const other = b[i];
+    if (other === undefined) return false;
+    const keys = new Set([...Object.keys(spec), ...Object.keys(other)]);
+    for (const key of keys) {
+      if (
+        (spec as Record<string, unknown>)[key] !==
+        (other as Record<string, unknown>)[key]
+      ) {
+        return false;
+      }
+    }
+    return true;
+  });
 }
 
 export const COMMAND_KINDS: readonly CommandKind[] = [
@@ -131,10 +236,10 @@ export function commandMainLine(cmd: CommandSummary): string {
 /** Secondary line shown under the primary line on a command card. */
 export function commandSubLine(cmd: CommandSummary): string {
   switch (cmd.kind) {
-    case "declare":
-      return cmd.expr !== undefined && cmd.expr !== ""
-        ? `initial ${cmd.expr}`
-        : "no initial value";
+    case "declare": {
+      const shown = displayDeclareValue(cmd.ty, cmd.expr);
+      return shown !== "" ? `initial ${shown}` : "no initial value";
+    }
     case "assign":
       return "assignment";
     case "print":
@@ -153,6 +258,84 @@ export function commandSubLine(cmd: CommandSummary): string {
 }
 
 /**
+ * Normalize a typed declare value before it crosses the bridge (P3/P17:
+ * input sugar only — the engine still validates everything):
+ * - `string`: one outer `"..."` (or `'...'`) pair is unwrapping, not
+ *   content — `"hello"` stores `hello`. The editor requires the quotes
+ *   (see `validateDeclareValue`); bare text from older programs stays
+ *   verbatim so replays keep working.
+ * - `char`: `'a'` (or `"a"`) stores `a`. Anything else is left for the
+ *   engine to accept or reject honestly.
+ * - `bool`: `True`/`FALSE`/etc. fold to lowercase (`true`/`false` are
+ *   the engine's only spellings); anything else passes through.
+ * Input text is otherwise stored byte-identical (`input is input`):
+ * floats keep `2` as `2`, integers keep their digits.
+ * Idempotent: normalized output normalizes to itself, so undo/redo
+ * replays are stable.
+ */
+export function normalizeDeclareInit(ty: OptilotusType, init: string): string {
+  switch (ty) {
+    case optilotus_type.string:
+      return (
+        stripOuterQuotes(init, '"') ?? stripOuterQuotes(init, "'") ?? init
+      );
+    case optilotus_type.char:
+      return (
+        stripOuterQuotes(init, "'") ?? stripOuterQuotes(init, '"') ?? init
+      );
+    case optilotus_type.bool: {
+      const trimmed = init.trim();
+      if (trimmed === "true" || trimmed === "false") return trimmed;
+      const lowered = trimmed.toLowerCase();
+      if (lowered === "true" || lowered === "false") return lowered;
+      return init;
+    }
+    default:
+      return init;
+  }
+}
+
+/**
+ * Field-level literal rule for the declare editor: string and char
+ * values must be wrapped in quotes (`"hello"`, `'a'`) — bare text is
+ * rejected with a message instead of reaching the engine. Empty stays
+ * valid (omitted initializer). Every other type is engine-validated on
+ * Apply, so this returns `null` for them. Returns the message to show,
+ * or `null` when the value may be applied.
+ */
+export function validateDeclareValue(
+  ty: OptilotusType,
+  init: string,
+): string | null {
+  if (init === "") return null;
+  if (ty === optilotus_type.string) {
+    if (
+      init.length >= 2 &&
+      init.startsWith('"') &&
+      init.endsWith('"')
+    ) {
+      return null;
+    }
+    return 'Wrap the text in "double quotes", e.g. "hello".';
+  }
+  if (ty === optilotus_type.char) {
+    const inner =
+      stripOuterQuotes(init, "'") ?? stripOuterQuotes(init, '"');
+    if (inner !== null && [...inner].length === 1) return null;
+    return "Use one character in 'single quotes', e.g. 'a'.";
+  }
+  return null;
+}
+
+/** Remove one outer quote pair (`""` → empty); `null` when not wrapped. */
+function stripOuterQuotes(text: string, quote: '"' | "'"): string | null {
+  if (text.length >= 2 && text.startsWith(quote) && text.endsWith(quote)) {
+    return text.slice(1, -1);
+  }
+  return null;
+}
+
+/**
  * Honest helper (P3): suggest the first unused `base`, `base1`, …
  * against `taken`. UI sugar only — the bridge still validates.
  */
@@ -166,4 +349,70 @@ export function freshName(
     n += 1;
   }
   return `${base}${n}`;
+}
+
+/**
+ * Which command ids a declare-to-declare edit recreates (P3: pure
+ * projection of bridge data). Always the declare itself; plus bound
+ * assigns (their baked-in engine type follows the declaration); plus,
+ * on a rename, every block whose expression/template text references
+ * `{old}`. Shared by the mutation (`useProgram`) and the position
+ * capture (`AppShell`) so the two always agree. Order follows `cmds`.
+ */
+export function declareEditAffected(
+  cmds: readonly CommandSummary[],
+  oldId: number,
+  newName: string,
+): readonly number[] {
+  const old = cmds.find((c) => c.id === oldId);
+  if (old === undefined || old.kind !== "declare") return [];
+  const oldName = (old.var ?? "").trim();
+  const renamed = newName.trim() !== "" && newName.trim() !== oldName;
+  const out: number[] = [];
+  for (const c of cmds) {
+    if (c.id === oldId) {
+      out.push(c.id);
+      continue;
+    }
+    if (c.kind === "assign" && (c.var ?? "") === oldName) {
+      out.push(c.id);
+      continue;
+    }
+    if (!renamed) continue;
+    const text =
+      c.kind === "assign"
+        ? (c.expr ?? "")
+        : c.kind === "print"
+          ? (c.template ?? "")
+          : c.kind === "return"
+            ? (c.expr ?? "")
+            : null;
+    if (text !== null && renameRefs(text, oldName, newName) !== text) {
+      out.push(c.id);
+    }
+  }
+  return out;
+}
+
+/**
+ * Rewrite `{old}` variable references as `{next}` inside expression or
+ * template text (P3: pure text, no semantics). Only brace references
+ * match — bare identifiers and `name()` calls are untouched, so
+ * renaming variable `x` never rewrites a call to function `x()`.
+ * Surrounding whitespace inside the braces is normalized away. The
+ * bridge still validates every rebuilt command.
+ */
+export function renameRefs(
+  text: string,
+  oldName: string,
+  nextName: string,
+): string {
+  const old = oldName.trim();
+  const next = nextName.trim();
+  if (old === "" || old === next) return text;
+  const escaped = old.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.replace(
+    new RegExp(`\\{\\s*${escaped}\\s*\\}`, "g"),
+    `{${next}}`,
+  );
 }

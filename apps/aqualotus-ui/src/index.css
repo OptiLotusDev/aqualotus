@@ -608,6 +608,17 @@ p {
   color: var(--text-muted);
 }
 
+.field-hint {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.field-hint-error {
+  color: var(--color-console-err);
+  font-weight: 600;
+}
+
 /* ---------- Function browser ---------- */
 
 .fn-list {
@@ -617,6 +628,21 @@ p {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.fn-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fn-row .fn-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.fn-rename {
+  flex: none;
 }
 
 .fn-item {

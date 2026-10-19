@@ -214,6 +214,7 @@ describe("ProjectNavigator", () => {
       busy: false,
       onSelect: vi.fn(),
       onDelete: vi.fn(),
+      onRenameFunction: vi.fn(),
       libraryBusy: false,
       onAddBlock: vi.fn(),
       onClearPackage: vi.fn(),
@@ -419,5 +420,224 @@ describe("Inspector", () => {
       />,
     );
     expect(screen.getByLabelText(/Value \(optional\)/)).toBeDefined();
+  });
+
+  it("demos each type's literal shape in the value field", () => {
+    const { rerender } = render(
+      <Inspector
+        {...inspectorProps()}
+        selected={{
+          id: 1,
+          kind: "declare",
+          next: null,
+          var: "flag",
+          ty: "bool",
+          expr: "",
+        }}
+      />,
+    );
+    expect(screen.getByPlaceholderText("true")).toBeDefined();
+    expect(screen.getByText(/comparisons live in Assign/)).toBeDefined();
+
+    rerender(
+      <Inspector
+        {...inspectorProps()}
+        selected={{
+          id: 2,
+          kind: "declare",
+          next: null,
+          var: "greeting",
+          ty: "string",
+          expr: "",
+        }}
+      />,
+    );
+    expect(screen.getByPlaceholderText('"hello"')).toBeDefined();
+    expect(screen.getByText(/double quotes.*required/)).toBeDefined();
+
+    rerender(
+      <Inspector
+        {...inspectorProps()}
+        selected={{
+          id: 3,
+          kind: "declare",
+          next: null,
+          var: "initial",
+          ty: "char",
+          expr: "",
+        }}
+      />,
+    );
+    expect(screen.getByPlaceholderText("'a'")).toBeDefined();
+    expect(screen.getByText(/single quotes/)).toBeDefined();
+  });
+
+  it("clears a stale value when the declare type switches", async () => {
+    const user = userEvent.setup();
+    render(
+      <Inspector
+        {...inspectorProps()}
+        onReplace={vi.fn()}
+        selected={{
+          id: 1,
+          kind: "declare",
+          next: null,
+          var: "n",
+          ty: "int32",
+          expr: "41",
+        }}
+      />,
+    );
+    // "41" belongs to int32 and would make the engine reject a `bool`
+    // edit (leaving the block visibly frozen on int32), so switching
+    // the type resets the value to the new default instead.
+    await user.selectOptions(screen.getByLabelText("Type"), "bool");
+    expect(
+      (screen.getByLabelText(/Value \(optional\)/) as HTMLInputElement).value,
+    ).toBe("");
+    expect(screen.getByPlaceholderText("true")).toBeDefined();
+  });
+
+  it("shows quoted stored values in the input rectangle", () => {
+    render(
+      <Inspector
+        {...inspectorProps()}
+        selected={{
+          id: 1,
+          kind: "declare",
+          next: null,
+          var: "greeting",
+          ty: "string",
+          expr: "hi",
+        }}
+      />,
+    );
+    // Stored bare, displayed quoted — the literal form survives edits.
+    expect(screen.getByDisplayValue('"hi"')).toBeDefined();
+  });
+
+  it("rejects bare string/char values and blocks Apply", async () => {
+    const user = userEvent.setup();
+    const onReplace = vi.fn();
+    render(
+      <Inspector
+        {...inspectorProps()}
+        onReplace={onReplace}
+        selected={{
+          id: 1,
+          kind: "declare",
+          next: null,
+          var: "greeting",
+          ty: "string",
+          expr: "hi",
+        }}
+      />,
+    );
+    // Stored bare, displayed quoted and valid…
+    expect(screen.getByDisplayValue('"hi"')).toBeDefined();
+    expect(screen.queryByTestId("declare-value-error")).toBeNull();
+    // …until the user strips the quotes: bare text errors and Apply
+    // stays off.
+    await user.clear(screen.getByLabelText(/Value \(optional\)/));
+    await user.type(screen.getByLabelText(/Value \(optional\)/), "hi");
+    expect(screen.getByTestId("declare-value-error")).toBeDefined();
+    expect(
+      (screen.getByRole("button", { name: "Apply edit" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    // Quoting clears the error and re-enables Apply.
+    await user.clear(screen.getByLabelText(/Value \(optional\)/));
+    await user.type(screen.getByLabelText(/Value \(optional\)/), '"hi"');
+    expect(screen.queryByTestId("declare-value-error")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Apply edit" }));
+    expect(onReplace).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        kind: "declare",
+        name: "greeting",
+        init: '"hi"',
+      }),
+    );
+  });
+});
+
+describe("FunctionBrowser rename", () => {
+  it("edits a name inline and reports it", async () => {
+    const user = userEvent.setup();
+    const onRename = vi.fn();
+    render(
+      <FunctionBrowser
+        functions={[
+          { id: 0, name: "main", isMain: true },
+          { id: 1, name: "helper", isMain: false },
+        ]}
+        selectedId={0}
+        busy={false}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={onRename}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Rename helper" }));
+    const input = screen.getByLabelText("New function name");
+    await user.clear(input);
+    await user.type(input, "worker");
+    await user.click(screen.getByRole("button", { name: "✓" }));
+    expect(onRename).toHaveBeenCalledWith(1, "worker");
+  });
+
+  it("renames main too (identity is the stable id)", async () => {
+    const user = userEvent.setup();
+    const onRename = vi.fn();
+    render(
+      <FunctionBrowser
+        functions={[{ id: 0, name: "main", isMain: true }]}
+        selectedId={0}
+        busy={false}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={onRename}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Rename main" }));
+    const input = screen.getByLabelText("New function name");
+    await user.clear(input);
+    await user.type(input, "entry");
+    await user.click(screen.getByRole("button", { name: "✓" }));
+    expect(onRename).toHaveBeenCalledWith(0, "entry");
+  });
+});
+
+describe("Inspector rename function", () => {
+  const func = {
+    status: "ok" as const,
+    id: 0,
+    name: "main",
+    isMain: true,
+    entry: null,
+    commandCount: 1,
+  };
+
+  function baseProps(): React.ComponentProps<typeof Inspector> {
+    return {
+      func,
+      selected: null,
+      busy: false,
+      onReplace: vi.fn(),
+      onDeleteBlock: vi.fn(),
+      onDeleteFunction: vi.fn(),
+      onClearEntry: vi.fn(),
+    };
+  }
+
+  it("renames the function from the Inspector", async () => {
+    const user = userEvent.setup();
+    const onRenameFunction = vi.fn();
+    render(<Inspector {...baseProps()} onRenameFunction={onRenameFunction} />);
+    const input = screen.getByLabelText("Function name");
+    await user.clear(input);
+    await user.type(input, "entry");
+    await user.click(screen.getByRole("button", { name: "Rename" }));
+    expect(onRenameFunction).toHaveBeenCalledWith("entry");
   });
 });

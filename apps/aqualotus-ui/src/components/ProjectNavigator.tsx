@@ -14,6 +14,7 @@ interface ProjectNavigatorProps {
   readonly busy: boolean;
   readonly onSelect: (id: FunctionId) => void;
   readonly onDelete: (id: FunctionId) => void;
+  readonly onRenameFunction: (id: FunctionId, name: string) => void;
   readonly libraryBusy: boolean;
   readonly onAddBlock: (kind: string) => void;
   readonly onClearPackage: () => void;
@@ -40,6 +41,7 @@ export default function ProjectNavigator(
     busy,
     onSelect,
     onDelete,
+    onRenameFunction,
     libraryBusy,
     onAddBlock,
     onClearPackage,
@@ -117,6 +119,7 @@ export default function ProjectNavigator(
             busy={busy}
             onSelect={onSelect}
             onDelete={onDelete}
+            onRename={onRenameFunction}
           />
         </div>
       </section>

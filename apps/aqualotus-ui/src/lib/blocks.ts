@@ -80,11 +80,13 @@ export const BLOCKS: readonly BlockDefinition[] = [
 ];
 
 /**
- * Exact matcher: the trimmed query must equal a block label or one of
- * its aliases (case-insensitive). Substring/category/description
- * matching is deliberately gone — searching "program" finds nothing
- * because no block is named that, while "function" finds only Function.
- * Empty query returns every definition, grouped by the caller.
+ * Substring matcher: the trimmed query matches when it appears inside a
+ * block label or one of its aliases (case-insensitive), so "fun",
+ * "func", and "function" all find Function. Category/description text
+ * never matches — searching "program" still finds nothing because no
+ * block is named that, while "function" finds Function and
+ * Call Function. Empty query returns every definition, grouped by the
+ * caller.
  */
 export function filterBlocks(
   query: string,
@@ -93,8 +95,8 @@ export function filterBlocks(
   if (q === "") return BLOCKS;
   return BLOCKS.filter(
     (b) =>
-      b.label.toLowerCase() === q ||
-      b.aliases.some((a) => a.toLowerCase() === q),
+      b.label.toLowerCase().includes(q) ||
+      b.aliases.some((a) => a.toLowerCase().includes(q)),
   );
 }
 

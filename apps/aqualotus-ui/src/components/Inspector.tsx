@@ -2,7 +2,11 @@ import { useState, type ReactElement } from "react";
 import type { CommandId, CommandSummary } from "../lib/optilotus";
 import type { FunctionInfo } from "../lib/optilotus";
 import { optilotus_type, type OptilotusType } from "../lib/optilotus";
-import { summaryToDraft, type CommandDraft } from "../lib/program";
+import {
+  summaryToDraft,
+  validateDeclareValue,
+  type CommandDraft,
+} from "../lib/program";
 import {
   PACKAGE_NAME,
   PRESENTATION_STRUCT_NAME,
@@ -20,6 +24,7 @@ interface InspectorProps {
   readonly onDeleteFunction: () => void;
   readonly onClearEntry: () => void;
   readonly onDeclareVariable?: (name: string) => void;
+  readonly onRenameFunction?: (name: string) => void;
 }
 
 /**
@@ -45,13 +50,111 @@ function assertNeverKind(draft: never): never {
   );
 }
 
+/**
+ * Per-type value demo for the declare editor (P17: UI vocabulary only).
+ * Each entry shows the exact literal shape the Optilotus engine parses
+ * for that type — the bridge still validates, this only teaches it.
+ * Notably: integers/floats take bare numbers (no quotes), `bool` is
+ * lowercase-only (`true`/`false`), `char` is one bare character, and
+ * `string` is raw text (typed quotes become part of the string).
+ */
+function declareValueHint(ty: OptilotusType): {
+  placeholder: string;
+  hint: string;
+  inputMode: "text" | "numeric" | "decimal";
+} {
+  switch (ty) {
+    case optilotus_type.int8:
+      return {
+        placeholder: "e.g. 41",
+        hint: "Whole number from −128 to 127, no quotes.",
+        inputMode: "numeric",
+      };
+    case optilotus_type.int16:
+      return {
+        placeholder: "e.g. 41",
+        hint: "Whole number from −32,768 to 32,767, no quotes.",
+        inputMode: "numeric",
+      };
+    case optilotus_type.int32:
+      return {
+        placeholder: "e.g. 41",
+        hint: "Whole number, no quotes.",
+        inputMode: "numeric",
+      };
+    case optilotus_type.int64:
+    case optilotus_type.int128:
+      return {
+        placeholder: "e.g. 41",
+        hint: "Whole number of any size, no quotes.",
+        inputMode: "numeric",
+      };
+    case optilotus_type.uint8:
+      return {
+        placeholder: "e.g. 41",
+        hint: "Number from 0 to 255, no quotes or minus sign.",
+        inputMode: "numeric",
+      };
+    case optilotus_type.uint16:
+      return {
+        placeholder: "e.g. 41",
+        hint: "Number from 0 to 65,535, no quotes or minus sign.",
+        inputMode: "numeric",
+      };
+    case optilotus_type.uint32:
+    case optilotus_type.uint64:
+    case optilotus_type.uint128:
+      return {
+        placeholder: "e.g. 41",
+        hint: "Zero or more, no quotes or minus sign.",
+        inputMode: "numeric",
+      };
+    case optilotus_type.float32:
+    case optilotus_type.float64:
+      return {
+        placeholder: "e.g. 2.0",
+        hint: "A decimal number — stored exactly as typed.",
+        inputMode: "decimal",
+      };
+    case optilotus_type.bool:
+      return {
+        placeholder: "true",
+        hint: "true or false here — comparisons live in Assign: declare a bool, then assign it e.g. 3 > 2 or {x} == 2.",
+        inputMode: "text",
+      };
+    case optilotus_type.char:
+      return {
+        placeholder: "'a'",
+        hint: "'single quotes' required, e.g. 'a'.",
+        inputMode: "text",
+      };
+    case optilotus_type.string:
+      return {
+        placeholder: '"hello"',
+        hint: '"double quotes" required, e.g. "hello".',
+        inputMode: "text",
+      };
+    default:
+      return {
+        placeholder: "41 — empty uses the type default",
+        hint: "Empty uses the type default.",
+        inputMode: "text",
+      };
+  }
+}
+
 function KindFields(props: {
   draft: CommandDraft;
   onChange: (next: CommandDraft) => void;
 }): ReactElement {
   const { draft, onChange } = props;
   switch (draft.kind) {
-    case "declare":
+    case "declare": {
+      const valueHint = declareValueHint(draft.ty);
+      // String/char literals must be quoted (`"hi"`, `'a'`); anything
+      // else is rejected here with a message instead of reaching the
+      // engine. Other types are engine-validated on Apply.
+      const valueError = validateDeclareValue(draft.ty, draft.init);
       return (
         <>
           <div className="field">
@@ -73,9 +176,20 @@ function KindFields(props: {
             <select
               id="in-type"
               value={draft.ty}
-              onChange={(e) =>
-                onChange({ ...draft, ty: e.target.value as OptilotusType })
-              }
+              onChange={(e) => {
+                const nextTy = e.target.value as OptilotusType;
+                // A literal typed for the old type is usually invalid for
+                // the new one (e.g. "41" kept while switching to `bool`),
+                // and the engine would reject the edit — leaving the block
+                // visibly "frozen" on the old type. Reset to empty (the
+                // engine default, valid for every type) on an actual type
+                // switch; the name is untouched.
+                onChange(
+                  nextTy === draft.ty
+                    ? { ...draft, ty: nextTy }
+                    : { ...draft, ty: nextTy, init: "" },
+                );
+              }}
             >
               {TYPES.map((t) => (
                 <option key={t} value={t}>
@@ -92,12 +206,28 @@ function KindFields(props: {
               id="in-value"
               value={draft.init}
               onChange={(e) => onChange({ ...draft, init: e.target.value })}
-              placeholder="41 — empty uses the type default"
+              placeholder={valueHint.placeholder}
               autoComplete="off"
+              inputMode={valueHint.inputMode}
+              aria-describedby="in-value-hint"
+              aria-invalid={valueError !== null}
             />
+            <div className="field-hint" id="in-value-hint">
+              {valueHint.hint} Empty uses the type default.
+            </div>
+            {valueError !== null ? (
+              <div
+                className="field-hint field-hint-error"
+                role="alert"
+                data-testid="declare-value-error"
+              >
+                {valueError}
+              </div>
+            ) : null}
           </div>
         </>
       );
+    }
     case "assign":
       return (
         <>
@@ -123,7 +253,13 @@ function KindFields(props: {
               onChange={(e) => onChange({ ...draft, expr: e.target.value })}
               placeholder="{n} + 1"
               autoComplete="off"
+              aria-describedby="in-value-hint"
             />
+            <div className="field-hint" id="in-value-hint">
+              Math (`+ - * / %`) and comparisons (`== != &lt; &lt;= &gt;
+              &gt;=`, e.g. `3 &gt; 2`) produce values — assign a
+              comparison into a bool variable for true/false.
+            </div>
           </div>
         </>
       );
@@ -252,6 +388,41 @@ function KindFields(props: {
   }
 }
 
+/** Inline function rename (function view). Remounted per function id. */
+function FunctionRenameForm(props: {
+  readonly name: string;
+  readonly busy: boolean;
+  readonly onRename: (name: string) => void;
+}): ReactElement {
+  const { name, busy, onRename } = props;
+  const [value, setValue] = useState<string>(name);
+  return (
+    <form
+      aria-label="Rename function"
+      style={{ display: "flex", gap: 8 }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        onRename(value);
+      }}
+    >
+      <input
+        aria-label="Function name"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="function name"
+        autoComplete="off"
+        style={{ flex: 1, minWidth: 0 }}
+      />
+      <button
+        type="submit"
+        className="btn btn-primary btn-sm"
+        disabled={busy || value.trim() === "" || value.trim() === name}
+      >
+        Rename
+      </button>
+    </form>
+  );
+}
 /**
  * Contextual block inspector (evolved from the command editor). Shows
  * function properties when nothing is selected, per-kind block
@@ -270,6 +441,7 @@ export default function Inspector(props: InspectorProps): ReactElement {
     onDeleteFunction,
     onClearEntry,
     onDeclareVariable,
+    onRenameFunction,
   } = props;
   // Edit draft derived from the selection during render (not synced in
   // an effect): when a different block is selected, the draft resets to
@@ -287,6 +459,11 @@ export default function Inspector(props: InspectorProps): ReactElement {
   }
 
   if (selected !== null && edit !== null) {
+    // An unquotable string/char value blocks Apply with the field-level
+    // message instead of failing at the engine.
+    const editBlocked =
+      edit.kind === "declare" &&
+      validateDeclareValue(edit.ty, edit.init) !== null;
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div className="pane-title">Inspector</div>
@@ -340,7 +517,16 @@ export default function Inspector(props: InspectorProps): ReactElement {
           }}
         >
           <KindFields draft={edit} onChange={setEdit} />
-          <button type="submit" className="btn btn-primary" disabled={busy}>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={busy || editBlocked}
+            title={
+              editBlocked
+                ? "Fix the value error first (see above)"
+                : undefined
+            }
+          >
             Apply edit
           </button>
         </form>
@@ -377,6 +563,14 @@ export default function Inspector(props: InspectorProps): ReactElement {
           {func.name}
           {func.isMain ? " · MAIN" : ""}
         </div>
+        {onRenameFunction !== undefined ? (
+          <FunctionRenameForm
+            key={func.id}
+            name={func.name}
+            busy={busy}
+            onRename={onRenameFunction}
+          />
+        ) : null}
         <dl className="props">
           <div>
             <dt>Function</dt>

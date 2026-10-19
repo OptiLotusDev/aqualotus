@@ -21,6 +21,7 @@ import {
   optilotus_listCommands,
   optilotus_listFunctions,
   optilotus_print,
+  optilotus_renameFunction,
   optilotus_return,
   optilotus_runProgram,
   optilotus_setEntry,
@@ -28,8 +29,12 @@ import {
 } from "../lib/optilotus";
 import { HistoryIdMap, type HistoryEntry } from "../lib/history";
 import {
+  commandDraftEqual,
+  declareEditAffected,
   errorMessage,
   isOptilotusError,
+  normalizeDeclareInit,
+  renameRefs,
   summaryToDraft,
 } from "../lib/program";
 import type { CommandDraft } from "../lib/program";
@@ -194,6 +199,7 @@ export function useProgram(
   selectCommand: (id: CommandId | null) => void;
   refresh: () => void;
   createFunction: (name: string) => void;
+  renameFunction: (id: FunctionId, name: string) => void;
   deleteFunction: (id: FunctionId) => void;
   addCommand: (fid: FunctionId, draft: CommandDraft) => void;
   declareVariable: (fid: FunctionId, name: string) => void;
@@ -382,18 +388,20 @@ export function useProgram(
   const runBuilder = useCallback(
     (fid: FunctionId, draft: CommandDraft) => {
       switch (draft.kind) {
-        case "declare":
+        case "declare": {
           // `init` is optional per the bridge/runtime (Issue 7): an empty
           // editor field means "omitted" (engine default), never a
-          // fabricated zero. A genuinely typed empty string for
-          // `string` variables still parses as a valid empty literal in
-          // the engine, so no UI special-casing is needed beyond this.
+          // fabricated zero. `normalizeDeclareInit` unwraps the way users
+          // naturally write literals (`"hi"`, `'a'`, `True`, `2` for a
+          // float) before the engine validates.
+          const normalized = normalizeDeclareInit(draft.ty, draft.init);
           return optilotus_declare(
             fid,
             draft.name,
             draft.ty,
-            draft.init === "" ? undefined : draft.init,
+            normalized === "" ? undefined : normalized,
           );
+        }
         case "assign":
           return optilotus_assign(fid, draft.name, draft.expr);
         case "print":
@@ -770,6 +778,68 @@ export function useProgram(
     ],
   );
 
+  /**
+   * Rename a function in place (stable id, history-backed). The bridge
+   * rejects empty names, `{}"` chars, `"main"` for helpers, and
+   * duplicates; failures surface without recording history.
+   */
+  const renameFunction = useCallback(
+    (id: FunctionId, name: string): void => {
+      try {
+        const trimmed = name.trim();
+        if (trimmed === "") return;
+        const info = optilotus_getFunction(id);
+        if (isOptilotusError(info)) {
+          setSnapshot((prev) => failCommand(prev, info));
+          return;
+        }
+        if (info.name === trimmed) return;
+        const oldName = info.name;
+        setSnapshot((prev) => ({
+          ...prev,
+          busy: true,
+          actionError: "",
+          commandErrorId: null,
+          recoveryVar: null,
+        }));
+        const renamed = optilotus_renameFunction(id, trimmed);
+        if (isOptilotusError(renamed)) {
+          setSnapshot((prev) => failCommand(prev, renamed));
+          return;
+        }
+        load(id);
+        pushHistory({
+          label: `Rename function to ${trimmed}`,
+          undo: () => {
+            setSnapshot((prev) => ({ ...prev, busy: true }));
+            const back = optilotus_renameFunction(id, oldName);
+            if (isOptilotusError(back)) {
+              setSnapshot((prev) => failCommand(prev, back));
+              load(selectedIdRef.current);
+              return false;
+            }
+            load(selectedIdRef.current);
+            return true;
+          },
+          redo: () => {
+            setSnapshot((prev) => ({ ...prev, busy: true }));
+            const again = optilotus_renameFunction(id, trimmed);
+            if (isOptilotusError(again)) {
+              setSnapshot((prev) => failCommand(prev, again));
+              load(selectedIdRef.current);
+              return false;
+            }
+            load(id);
+            return true;
+          },
+        });
+      } catch (e: unknown) {
+        setSnapshot((prev) => failThrown(prev, e));
+      }
+    },
+    [load, pushHistory],
+  );
+
   const addCommand = useCallback(
     (fid: FunctionId, draft: CommandDraft): void => {
       try {
@@ -903,6 +973,316 @@ export function useProgram(
           }));
           return;
         }
+        // No-op Apply (e.g. re-applying an untouched quoted string):
+        // nothing changed, so record nothing and recreate nothing.
+        if (commandDraftEqual(slot.draft, draft)) {
+          setSnapshot((prev) => ({ ...prev, busy: false }));
+          return;
+        }
+        // Declare-to-declare edit: the replacement keeps the variable's
+        // identity but may change its type and/or name. Two engine facts
+        // shape this path (UI only adapts to them):
+        // - `declare` rejects a duplicate name while the original still
+        //   exists, so a same-name edit must delete first and create
+        //   second; a rename can validate first (create before delete),
+        //   preserving the block when the new literal is invalid.
+        // - every `assign` bakes the declaration's type (and name) into
+        //   its engine `Set` at creation, so the edit must also rebuild
+        //   dependent assigns — otherwise the run fails with a stale
+        //   `TypeMismatch` while the editor already shows the new type.
+        // On validation failure the original block is restored into its
+        // slot, so no work is lost (Issue 6).
+        const isDeclareToDeclare =
+          draft.kind === "declare" && slot.draft.kind === "declare";
+        const isSameNameDeclare =
+          isDeclareToDeclare &&
+          draft.name.trim() !== "" &&
+          draft.kind === "declare" &&
+          slot.draft.kind === "declare" &&
+          draft.name.trim() === slot.draft.name.trim();
+        if (isDeclareToDeclare) {
+          const oldDraft = slot.draft;
+          const oldKind = slot.kind;
+          const dependents: {
+            id: CommandId;
+            oldDraft: CommandDraft;
+            newDraft: CommandDraft;
+          }[] = [];
+          if (oldDraft.kind === "declare" && draft.kind === "declare") {
+            const oldName = oldDraft.name.trim();
+            const nextName = draft.name.trim();
+            const renamed = nextName !== oldName;
+            // Selection lives in one place (`declareEditAffected`,
+            // shared with the position capture); here only drafts.
+            const affected = new Set(
+              declareEditAffected(ordered, oldId, draft.name),
+            );
+            for (const c of ordered) {
+              if (c.id === oldId || !affected.has(c.id)) continue;
+              const rebuilt = summaryToDraft(c);
+              if (c.kind === "assign" && (c.var ?? "") === oldName) {
+                // Bound to the variable: follows type and name, and its
+                // expression follows a rename.
+                if (rebuilt.kind !== "assign") continue;
+                dependents.push({
+                  id: c.id,
+                  oldDraft: rebuilt,
+                  newDraft: {
+                    ...rebuilt,
+                    name: nextName,
+                    expr: renamed
+                      ? renameRefs(rebuilt.expr, oldName, nextName)
+                      : rebuilt.expr,
+                  },
+                });
+                continue;
+              }
+              // Rename-only: rewrite textual `{old}` references in other
+              // expressions/templates; calls (`name()`) never match.
+              if (rebuilt.kind === "assign") {
+                const expr = renameRefs(rebuilt.expr, oldName, nextName);
+                if (expr !== rebuilt.expr) {
+                  dependents.push({
+                    id: c.id,
+                    oldDraft: rebuilt,
+                    newDraft: { ...rebuilt, expr },
+                  });
+                }
+              } else if (rebuilt.kind === "print") {
+                const template = renameRefs(
+                  rebuilt.template,
+                  oldName,
+                  nextName,
+                );
+                if (template !== rebuilt.template) {
+                  dependents.push({
+                    id: c.id,
+                    oldDraft: rebuilt,
+                    newDraft: { ...rebuilt, template },
+                  });
+                }
+              } else if (rebuilt.kind === "return") {
+                const expr = renameRefs(rebuilt.expr, oldName, nextName);
+                if (expr !== rebuilt.expr) {
+                  dependents.push({
+                    id: c.id,
+                    oldDraft: rebuilt,
+                    newDraft: { ...rebuilt, expr },
+                  });
+                }
+              }
+            }
+          }
+          const before = readLinks(fid);
+          let candidate: number | null = null;
+          if (isSameNameDeclare) {
+            if (!bridgeDelete(fid, oldId)) {
+              load(fid);
+              return;
+            }
+            candidate = createDetached(fid, draft);
+          } else {
+            // Rename: validate the replacement while the original still
+            // exists, so a bad literal or duplicate name fails without
+            // deleting anything.
+            const built = createDetached(fid, draft);
+            if (built === null) {
+              load(fid);
+              return;
+            }
+            if (!bridgeDelete(fid, oldId)) {
+              bridgeDelete(fid, built);
+              load(fid);
+              return;
+            }
+            candidate = built;
+          }
+          if (candidate === null) {
+            insertSlot(
+              fid,
+              oldDraft,
+              {
+                prevId: slot.prevId,
+                nextId: slot.nextId,
+                makeEntry: slot.wasEntry,
+              },
+              oldId,
+            );
+            load(fid);
+            return;
+          }
+          const remap = remapRef.current;
+          remap.track(oldId, candidate);
+          const prevId =
+            slot.prevId === null ? null : remap.resolve(slot.prevId);
+          const nextId =
+            slot.nextId === null ? null : remap.resolve(slot.nextId);
+          const spliced = runLinkPlan(fid, {
+            edits: [
+              ...(prevId === null
+                ? []
+                : [{ id: prevId, next: candidate }]),
+              { id: candidate, next: nextId },
+            ],
+            entry: slot.wasEntry
+              ? { type: "set" as const, entry: candidate }
+              : { type: "keep" as const },
+          });
+          if (!spliced) {
+            load(fid);
+            return;
+          }
+          // Rebuild each dependent assign in its own slot (fresh reads:
+          // every rebuild repairs the chain around itself, so sequential
+          // splices stay consistent even for adjacent assigns).
+          const newAssignIds: CommandId[] = [];
+          for (const dep of dependents) {
+            const listed = optilotus_listCommands(fid);
+            if (isOptilotusError(listed)) {
+              setSnapshot((prev) => failCommand(prev, listed));
+              load(fid);
+              return;
+            }
+            const infoNow = optilotus_getFunction(fid);
+            const entryNow =
+              !isOptilotusError(infoNow) && infoNow.entry !== undefined
+                ? infoNow.entry
+                : null;
+            const depSlot = slotOf(listed.commands, entryNow, dep.id);
+            if (depSlot === null) {
+              load(fid);
+              return;
+            }
+            if (!bridgeDelete(fid, dep.id)) {
+              load(fid);
+              return;
+            }
+            const nid = createDetached(fid, dep.newDraft);
+            if (nid === null) {
+              load(fid);
+              return;
+            }
+            remap.track(dep.id, nid);
+            newAssignIds.push(nid);
+            const depPrev =
+              depSlot.prevId === null
+                ? null
+                : remap.resolve(depSlot.prevId);
+            const depNext =
+              depSlot.nextId === null
+                ? null
+                : remap.resolve(depSlot.nextId);
+            const depSpliced = runLinkPlan(fid, {
+              edits: [
+                ...(depPrev === null
+                  ? []
+                  : [{ id: depPrev, next: nid }]),
+                { id: nid, next: depNext },
+              ],
+              entry: depSlot.wasEntry
+                ? { type: "set" as const, entry: nid }
+                : { type: "keep" as const },
+            });
+            if (!depSpliced) {
+              load(fid);
+              return;
+            }
+          }
+          const after = readLinks(fid);
+          const boxD = { id: candidate };
+          const boxA = newAssignIds.map((id) => ({ id }));
+          // Old drafts carry the previous name (for rename) and pair with
+          // the previous baked-in types; new drafts carry the new name so
+          // recreation picks up the new declaration type.
+          const oldAssignDrafts = dependents.map((dep) => dep.oldDraft);
+          const newAssignDrafts = dependents.map((dep) => dep.newDraft);
+          load(fid);
+          setSnapshot((prev) => ({ ...prev, selectedCommandId: boxD.id }));
+          pushHistory({
+            label: `Edit ${oldKind}`,
+            undo: () => {
+              setSnapshot((prev) => ({ ...prev, busy: true }));
+              for (const b of [boxD, ...boxA]) {
+                if (!bridgeDelete(fid, remap.resolve(b.id))) {
+                  load(fid);
+                  return false;
+                }
+              }
+              const nidD = createDetached(fid, oldDraft);
+              if (nidD === null) {
+                load(fid);
+                return false;
+              }
+              remap.track(boxD.id, nidD);
+              boxD.id = nidD;
+              for (let i = 0; i < oldAssignDrafts.length; i += 1) {
+                const item = oldAssignDrafts[i];
+                const target = boxA[i];
+                if (item === undefined || target === undefined) {
+                  load(fid);
+                  return false;
+                }
+                const nid = createDetached(fid, item);
+                if (nid === null) {
+                  load(fid);
+                  return false;
+                }
+                remap.track(target.id, nid);
+                target.id = nid;
+              }
+              if (before !== null) {
+                if (!restoreLinks(fid, before.links, before.entry, false)) {
+                  load(fid);
+                  return false;
+                }
+              }
+              load(fid);
+              setSnapshot((prev) => ({ ...prev, selectedCommandId: nidD }));
+              return true;
+            },
+            redo: () => {
+              setSnapshot((prev) => ({ ...prev, busy: true }));
+              for (const b of [boxD, ...boxA]) {
+                if (!bridgeDelete(fid, remap.resolve(b.id))) {
+                  load(fid);
+                  return false;
+                }
+              }
+              const nidD = createDetached(fid, draft);
+              if (nidD === null) {
+                load(fid);
+                return false;
+              }
+              remap.track(boxD.id, nidD);
+              boxD.id = nidD;
+              for (let i = 0; i < newAssignDrafts.length; i += 1) {
+                const item = newAssignDrafts[i];
+                const target = boxA[i];
+                if (item === undefined || target === undefined) {
+                  load(fid);
+                  return false;
+                }
+                const nid = createDetached(fid, item);
+                if (nid === null) {
+                  load(fid);
+                  return false;
+                }
+                remap.track(target.id, nid);
+                target.id = nid;
+              }
+              if (after !== null) {
+                if (!restoreLinks(fid, after.links, after.entry, false)) {
+                  load(fid);
+                  return false;
+                }
+              }
+              load(fid);
+              setSnapshot((prev) => ({ ...prev, selectedCommandId: nidD }));
+              return true;
+            },
+          });
+          return;
+        }
         // Validate first (Issue 6): build the replacement detached
         // BEFORE deleting the original, so a validation failure (e.g.
         // assign to an undeclared variable) leaves the user's block
@@ -1014,6 +1394,7 @@ export function useProgram(
       insertSlot,
       createDetached,
       runLinkPlan,
+      restoreLinks,
       pushHistory,
     ],
   );
@@ -1314,6 +1695,9 @@ export function useProgram(
         redo: () => {
           setSnapshot((prev) => ({ ...prev, busy: true }));
           optilotus_clearPackage();
+          // The allocator restarts, so every remembered id mapping is
+          // stale (reused ids would otherwise resolve to wrong blocks).
+          remapRef.current.clear();
           setSnapshot((prev) => ({ ...prev, selectedCommandId: null }));
           load(null);
           return true;
@@ -1418,6 +1802,7 @@ export function useProgram(
     selectCommand,
     refresh,
     createFunction,
+    renameFunction,
     deleteFunction,
     addCommand,
     declareVariable,
