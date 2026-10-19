@@ -99,6 +99,12 @@ jobs:
       - name: Install UI deps
         working-directory: apps/aqualotus-ui
         run: npm ci
+      # `src/wasm/` is generated output and is git-ignored, so it must be
+      # built before anything imports it (lint, tests and the build all
+      # resolve `../wasm/optilotus/optilotus.js`).
+      - name: Build WASM bridge
+        working-directory: apps/aqualotus-ui
+        run: npm run build:wasm
       - name: Lint
         working-directory: apps/aqualotus-ui
         run: npm run lint

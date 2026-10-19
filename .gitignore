@@ -15,6 +15,13 @@ build/
 */dist/
 */build/
 
+# Generated WASM bridge (wasm-pack output). Rebuilt by `npm run
+# build:wasm`, which every build/dev/test path chains, so it is never
+# edited by hand and must not be committed: a checked-in binary drifts
+# from crates/optilotus and turns every engine change into an
+# unreviewable diff.
+apps/aqualotus-ui/src/wasm/
+
 # ============================================
 # Capacitor native builds
 # ============================================
