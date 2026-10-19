@@ -41,6 +41,7 @@ pub const STATUS_WAITING_INPUT: &str = "waiting_input";
 #[cfg_attr(feature = "ts-bindings", ts(export))]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorResponse {
+    #[cfg_attr(feature = "ts-bindings", ts(type = "\"error\""))]
     pub status: &'static str,
     /// Error family, e.g. `PackageError`, `TypeMismatch`, `NoRun`.
     pub kind: String,
@@ -48,8 +49,10 @@ pub struct ErrorResponse {
     pub command: Option<u32>,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub value: Option<u32>,
 }
 
@@ -100,6 +103,7 @@ impl ErrorResponse {
 #[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct IdleResponse {
+    #[cfg_attr(feature = "ts-bindings", ts(type = "\"idle\""))]
     pub status: &'static str,
 }
 
@@ -114,6 +118,7 @@ impl Default for IdleResponse {
 #[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct OkResponse {
+    #[cfg_attr(feature = "ts-bindings", ts(type = "\"ok\""))]
     pub status: &'static str,
 }
 
@@ -128,6 +133,7 @@ impl Default for OkResponse {
 #[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct CommandIdResponse {
+    #[cfg_attr(feature = "ts-bindings", ts(type = "\"ok\""))]
     pub status: &'static str,
     pub id: u32,
 }
@@ -146,6 +152,7 @@ impl CommandIdResponse {
 #[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct DeletedResponse {
+    #[cfg_attr(feature = "ts-bindings", ts(type = "\"ok\""))]
     pub status: &'static str,
     pub deleted: u32,
 }
@@ -164,6 +171,7 @@ impl DeletedResponse {
 #[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct ClearedResponse {
+    #[cfg_attr(feature = "ts-bindings", ts(type = "\"ok\""))]
     pub status: &'static str,
     pub cleared: usize,
 }
@@ -203,6 +211,7 @@ impl From<&FunctionSummary> for FunctionRow {
 #[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct ListFunctionsResponse {
+    #[cfg_attr(feature = "ts-bindings", ts(type = "\"ok\""))]
     pub status: &'static str,
     pub functions: Vec<FunctionRow>,
 }
@@ -222,6 +231,7 @@ impl ListFunctionsResponse {
 #[cfg_attr(feature = "ts-bindings", ts(export))]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionResponse {
+    #[cfg_attr(feature = "ts-bindings", ts(type = "\"ok\""))]
     pub status: &'static str,
     pub id: u32,
     pub name: String,
@@ -246,6 +256,7 @@ impl From<&FunctionInfo> for FunctionResponse {
 #[cfg_attr(feature = "ts-bindings", ts(export))]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionInfoResponse {
+    #[cfg_attr(feature = "ts-bindings", ts(type = "\"ok\""))]
     pub status: &'static str,
     pub id: u32,
     pub name: String,
@@ -273,6 +284,7 @@ impl From<&FunctionInfo> for FunctionInfoResponse {
 #[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct ListCommandsResponse {
+    #[cfg_attr(feature = "ts-bindings", ts(type = "\"ok\""))]
     pub status: &'static str,
     pub commands: Vec<CommandSummary>,
 }
@@ -292,11 +304,16 @@ impl ListCommandsResponse {
 #[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct RunOkResponse {
+    #[cfg_attr(feature = "ts-bindings", ts(type = "\"ok\""))]
     pub status: &'static str,
     pub steps: usize,
     pub prints: usize,
     pub printed: Vec<String>,
     pub returned: Option<crate::value::Value>,
+    /// Present only in debug mode: mirrors `steps` for introspection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
+    pub step_count: Option<usize>,
 }
 
 impl RunOkResponse {
@@ -312,7 +329,16 @@ impl RunOkResponse {
             prints,
             printed,
             returned,
+            step_count: None,
         }
+    }
+
+    /// Attach the debug-mode step mirror.
+    pub fn with_debug(mut self, debug: bool) -> Self {
+        if debug {
+            self.step_count = Some(self.steps);
+        }
+        self
     }
 }
 
@@ -322,10 +348,12 @@ impl RunOkResponse {
 #[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct WaitingInputResponse {
+    #[cfg_attr(feature = "ts-bindings", ts(type = "\"waiting_input\""))]
     pub status: &'static str,
     pub command: u32,
     pub ty: Type,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub peek: Option<bool>,
 }
 

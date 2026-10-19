@@ -4,6 +4,11 @@ use wasm_bindgen::prelude::*;
 
 use crate::error::ExecError;
 use crate::run_resumable::RunStatus;
+use crate::wire::{
+    exec_error_response, ClearedResponse, CommandIdResponse, DeletedResponse, ErrorResponse,
+    FunctionInfoResponse, FunctionResponse, FunctionRow, IdleResponse, ListCommandsResponse,
+    ListFunctionsResponse, OkResponse, RunOkResponse, WaitingInputResponse,
+};
 use crate::CommandSpec;
 
 /// Crate version, also exposed to JS.
@@ -26,79 +31,29 @@ pub fn version() -> &'static str {
     VERSION
 }
 
-/// Map an execution failure to the frontend-facing error object.
+/// Serialize any wire response to the JSON string the JS bridge parses.
+///
+/// The bridge keeps returning JSON strings (rather than `JsValue`) so a
+/// malformed response can never throw across the boundary: every call
+/// yields a parseable envelope, and the UI discriminates on `status`.
+/// The *shapes* are declared in `crate::wire`, so this is the only place
+/// that knows they are transported as JSON text.
+fn to_json<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_string(value).unwrap_or_else(|e| {
+        // Serialization of these plain structs cannot fail in practice;
+        // if it ever does, surface it as a typed error rather than
+        // panicking in the browser (P22: fail explicitly).
+        format!(
+            r#"{{"status":"error","kind":"Serialization","command":null,"message":"failed to serialize bridge response: {e}"}}"#
+        )
+    })
+}
+
+/// Map an execution failure to the frontend-facing error envelope.
 /// `command` carries the offending `CommandId` (null for `LoopLimit`)
 /// so the editor can highlight the corresponding visual block.
-fn exec_error_json(err: &crate::error::ExecError) -> serde_json::Value {
-    use crate::error::ExecError as E;
-    let message = err.to_string();
-    match err {
-        E::TypeMismatch { command, detail } => serde_json::json!({
-            "status": "error", "kind": "TypeMismatch",
-            "command": command.0, "message": message, "detail": detail,
-        }),
-        E::Overflow { command } => serde_json::json!({
-            "status": "error", "kind": "Overflow",
-            "command": command.0, "message": message,
-        }),
-        E::DivByZero { command } => serde_json::json!({
-            "status": "error", "kind": "DivByZero",
-            "command": command.0, "message": message,
-        }),
-        E::MissingValue { command, value } => serde_json::json!({
-            "status": "error", "kind": "MissingValue",
-            "command": command.0, "message": message, "value": value.0,
-        }),
-        E::Arity {
-            command,
-            expected,
-            found,
-        } => serde_json::json!({
-            "status": "error", "kind": "Arity",
-            "command": command.0, "message": message,
-            "expected": expected, "found": found,
-        }),
-        E::UnknownCommand { command } => serde_json::json!({
-            "status": "error", "kind": "UnknownCommand",
-            "command": command.0, "message": message,
-        }),
-        E::LoopLimit { limit } => serde_json::json!({
-            "status": "error", "kind": "LoopLimit",
-            "command": null, "message": message, "limit": limit,
-        }),
-        E::UnknownVariable { command, var } => serde_json::json!({
-            "status": "error", "kind": "UnknownVariable",
-            "command": command.0, "message": message, "var": var,
-        }),
-        E::ExprError { command, detail } => serde_json::json!({
-            "status": "error", "kind": "ExprError",
-            "command": command.0, "message": message, "detail": detail,
-        }),
-        E::UnknownFunction { command, name } => serde_json::json!({
-            "status": "error", "kind": "UnknownFunction",
-            "command": command.0, "message": message, "function": name,
-        }),
-        E::MissingReturn { command, function } => serde_json::json!({
-            "status": "error", "kind": "MissingReturn",
-            "command": command.0, "message": message, "function": function,
-        }),
-        E::InputEof { command } => serde_json::json!({
-            "status": "error", "kind": "InputEof",
-            "command": command.0, "message": message,
-        }),
-        E::InputParse { command, detail } => serde_json::json!({
-            "status": "error", "kind": "InputParse",
-            "command": command.0, "message": message, "detail": detail,
-        }),
-        E::Paused => serde_json::json!({
-            "status": "error", "kind": "Paused",
-            "command": null, "message": message,
-        }),
-        E::InvalidState => serde_json::json!({
-            "status": "error", "kind": "InvalidState",
-            "command": null, "message": message,
-        }),
-    }
+fn exec_error_json(err: &crate::error::ExecError) -> ErrorResponse {
+    exec_error_response(err)
 }
 
 // ---------------------------------------------------------------------------
@@ -149,35 +104,30 @@ fn with_package<T>(f: impl FnOnce(&mut crate::package::Package) -> T) -> T {
 /// Package CRUD error envelope: `{"status":"error","kind":"PackageError",
 /// "command":id|null,"message"}` — no block ran (command set for
 /// `UnknownCommand` so the editor can highlight it).
-fn package_fail_json(err: &crate::package::PackageError) -> serde_json::Value {
-    let command = match err {
-        crate::package::PackageError::UnknownCommand(id) => serde_json::Value::from(id.0),
-        _ => serde_json::Value::Null,
-    };
-    serde_json::json!({
-        "status": "error", "kind": "PackageError",
-        "command": command, "message": err.to_string(),
-    })
+fn package_fail(err: &crate::package::PackageError) -> ErrorResponse {
+    let message = err.to_string();
+    match err {
+        crate::package::PackageError::UnknownCommand(id) => {
+            ErrorResponse::at_command("PackageError", *id, message)
+        }
+        _ => ErrorResponse::new("PackageError", message),
+    }
 }
 
 /// Typed error for malformed input JSON — never silently empty.
 fn invalid_inputs_json(e: &serde_json::Error) -> String {
-    serde_json::json!({
-        "status": "error", "kind": "InvalidInputs", "command": null,
-        "message": format!("invalid inputs JSON: {e}"),
-    })
-    .to_string()
+    to_json(&ErrorResponse::new(
+        "InvalidInputs",
+        format!("invalid inputs JSON: {e}"),
+    ))
 }
 
 /// List functions: `{"status":"ok","functions":[{id,name,isMain}]}`.
 /// Wire JSON uses `camelCase` for the TS bridge; Rust fields stay `snake_case`.
 pub fn package_list_functions() -> String {
     let functions = with_package(|pkg| pkg.list_functions());
-    let items: Vec<serde_json::Value> = functions
-        .iter()
-        .map(|f| serde_json::json!({"id": f.id.0, "name": f.name, "isMain": f.is_main}))
-        .collect();
-    serde_json::json!({"status": "ok", "functions": items}).to_string()
+    let rows: Vec<FunctionRow> = functions.iter().map(FunctionRow::from).collect();
+    to_json(&ListFunctionsResponse::new(rows))
 }
 
 /// Create a function: `{"status":"ok","id","name","isMain"}`.
@@ -185,35 +135,25 @@ pub fn package_create_function(name: &str) -> String {
     with_package(|pkg| match pkg.create_function(name) {
         Ok(id) => {
             let info = pkg.get_function(id).expect("just created");
-            serde_json::json!({
-                "status": "ok", "id": info.id.0,
-                "name": info.name, "isMain": info.is_main,
-            })
-            .to_string()
+            to_json(&FunctionResponse::from(&info))
         }
-        Err(e) => package_fail_json(&e).to_string(),
+        Err(e) => to_json(&package_fail(&e)),
     })
 }
 
 /// Inspect one function by numeric id.
 pub fn package_get_function(id: u32) -> String {
     with_package(|pkg| match pkg.get_function(crate::ir::FunctionId(id)) {
-        Ok(info) => serde_json::json!({
-            "status": "ok", "id": info.id.0, "name": info.name,
-            "isMain": info.is_main,
-            "entry": info.entry.map(|c| c.0),
-            "commandCount": info.command_count,
-        })
-        .to_string(),
-        Err(e) => package_fail_json(&e).to_string(),
+        Ok(info) => to_json(&FunctionInfoResponse::from(&info)),
+        Err(e) => to_json(&package_fail(&e)),
     })
 }
 
 /// Delete a helper by numeric id (`main` is protected).
 pub fn package_delete_function(id: u32) -> String {
     with_package(|pkg| match pkg.delete_function(crate::ir::FunctionId(id)) {
-        Ok(()) => serde_json::json!({"status": "ok", "deleted": id}).to_string(),
-        Err(e) => package_fail_json(&e).to_string(),
+        Ok(()) => to_json(&DeletedResponse::new(id)),
+        Err(e) => to_json(&package_fail(&e)),
     })
 }
 
@@ -225,13 +165,9 @@ pub fn package_rename_function(id: u32, name: &str) -> String {
                 let info = pkg
                     .get_function(crate::ir::FunctionId(id))
                     .expect("just renamed");
-                serde_json::json!({
-                    "status": "ok", "id": info.id.0,
-                    "name": info.name, "isMain": info.is_main,
-                })
-                .to_string()
+                to_json(&FunctionResponse::from(&info))
             }
-            Err(e) => package_fail_json(&e).to_string(),
+            Err(e) => to_json(&package_fail(&e)),
         },
     )
 }
@@ -241,7 +177,7 @@ pub fn package_clear() -> String {
     with_package(|pkg| {
         let held = pkg.list_functions().len().saturating_sub(1);
         pkg.clear_package();
-        serde_json::json!({"status": "ok", "cleared": held}).to_string()
+        to_json(&ClearedResponse::new(held))
     })
 }
 
@@ -249,8 +185,8 @@ pub fn package_clear() -> String {
 pub fn package_declare(fid: u32, name: &str, ty: &str, init: Option<String>) -> String {
     with_package(
         |pkg| match pkg.declare(crate::ir::FunctionId(fid), name, ty, init.as_deref()) {
-            Ok(id) => serde_json::json!({"status": "ok", "id": id.0}).to_string(),
-            Err(e) => package_fail_json(&e).to_string(),
+            Ok(id) => to_json(&CommandIdResponse::new(id)),
+            Err(e) => to_json(&package_fail(&e)),
         },
     )
 }
@@ -259,8 +195,8 @@ pub fn package_declare(fid: u32, name: &str, ty: &str, init: Option<String>) -> 
 pub fn package_assign(fid: u32, name: &str, expr: &str) -> String {
     with_package(
         |pkg| match pkg.assign(crate::ir::FunctionId(fid), name, expr) {
-            Ok(id) => serde_json::json!({"status": "ok", "id": id.0}).to_string(),
-            Err(e) => package_fail_json(&e).to_string(),
+            Ok(id) => to_json(&CommandIdResponse::new(id)),
+            Err(e) => to_json(&package_fail(&e)),
         },
     )
 }
@@ -269,8 +205,8 @@ pub fn package_assign(fid: u32, name: &str, expr: &str) -> String {
 pub fn package_print(fid: u32, template: &str) -> String {
     with_package(
         |pkg| match pkg.print(crate::ir::FunctionId(fid), template) {
-            Ok(id) => serde_json::json!({"status": "ok", "id": id.0}).to_string(),
-            Err(e) => package_fail_json(&e).to_string(),
+            Ok(id) => to_json(&CommandIdResponse::new(id)),
+            Err(e) => to_json(&package_fail(&e)),
         },
     )
 }
@@ -278,8 +214,8 @@ pub fn package_print(fid: u32, template: &str) -> String {
 /// `input(fid, ty)` -> `{"status":"ok","id"}`.
 pub fn package_input(fid: u32, ty: &str) -> String {
     with_package(|pkg| match pkg.input(crate::ir::FunctionId(fid), ty) {
-        Ok(id) => serde_json::json!({"status": "ok", "id": id.0}).to_string(),
-        Err(e) => package_fail_json(&e).to_string(),
+        Ok(id) => to_json(&CommandIdResponse::new(id)),
+        Err(e) => to_json(&package_fail(&e)),
     })
 }
 
@@ -287,8 +223,8 @@ pub fn package_input(fid: u32, ty: &str) -> String {
 pub fn package_cast(fid: u32, name: &str, to: &str, expr: &str) -> String {
     with_package(
         |pkg| match pkg.cast(crate::ir::FunctionId(fid), name, to, expr) {
-            Ok(id) => serde_json::json!({"status": "ok", "id": id.0}).to_string(),
-            Err(e) => package_fail_json(&e).to_string(),
+            Ok(id) => to_json(&CommandIdResponse::new(id)),
+            Err(e) => to_json(&package_fail(&e)),
         },
     )
 }
@@ -296,22 +232,16 @@ pub fn package_cast(fid: u32, name: &str, to: &str, expr: &str) -> String {
 /// `return(fid, expr)` -> `{"status":"ok","id"}`.
 pub fn package_return(fid: u32, expr: &str) -> String {
     with_package(|pkg| match pkg.return_(crate::ir::FunctionId(fid), expr) {
-        Ok(id) => serde_json::json!({"status": "ok", "id": id.0}).to_string(),
-        Err(e) => package_fail_json(&e).to_string(),
+        Ok(id) => to_json(&CommandIdResponse::new(id)),
+        Err(e) => to_json(&package_fail(&e)),
     })
 }
 
 /// `list_commands(fid)` -> `{"status":"ok","commands":[...]}` in user kinds.
 pub fn package_list_commands(fid: u32) -> String {
     with_package(|pkg| match pkg.list_commands(crate::ir::FunctionId(fid)) {
-        Ok(cmds) => {
-            let items: Vec<serde_json::Value> = cmds
-                .iter()
-                .map(|c| serde_json::to_value(c).unwrap_or(serde_json::Value::Null))
-                .collect();
-            serde_json::json!({"status": "ok", "commands": items}).to_string()
-        }
-        Err(e) => package_fail_json(&e).to_string(),
+        Ok(cmds) => to_json(&ListCommandsResponse::new(cmds)),
+        Err(e) => to_json(&package_fail(&e)),
     })
 }
 
@@ -319,8 +249,8 @@ pub fn package_list_commands(fid: u32) -> String {
 pub fn package_set_entry(fid: u32, cmd: Option<u32>) -> String {
     with_package(|pkg| {
         match pkg.set_entry(crate::ir::FunctionId(fid), cmd.map(crate::ir::CommandId)) {
-            Ok(()) => serde_json::json!({"status": "ok"}).to_string(),
-            Err(e) => package_fail_json(&e).to_string(),
+            Ok(()) => to_json(&OkResponse::default()),
+            Err(e) => to_json(&package_fail(&e)),
         }
     })
 }
@@ -333,8 +263,8 @@ pub fn package_set_next(fid: u32, cmd: u32, next: Option<u32>) -> String {
             crate::ir::CommandId(cmd),
             next.map(crate::ir::CommandId),
         ) {
-            Ok(()) => serde_json::json!({"status": "ok"}).to_string(),
-            Err(e) => package_fail_json(&e).to_string(),
+            Ok(()) => to_json(&OkResponse::default()),
+            Err(e) => to_json(&package_fail(&e)),
         }
     })
 }
@@ -343,8 +273,8 @@ pub fn package_set_next(fid: u32, cmd: u32, next: Option<u32>) -> String {
 pub fn package_delete_command(fid: u32, cmd: u32) -> String {
     with_package(|pkg| {
         match pkg.delete_command(crate::ir::FunctionId(fid), crate::ir::CommandId(cmd)) {
-            Ok(()) => serde_json::json!({"status": "ok", "deleted": cmd}).to_string(),
-            Err(e) => package_fail_json(&e).to_string(),
+            Ok(()) => to_json(&DeletedResponse::new(cmd)),
+            Err(e) => to_json(&package_fail(&e)),
         }
     })
 }
@@ -396,14 +326,13 @@ pub fn run_program() -> String {
     with_package(|pkg| {
         let mut sink = crate::sink::VecSink::default();
         match pkg.run_main(&mut sink) {
-            Ok(report) => serde_json::json!({
-                "status": "ok",
-                "steps": report.steps,
-                "prints": report.prints,
-                "printed": sink.lines,
-            })
-            .to_string(),
-            Err(e) => exec_error_json(&e).to_string(),
+            Ok(report) => to_json(&RunOkResponse::new(
+                report.steps,
+                report.prints,
+                sink.lines,
+                None,
+            )),
+            Err(e) => to_json(&exec_error_json(&e)),
         }
     })
 }
@@ -418,14 +347,13 @@ pub fn run_program_with_inputs(inputs_json: &str) -> String {
     with_package(|pkg| {
         let mut sink = crate::sink::VecSink::default();
         match pkg.run_main_with_input_lines(&mut sink, lines) {
-            Ok(report) => serde_json::json!({
-                "status": "ok",
-                "steps": report.steps,
-                "prints": report.prints,
-                "printed": sink.lines,
-            })
-            .to_string(),
-            Err(e) => exec_error_json(&e).to_string(),
+            Ok(report) => to_json(&RunOkResponse::new(
+                report.steps,
+                report.prints,
+                sink.lines,
+                None,
+            )),
+            Err(e) => to_json(&exec_error_json(&e)),
         }
     })
 }
@@ -561,42 +489,22 @@ fn run_status_json(status: crate::run_resumable::RunStatus) -> String {
     let debug = DEBUG_MODE.with(|cell| *cell.borrow());
     match status {
         RunStatus::WaitingInput { command, ty } => {
-            let mut map = serde_json::json!({
-                "status": "waiting_input",
-                "command": command.0,
-                "ty": ty.tag(),
-            });
+            let mut response = WaitingInputResponse::new(command, ty);
             if debug {
-                if let Some(obj) = map.as_object_mut() {
-                    obj.insert("peek".to_string(), serde_json::Value::Bool(true));
-                }
+                response.peek = Some(true);
             }
-            map.to_string()
+            to_json(&response)
         }
         RunStatus::Finished {
             steps,
             prints,
             printed,
             returned,
-        } => {
-            let mut map = serde_json::json!({
-                "status": "ok",
-                "steps": steps,
-                "prints": prints,
-                "printed": printed,
-                "returned": returned,
-            });
-            if debug {
-                if let Some(obj) = map.as_object_mut() {
-                    obj.insert("step_count".to_string(), serde_json::Value::from(steps));
-                }
-            }
-            map.to_string()
-        }
+        } => to_json(&RunOkResponse::new(steps, prints, printed, returned).with_debug(debug)),
         RunStatus::Error(e) => {
             // record for lastError query
             crate::bridge::record_error(e.clone());
-            exec_error_json(&e).to_string()
+            to_json(&exec_error_json(&e))
         }
     }
 }
@@ -621,8 +529,7 @@ pub fn run_program_provide_input(value: &str) -> String {
         if let Some(run) = cell.as_mut() {
             run_status_json(run.provide_input(value))
         } else {
-            serde_json::json!({"status":"error","kind":"NoRun","message":"no active run"})
-                .to_string()
+            to_json(&ErrorResponse::new("NoRun", "no active run"))
         }
     })
 }
@@ -640,7 +547,7 @@ pub fn run_program_status() -> String {
         if let Some(run) = cell.borrow().as_ref() {
             run_status_json(run.status())
         } else {
-            serde_json::json!({"status":"idle"}).to_string()
+            to_json(&IdleResponse::default())
         }
     })
 }
@@ -731,31 +638,24 @@ pub fn run_program_peek_pending() -> String {
     RUN.with(|cell| {
         if let Some(run) = cell.borrow().as_ref() {
             match run.peek_pending() {
-                Some(p) => serde_json::json!({
-                    "status": "waiting_input",
-                    "command": p.command.0,
-                    "ty": p.ty.tag(),
-                })
-                .to_string(),
+                Some(p) => to_json(&WaitingInputResponse::new(p.command, p.ty)),
                 None => {
                     if let Some(err) = &run.error {
-                        exec_error_json(err).to_string()
+                        to_json(&exec_error_json(err))
                     } else if run.frames.is_empty() {
-                        serde_json::json!({
-                            "status": "ok",
-                            "steps": run.global_steps,
-                            "prints": run.global_prints,
-                            "printed": run.sink.lines,
-                            "returned": run.result.clone(),
-                        })
-                        .to_string()
+                        to_json(&RunOkResponse::new(
+                            run.global_steps,
+                            run.global_prints,
+                            run.sink.lines.clone(),
+                            run.result.clone(),
+                        ))
                     } else {
-                        serde_json::json!({"status":"idle"}).to_string()
+                        to_json(&IdleResponse::default())
                     }
                 }
             }
         } else {
-            serde_json::json!({"status":"idle"}).to_string()
+            to_json(&IdleResponse::default())
         }
     })
 }
@@ -765,14 +665,14 @@ pub fn run_program_reset() -> String {
     RUN.with(|cell| {
         *cell.borrow_mut() = None;
     });
-    serde_json::json!({"status":"idle"}).to_string()
+    to_json(&IdleResponse::default())
 }
 
 /// Query the last recorded error. Returns `{"status":"idle"}` if none.
 pub fn run_program_last_error() -> String {
     LAST_ERROR.with(|cell| match &*cell.borrow() {
-        Some(err) => exec_error_json(err).to_string(),
-        None => serde_json::json!({"status":"idle"}).to_string(),
+        Some(err) => to_json(&exec_error_json(err)),
+        None => to_json(&IdleResponse::default()),
     })
 }
 
@@ -798,8 +698,7 @@ pub fn run_program_provide_inputs(inputs_json: &str) -> String {
             }
             run_status_json(last_status)
         } else {
-            serde_json::json!({"status":"error","kind":"NoRun","message":"no active run"})
-                .to_string()
+            to_json(&ErrorResponse::new("NoRun", "no active run"))
         }
     })
 }
@@ -844,8 +743,7 @@ pub fn run_program_provide_input_typed(value_json: &str) -> String {
                 }
             }
         } else {
-            serde_json::json!({"status":"error","kind":"NoRun","message":"no active run"})
-                .to_string()
+            to_json(&ErrorResponse::new("NoRun", "no active run"))
         }
     })
 }

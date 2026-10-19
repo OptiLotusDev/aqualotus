@@ -106,15 +106,41 @@ export function optilotus_health(): string {
 
 /**
  * Package registry: one package, many functions, stable `main` (id 0).
- * Typed wrappers only — JSON is parsed once inside each wrapper, so UI
- * call sites never build or pass IR JSON.
+ * Typed wrappers only — the bridge returns JSON strings whose shapes are
+ * declared in Rust (`crates/optilotus/src/wire.rs`) and generated into
+ * `src/wasm/optilotus/bindings/` by `npm run build:wasm`. The types below
+ * are re-exports of those generated bindings, so they cannot drift from
+ * the engine (P18: serialization is a contract).
  */
-export type FunctionId = number;
-export type CommandId = number;
+export type { CommandId } from "../wasm/optilotus/bindings/CommandId";
+export type { FunctionId } from "../wasm/optilotus/bindings/FunctionId";
+export type { ValueId } from "../wasm/optilotus/bindings/ValueId";
+export type { CommandKind } from "../wasm/optilotus/bindings/CommandKind";
+export type { CommandSpec } from "../wasm/optilotus/bindings/CommandSpec";
+export type { CommandSummary } from "../wasm/optilotus/bindings/CommandSummary";
+export type { ErrorResponse as OptilotusError } from "../wasm/optilotus/bindings/ErrorResponse";
+export type { FunctionInfo } from "../wasm/optilotus/bindings/FunctionInfo";
+export type { FunctionSummary } from "../wasm/optilotus/bindings/FunctionSummary";
+export type { RunOkResponse as RunOk } from "../wasm/optilotus/bindings/RunOkResponse";
+export type { Type as OptilotusType } from "../wasm/optilotus/bindings/Type";
+export type { Value } from "../wasm/optilotus/bindings/Value";
+export type { WaitingInputResponse as PendingInput } from "../wasm/optilotus/bindings/WaitingInputResponse";
+
+import type { CommandSpec } from "../wasm/optilotus/bindings/CommandSpec";
+import type { CommandSummary } from "../wasm/optilotus/bindings/CommandSummary";
+import type { ErrorResponse as OptilotusError } from "../wasm/optilotus/bindings/ErrorResponse";
+import type { FunctionInfo } from "../wasm/optilotus/bindings/FunctionInfo";
+import type { FunctionSummary } from "../wasm/optilotus/bindings/FunctionSummary";
+import type { RunOkResponse as RunOk } from "../wasm/optilotus/bindings/RunOkResponse";
+import type { Type as OptilotusType } from "../wasm/optilotus/bindings/Type";
+import type { WaitingInputResponse as PendingInput } from "../wasm/optilotus/bindings/WaitingInputResponse";
 
 /**
  * Scalar type tags (mirrors Rust `Type::tag()`).
  * Use as `optilotus_type.int32` instead of raw `"int32"` strings.
+ *
+ * The values must stay in step with the generated `Type` union; the
+ * `satisfies` clause below makes a missing or extra tag a compile error.
  */
 export const optilotus_type = {
   int8: "int8",
@@ -133,48 +159,15 @@ export const optilotus_type = {
   char: "char",
   string: "string",
   void: "void",
-} as const;
+} as const satisfies Record<string, OptilotusType>;
 
-export type OptilotusType =
-  (typeof optilotus_type)[keyof typeof optilotus_type];
-
-export type FunctionSummary = {
-  id: number;
-  name: string;
-  isMain: boolean;
-};
-
-export type FunctionInfo = {
-  id: number;
-  name: string;
-  isMain: boolean;
-  entry: number | null;
-  commandCount: number;
-};
-
-export type CommandSummary = {
-  id: number;
-  kind: "declare" | "assign" | "print" | "input" | "cast" | "return" | "if";
-  /** Following user command head; `null` at the tail end or when cleared. */
-  next: number | null;
-  var?: string;
-  ty?: OptilotusType;
-  expr?: string;
-  template?: string;
-  /** `if` only: condition value id, branch bodies (ordered command ids). */
-  condition?: number;
-  then_body?: number[];
-  else_body?: number[];
-};
-
-export type OptilotusError = {
-  status: "error";
-  kind: string;
-  command: number | null;
-  message: string;
-  [key: string]: unknown;
-};
-
+/**
+ * Parse a bridge response. The bridge always returns a JSON string (it
+ * never throws across the boundary), so this is the single place the UI
+ * turns that text into a value. The cast is unchecked by construction —
+ * the *shapes* are generated from Rust, but the parse itself cannot be
+ * validated without a runtime schema.
+ */
 function parseBridge<T>(raw: string): T {
   return JSON.parse(raw) as T;
 }
@@ -315,31 +308,16 @@ export function optilotus_deleteCommand(
   return parseBridge(deleteCommand_wasm(fid, cmd));
 }
 
-/** Typed result of `optilotus_runProgram()` (parsed once, inside). */
-export type RunOk = {
-  status: "ok";
-  steps: number;
-  prints: number;
-  printed: string[];
-  /** Value returned by `main`; `null` when the run did not return a value. */
-  returned: unknown;
-};
-
-export type RunErr = {
-  status: "error";
-  kind: string;
-  command: number | null;
-  message: string;
-  [key: string]: unknown;
-};
+/**
+ * Typed result of `optilotus_runProgram()`.
+ *
+ * `RunOk` is the generated `RunOkResponse` (re-exported above). `RunErr`
+ * is the generated `ErrorResponse` narrowed to its error status, so the
+ * two stay in step with the engine.
+ */
+export type RunErr = OptilotusError;
 
 export type RunResult = RunOk | RunErr;
-
-/** Pending input the run is waiting on (without consuming it). */
-export type PendingInput = {
-  command: number;
-  ty: OptilotusType;
-};
 
 export type RunStatus =
   | { status: "waiting_input"; command: number; ty: OptilotusType }
@@ -348,19 +326,6 @@ export type RunStatus =
 
 /** Status of the run when no session is active. */
 export type RunIdle = { status: "idle" };
-
-/**
- * User-level command spec for building `if` bodies. Passed to
- * `optilus_if` as native JS objects — no JSON strings, full type safety.
- * The server validates, allocates ids and expands each spec into raw
- * commands linked in order.
- */
-export type CommandSpec =
-  | { kind: "declare"; var: string; ty: OptilotusType; init?: string }
-  | { kind: "assign"; var: string; expr: string }
-  | { kind: "print"; template: string }
-  | { kind: "input"; ty: OptilotusType }
-  | { kind: "cast"; var: string; to: OptilotusType; expr: string };
 
 /** Debug-enabled status (extra fields when debug mode is on). */
 export type DebugStatus = RunStatus & { step_count?: number; peek?: boolean };
