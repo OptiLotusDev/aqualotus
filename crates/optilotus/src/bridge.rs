@@ -2,6 +2,10 @@ use std::cell::RefCell;
 
 use wasm_bindgen::prelude::*;
 
+use crate::error::ExecError;
+use crate::run_resumable::RunStatus;
+use crate::CommandSpec;
+
 /// Crate version, also exposed to JS.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -133,6 +137,9 @@ thread_local! {
         RefCell::new(crate::package::Package::new());
     static RUN: RefCell<Option<crate::run_resumable::RunSession>> =
         const { RefCell::new(None) };
+    static LAST_ERROR: RefCell<Option<crate::error::ExecError>> =
+        const { RefCell::new(None) };
+    static DEBUG_MODE: RefCell<bool> = const { RefCell::new(false) };
 }
 
 fn with_package<T>(f: impl FnOnce(&mut crate::package::Package) -> T) -> T {
@@ -151,6 +158,15 @@ fn package_fail_json(err: &crate::package::PackageError) -> serde_json::Value {
         "status": "error", "kind": "PackageError",
         "command": command, "message": err.to_string(),
     })
+}
+
+/// Typed error for malformed input JSON — never silently empty.
+fn invalid_inputs_json(e: &serde_json::Error) -> String {
+    serde_json::json!({
+        "status": "error", "kind": "InvalidInputs", "command": null,
+        "message": format!("invalid inputs JSON: {e}"),
+    })
+    .to_string()
 }
 
 /// List functions: `{"status":"ok","functions":[{id,name,isMain}]}`.
@@ -333,6 +349,46 @@ pub fn package_delete_command(fid: u32, cmd: u32) -> String {
     })
 }
 
+/// `if(fid, cond_expr, then_specs, else_specs?)` -> Result<u32, JsValue>.
+///
+/// Creates an `Op::If` in one call: the condition expression is evaluated
+/// into a hidden ValueId appended to the main chain, and each body spec
+/// is expanded into raw commands linked in order. Body specs cross as
+/// native JS objects (no JSON strings); the Ok value is the new
+/// if-command's user id, the Err value is the error message.
+#[wasm_bindgen(js_name = optilotus_if)]
+pub fn js_package_if(
+    fid: u32,
+    cond_expr: &str,
+    then_specs: Vec<JsValue>,
+    else_specs: Option<Vec<JsValue>>,
+) -> Result<u32, JsValue> {
+    init_panic_hook();
+    with_package(|pkg| {
+        let then_specs = parse_specs(then_specs)?;
+        let else_specs = match else_specs {
+            Some(specs) => Some(parse_specs(specs)?),
+            None => None,
+        };
+        pkg.if_with_expr(
+            crate::ir::FunctionId(fid),
+            cond_expr,
+            &then_specs,
+            else_specs.as_deref(),
+        )
+        .map(|id| id.0)
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+    })
+}
+
+/// Deserialize a list of native JS command specs into domain types.
+fn parse_specs(specs: Vec<JsValue>) -> Result<Vec<CommandSpec>, JsValue> {
+    specs
+        .into_iter()
+        .map(|js| serde_wasm_bindgen::from_value(js).map_err(|e| JsValue::from_str(&e.to_string())))
+        .collect()
+}
+
 /// Run `main` by id only (no JSON input). The output is always a JSON
 /// string — this never throws across the boundary, so JS callers only parse:
 /// ok `{"status":"ok","steps","prints","printed"}` or the typed error object.
@@ -353,8 +409,12 @@ pub fn run_program() -> String {
 }
 
 /// Run `main` consuming the supplied input lines (JSON array of strings).
+/// Malformed JSON returns a typed error — never a silent empty run.
 pub fn run_program_with_inputs(inputs_json: &str) -> String {
-    let lines: Vec<String> = serde_json::from_str(inputs_json).unwrap_or_default();
+    let lines: Vec<String> = match serde_json::from_str(inputs_json) {
+        Ok(v) => v,
+        Err(e) => return invalid_inputs_json(&e),
+    };
     with_package(|pkg| {
         let mut sink = crate::sink::VecSink::default();
         match pkg.run_main_with_input_lines(&mut sink, lines) {
@@ -489,29 +549,55 @@ pub fn js_package_delete_command(fid: u32, cmd: u32) -> String {
     package_delete_command(fid, cmd)
 }
 
+/// Record the last execution error for `optilotus_lastError()` queries.
+fn record_error(err: crate::error::ExecError) {
+    LAST_ERROR.with(|cell| {
+        *cell.borrow_mut() = Some(err);
+    });
+}
+
 fn run_status_json(status: crate::run_resumable::RunStatus) -> String {
     use crate::run_resumable::RunStatus;
+    let debug = DEBUG_MODE.with(|cell| *cell.borrow());
     match status {
-        RunStatus::WaitingInput { command, ty } => serde_json::json!({
-            "status": "waiting_input",
-            "command": command.0,
-            "ty": ty.tag(),
-        })
-        .to_string(),
+        RunStatus::WaitingInput { command, ty } => {
+            let mut map = serde_json::json!({
+                "status": "waiting_input",
+                "command": command.0,
+                "ty": ty.tag(),
+            });
+            if debug {
+                if let Some(obj) = map.as_object_mut() {
+                    obj.insert("peek".to_string(), serde_json::Value::Bool(true));
+                }
+            }
+            map.to_string()
+        }
         RunStatus::Finished {
             steps,
             prints,
             printed,
             returned,
-        } => serde_json::json!({
-            "status": "ok",
-            "steps": steps,
-            "prints": prints,
-            "printed": printed,
-            "returned": returned,
-        })
-        .to_string(),
-        RunStatus::Error(e) => exec_error_json(&e).to_string(),
+        } => {
+            let mut map = serde_json::json!({
+                "status": "ok",
+                "steps": steps,
+                "prints": prints,
+                "printed": printed,
+                "returned": returned,
+            });
+            if debug {
+                if let Some(obj) = map.as_object_mut() {
+                    obj.insert("step_count".to_string(), serde_json::Value::from(steps));
+                }
+            }
+            map.to_string()
+        }
+        RunStatus::Error(e) => {
+            // record for lastError query
+            crate::bridge::record_error(e.clone());
+            exec_error_json(&e).to_string()
+        }
     }
 }
 
@@ -559,17 +645,6 @@ pub fn run_program_status() -> String {
     })
 }
 
-// Compatibility aliases (old names).
-pub fn run_program_resumable_start() -> String {
-    run_program_start()
-}
-pub fn run_program_resumable_provide_input(value: &str) -> String {
-    run_program_provide_input(value)
-}
-pub fn run_program_resumable_cancel() {
-    run_program_cancel()
-}
-
 /// JS: `optilotus_runProgramStart() -> string`
 #[wasm_bindgen(js_name = optilotus_runProgramStart)]
 pub fn js_run_program_start() -> String {
@@ -598,30 +673,255 @@ pub fn js_run_program_status() -> String {
     run_program_status()
 }
 
-/// JS: `optilotus_runProgramResumableStart() -> string`
-#[wasm_bindgen(js_name = optilotus_runProgramResumableStart)]
-pub fn js_run_program_resumable_start() -> String {
+/// Peek at pending input without consuming it.
+/// Returns `{"status":"waiting_input","command":...,"ty":...}` or `{"status":"idle"}` / error.
+#[wasm_bindgen(js_name = optilotus_runProgramPeekPending)]
+pub fn js_run_program_peek_pending() -> String {
     init_panic_hook();
-    run_program_resumable_start()
+    run_program_peek_pending()
 }
 
-/// JS: `optilotus_runProgramResumableProvideInput(value) -> string`
-#[wasm_bindgen(js_name = optilotus_runProgramResumableProvideInput)]
-pub fn js_run_program_resumable_provide_input(value: &str) -> String {
+/// Reset / clear the active run session. Returns `{"status":"idle"}`.
+#[wasm_bindgen(js_name = optilotus_runProgramReset)]
+pub fn js_run_program_reset() -> String {
     init_panic_hook();
-    run_program_resumable_provide_input(value)
+    run_program_reset()
 }
 
-/// JS: `optilotus_runProgramResumableCancel() -> void`
-#[wasm_bindgen(js_name = optilotus_runProgramResumableCancel)]
-pub fn js_run_program_resumable_cancel() {
+/// Query the last recorded error. Returns `{"status":"idle"}` if none.
+#[wasm_bindgen(js_name = optilotus_lastError)]
+pub fn js_last_error() -> String {
     init_panic_hook();
-    run_program_resumable_cancel()
+    run_program_last_error()
 }
 
-/// JS: `optilotus_runProgram() -> string` (JSON report, no JSON input)
+/// Batch provide multiple input lines sequentially.
+/// Stops at the first `waiting_input` or completion.
+#[wasm_bindgen(js_name = optilotus_runProgramProvideInputs)]
+pub fn js_run_program_provide_inputs(inputs_json: &str) -> String {
+    init_panic_hook();
+    run_program_provide_inputs(inputs_json)
+}
+
+/// Provide a single typed input value (JSON-encoded).
+/// The library parses the JSON value according to the pending command's type.
+#[wasm_bindgen(js_name = optilotus_runProgramProvideInputTyped)]
+pub fn js_run_program_provide_input_typed(value_json: &str) -> String {
+    init_panic_hook();
+    run_program_provide_input_typed(value_json)
+}
+
+/// Enable or disable debug mode (adds extra introspection fields to status JSON).
+#[wasm_bindgen(js_name = optilotus_debugMode)]
+pub fn js_run_program_debug_mode(enable: bool) {
+    init_panic_hook();
+    run_program_debug_mode(enable);
+}
+
+/// JS: `opilotus_runProgram() -> string` (JSON report, no JSON input)
 #[wasm_bindgen(js_name = optilotus_runProgram)]
 pub fn js_run_program() -> String {
     init_panic_hook();
     run_program()
+}
+
+/// Peek at pending input without consuming it.
+/// Returns `{"status":"waiting_input","command":...,"ty":...}` or `{"status":"idle"}` / error.
+pub fn run_program_peek_pending() -> String {
+    RUN.with(|cell| {
+        if let Some(run) = cell.borrow().as_ref() {
+            match run.peek_pending() {
+                Some(p) => serde_json::json!({
+                    "status": "waiting_input",
+                    "command": p.command.0,
+                    "ty": p.ty.tag(),
+                })
+                .to_string(),
+                None => {
+                    if let Some(err) = &run.error {
+                        exec_error_json(err).to_string()
+                    } else if run.frames.is_empty() {
+                        serde_json::json!({
+                            "status": "ok",
+                            "steps": run.global_steps,
+                            "prints": run.global_prints,
+                            "printed": run.sink.lines,
+                            "returned": run.result.clone(),
+                        })
+                        .to_string()
+                    } else {
+                        serde_json::json!({"status":"idle"}).to_string()
+                    }
+                }
+            }
+        } else {
+            serde_json::json!({"status":"idle"}).to_string()
+        }
+    })
+}
+
+/// Reset / clear the active run session. Returns `{"status":"idle"}`.
+pub fn run_program_reset() -> String {
+    RUN.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+    serde_json::json!({"status":"idle"}).to_string()
+}
+
+/// Query the last recorded error. Returns `{"status":"idle"}` if none.
+pub fn run_program_last_error() -> String {
+    LAST_ERROR.with(|cell| match &*cell.borrow() {
+        Some(err) => exec_error_json(err).to_string(),
+        None => serde_json::json!({"status":"idle"}).to_string(),
+    })
+}
+
+/// Batch provide multiple input lines sequentially.
+/// Feeds each value in order, stopping at the first `waiting_input` or completion.
+/// Malformed JSON returns a typed error — never a silent empty batch.
+pub fn run_program_provide_inputs(inputs_json: &str) -> String {
+    let inputs: Vec<String> = match serde_json::from_str(inputs_json) {
+        Ok(v) => v,
+        Err(e) => return invalid_inputs_json(&e),
+    };
+    RUN.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        if let Some(run) = cell.as_mut() {
+            let mut last_status = run.status();
+            for input in &inputs {
+                match &last_status {
+                    crate::run_resumable::RunStatus::WaitingInput { .. } => {
+                        last_status = run.provide_input(input);
+                    }
+                    _ => break,
+                }
+            }
+            run_status_json(last_status)
+        } else {
+            serde_json::json!({"status":"error","kind":"NoRun","message":"no active run"})
+                .to_string()
+        }
+    })
+}
+
+/// Provide a single typed input value (JSON-encoded).
+/// The library parses the JSON value according to the pending command's type.
+pub fn run_program_provide_input_typed(value_json: &str) -> String {
+    RUN.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        if let Some(run) = cell.as_mut() {
+            let pending = match run.peek_pending() {
+                Some(p) => p.clone(),
+                None => {
+                    let e = ExecError::InvalidState;
+                    run.error = Some(e.clone());
+                    return run_status_json(RunStatus::Error(e));
+                }
+            };
+            let parsed: serde_json::Value = match serde_json::from_str(value_json) {
+                Ok(v) => v,
+                Err(_) => {
+                    let e = ExecError::InputParse {
+                        command: pending.command,
+                        detail: "invalid JSON input".to_string(),
+                    };
+                    run.error = Some(e.clone());
+                    return run_status_json(RunStatus::Error(e));
+                }
+            };
+            match coerce_json_to_value(&parsed, pending.ty) {
+                Ok(v) => {
+                    let s = v.to_string();
+                    run_status_json(run.provide_input(&s))
+                }
+                Err(detail) => {
+                    let e = ExecError::InputParse {
+                        command: pending.command,
+                        detail,
+                    };
+                    run.error = Some(e.clone());
+                    run_status_json(RunStatus::Error(e))
+                }
+            }
+        } else {
+            serde_json::json!({"status":"error","kind":"NoRun","message":"no active run"})
+                .to_string()
+        }
+    })
+}
+
+/// Enable or disable debug mode (adds extra introspection fields to status JSON).
+pub fn run_program_debug_mode(enable: bool) {
+    DEBUG_MODE.with(|cell| {
+        *cell.borrow_mut() = enable;
+    });
+}
+
+/// Coerce a serde_json::Value into a runtime Value for the given type.
+fn coerce_json_to_value(
+    v: &serde_json::Value,
+    ty: crate::types::Type,
+) -> Result<crate::value::Value, String> {
+    use crate::value::Value;
+    match ty {
+        crate::types::Type::String => match v {
+            serde_json::Value::String(s) => Ok(Value::String(s.clone())),
+            other => Ok(Value::String(other.to_string())),
+        },
+        crate::types::Type::Bool => match v {
+            serde_json::Value::Bool(b) => Ok(Value::Bool(*b)),
+            serde_json::Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
+                "true" => Ok(Value::Bool(true)),
+                "false" => Ok(Value::Bool(false)),
+                _ => Err(format!(
+                    "invalid bool input {s:?}: expected \"true\" or \"false\""
+                )),
+            },
+            _ => Err(format!("cannot coerce {v} to bool")),
+        },
+        crate::types::Type::Char => match v {
+            serde_json::Value::String(s) => {
+                let trimmed = s.trim();
+                let mut chars = trimmed.chars();
+                match (chars.next(), chars.next()) {
+                    (Some(c), None) => Ok(Value::Char(c)),
+                    _ => Err(format!(
+                        "invalid char input {s:?}: expected a single character"
+                    )),
+                }
+            }
+            _ => Err(format!("cannot coerce {v} to char")),
+        },
+        crate::types::Type::Float32 | crate::types::Type::Float64 => {
+            let number: f64 = match v {
+                serde_json::Value::Number(n) => n
+                    .as_f64()
+                    .ok_or_else(|| format!("invalid float input {v}"))?,
+                serde_json::Value::String(s) => s
+                    .trim()
+                    .parse::<f64>()
+                    .map_err(|_| format!("invalid float input {s:?}"))?,
+                _ => return Err(format!("cannot coerce {v} to float")),
+            };
+            if ty == crate::types::Type::Float32 {
+                Ok(Value::Float32(number as f32))
+            } else {
+                Ok(Value::Float64(number))
+            }
+        }
+        _ => {
+            let raw: i128 = match v {
+                serde_json::Value::Number(n) => n
+                    .as_i64()
+                    .map(|x| x as i128)
+                    .ok_or_else(|| format!("invalid int input {v}"))?,
+                serde_json::Value::String(s) => s
+                    .trim()
+                    .parse::<i128>()
+                    .map_err(|_| format!("invalid int input {s:?}"))?,
+                _ => return Err(format!("cannot coerce {v} to integer")),
+            };
+            crate::ops::narrow_input_int(raw, ty).map_err(|e| e.to_string())
+        }
+    }
 }

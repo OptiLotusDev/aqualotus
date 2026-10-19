@@ -22,6 +22,11 @@ export function optilotus_clearPackage(): string;
 export function optilotus_createFunction(name: string): string;
 
 /**
+ * Enable or disable debug mode (adds extra introspection fields to status JSON).
+ */
+export function optilotus_debugMode(enable: boolean): void;
+
+/**
  * JS: `optilotus_declare(fid, name, ty, init?) -> string` (JSON)
  */
 export function optilotus_declare(fid: number, name: string, ty: string, init?: string | null): string;
@@ -47,9 +52,25 @@ export function optilotus_getFunction(id: number): string;
 export function optilotus_health(): string;
 
 /**
+ * `if(fid, cond_expr, then_specs, else_specs?)` -> Result<u32, JsValue>.
+ *
+ * Creates an `Op::If` in one call: the condition expression is evaluated
+ * into a hidden ValueId appended to the main chain, and each body spec
+ * is expanded into raw commands linked in order. Body specs cross as
+ * native JS objects (no JSON strings); the Ok value is the new
+ * if-command's user id, the Err value is the error message.
+ */
+export function optilotus_if(fid: number, cond_expr: string, then_specs: any[], else_specs?: any[] | null): number;
+
+/**
  * JS: `optilotus_input(fid, ty) -> string` (JSON)
  */
 export function optilotus_input(fid: number, ty: string): string;
+
+/**
+ * Query the last recorded error. Returns `{"status":"idle"}` if none.
+ */
+export function optilotus_lastError(): string;
 
 /**
  * JS: `optilotus_listCommands(fid) -> string` (JSON)
@@ -77,7 +98,7 @@ export function optilotus_renameFunction(id: number, name: string): string;
 export function optilotus_return(fid: number, expr: string): string;
 
 /**
- * JS: `optilotus_runProgram() -> string` (JSON report, no JSON input)
+ * JS: `opilotus_runProgram() -> string` (JSON report, no JSON input)
  */
 export function optilotus_runProgram(): string;
 
@@ -87,24 +108,32 @@ export function optilotus_runProgram(): string;
 export function optilotus_runProgramCancel(): void;
 
 /**
+ * Peek at pending input without consuming it.
+ * Returns `{"status":"waiting_input","command":...,"ty":...}` or `{"status":"idle"}` / error.
+ */
+export function optilotus_runProgramPeekPending(): string;
+
+/**
  * JS: `optilotus_runProgramProvideInput(value) -> string`
  */
 export function optilotus_runProgramProvideInput(value: string): string;
 
 /**
- * JS: `optilotus_runProgramResumableCancel() -> void`
+ * Provide a single typed input value (JSON-encoded).
+ * The library parses the JSON value according to the pending command's type.
  */
-export function optilotus_runProgramResumableCancel(): void;
+export function optilotus_runProgramProvideInputTyped(value_json: string): string;
 
 /**
- * JS: `optilotus_runProgramResumableProvideInput(value) -> string`
+ * Batch provide multiple input lines sequentially.
+ * Stops at the first `waiting_input` or completion.
  */
-export function optilotus_runProgramResumableProvideInput(value: string): string;
+export function optilotus_runProgramProvideInputs(inputs_json: string): string;
 
 /**
- * JS: `optilotus_runProgramResumableStart() -> string`
+ * Reset / clear the active run session. Returns `{"status":"idle"}`.
  */
-export function optilotus_runProgramResumableStart(): string;
+export function optilotus_runProgramReset(): string;
 
 /**
  * JS: `optilotus_runProgramStart() -> string`
@@ -144,12 +173,15 @@ export interface InitOutput {
     readonly optilotus_cast: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly optilotus_clearPackage: () => [number, number];
     readonly optilotus_createFunction: (a: number, b: number) => [number, number];
+    readonly optilotus_debugMode: (a: number) => void;
     readonly optilotus_declare: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly optilotus_deleteCommand: (a: number, b: number) => [number, number];
     readonly optilotus_deleteFunction: (a: number) => [number, number];
     readonly optilotus_getFunction: (a: number) => [number, number];
     readonly optilotus_health: () => [number, number];
+    readonly optilotus_if: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
     readonly optilotus_input: (a: number, b: number, c: number) => [number, number];
+    readonly optilotus_lastError: () => [number, number];
     readonly optilotus_listCommands: (a: number) => [number, number];
     readonly optilotus_listFunctions: () => [number, number];
     readonly optilotus_print: (a: number, b: number, c: number) => [number, number];
@@ -157,20 +189,23 @@ export interface InitOutput {
     readonly optilotus_return: (a: number, b: number, c: number) => [number, number];
     readonly optilotus_runProgram: () => [number, number];
     readonly optilotus_runProgramCancel: () => void;
+    readonly optilotus_runProgramPeekPending: () => [number, number];
     readonly optilotus_runProgramProvideInput: (a: number, b: number) => [number, number];
-    readonly optilotus_runProgramResumableCancel: () => void;
-    readonly optilotus_runProgramResumableProvideInput: (a: number, b: number) => [number, number];
-    readonly optilotus_runProgramResumableStart: () => [number, number];
+    readonly optilotus_runProgramProvideInputTyped: (a: number, b: number) => [number, number];
+    readonly optilotus_runProgramProvideInputs: (a: number, b: number) => [number, number];
+    readonly optilotus_runProgramReset: () => [number, number];
     readonly optilotus_runProgramStart: () => [number, number];
     readonly optilotus_runProgramStatus: () => [number, number];
     readonly optilotus_runProgramWithInputs: (a: number, b: number) => [number, number];
     readonly optilotus_setEntry: (a: number, b: number) => [number, number];
     readonly optilotus_setNext: (a: number, b: number, c: number) => [number, number];
     readonly optilotus_version: () => [number, number];
-    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly __externref_table_alloc: () => number;
+    readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_start: () => void;
 }
 

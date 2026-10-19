@@ -75,8 +75,7 @@ pub use bridge::{
     package_delete_command, package_delete_function, package_get_function, package_input,
     package_list_commands, package_list_functions, package_print, package_rename_function,
     package_return, package_set_entry, package_set_next, run_program, run_program_cancel,
-    run_program_provide_input, run_program_resumable_cancel, run_program_resumable_provide_input,
-    run_program_resumable_start, run_program_start, run_program_status, run_program_with_inputs,
+    run_program_provide_input, run_program_start, run_program_status, run_program_with_inputs,
     version, VERSION,
 };
 pub use error::ExecError;
@@ -91,8 +90,8 @@ pub use expr::{
 pub use ir::{Command, CommandId, Function, FunctionId, Program, ValueId};
 pub use ops::{apply_arith, cast_value, parse_input_line, print_text, ArithKind, Op, OpError};
 pub use package::{
-    CommandKind, CommandSummary, FunctionInfo, FunctionSummary, Package, PackageError, MAIN_ID,
-    MAIN_NAME, PACKAGE_NAME,
+    CommandKind, CommandSpec, CommandSummary, FunctionInfo, FunctionSummary, Package, PackageError,
+    MAIN_ID, MAIN_NAME, PACKAGE_NAME,
 };
 pub use resumable::ResumableRun;
 pub use run_resumable::{PendingInput, RunSession, RunStatus};

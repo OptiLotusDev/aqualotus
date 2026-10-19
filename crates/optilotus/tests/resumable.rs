@@ -359,3 +359,70 @@ fn cancel_clears_state() {
         run_resumable::RunStatus::Error(_)
     ));
 }
+
+#[test]
+fn peek_pending_without_consuming() {
+    let f = main_fn(
+        1,
+        vec![cmd(1, Op::Input { ty: Type::Int32 }, vec![], vec![1], None)],
+    );
+    let program = Program {
+        version: 1,
+        package: "app".to_string(),
+        functions: vec![f],
+    };
+    let _ = run_resumable::start(program);
+
+    // Peek returns the pending input without consuming it.
+    let peek = run_resumable::peek();
+    assert!(matches!(
+        peek,
+        Some(optilotus::run_resumable::PendingInput {
+            command: CommandId(1),
+            ty: Type::Int32
+        })
+    ));
+
+    // Peek again — still pending, not consumed.
+    let peek2 = run_resumable::peek();
+    assert!(peek2.is_some());
+
+    // Providing input consumes it.
+    let status = run_resumable::provide_input("42");
+    assert!(matches!(status, run_resumable::RunStatus::Finished { .. }));
+
+    // After completion, no pending input.
+    let peek3 = run_resumable::peek();
+    assert!(peek3.is_none());
+}
+
+#[test]
+fn peek_pending_when_no_active_run() {
+    let peek = run_resumable::peek();
+    assert!(peek.is_none());
+}
+
+#[test]
+fn reset_clears_active_run() {
+    let f = main_fn(
+        1,
+        vec![cmd(1, Op::Input { ty: Type::Int32 }, vec![], vec![1], None)],
+    );
+    let program = Program {
+        version: 1,
+        package: "app".to_string(),
+        functions: vec![f.clone()],
+    };
+    let _ = run_resumable::start(program);
+    run_resumable::reset();
+    let st = run_resumable::status();
+    assert!(matches!(st, run_resumable::RunStatus::Error(_)));
+    // Fresh start works after reset.
+    let program = Program {
+        version: 1,
+        package: "app".to_string(),
+        functions: vec![f],
+    };
+    let st = run_resumable::start(program);
+    assert!(matches!(st, run_resumable::RunStatus::WaitingInput { .. }));
+}

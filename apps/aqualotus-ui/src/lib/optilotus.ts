@@ -9,19 +9,27 @@ import init, {
   optilotus_getFunction as getFunction_wasm,
   optilotus_health as health_wasm,
   optilotus_input as input_wasm,
+  optilotus_lastError as lastError_wasm,
   optilotus_listCommands as listCommands_wasm,
   optilotus_listFunctions as listFunctions_wasm,
   optilotus_print as print_wasm,
   optilotus_renameFunction as renameFunction_wasm,
   optilotus_return as return_wasm,
   optilotus_runProgram as runProgram_wasm,
-  optilotus_runProgramResumableStart as runProgramResumableStart_wasm,
-  optilotus_runProgramResumableProvideInput as runProgramResumableProvideInput_wasm,
-  optilotus_runProgramResumableCancel as runProgramResumableCancel_wasm,
+  optilotus_runProgramCancel as runProgramCancel_wasm,
+  optilotus_runProgramPeekPending as runProgramPeekPending_wasm,
+  optilotus_runProgramProvideInput as runProgramProvideInput_wasm,
+  optilotus_runProgramProvideInputTyped as runProgramProvideInputTyped_wasm,
+  optilotus_runProgramProvideInputs as runProgramProvideInputs_wasm,
+  optilotus_runProgramReset as runProgramReset_wasm,
+  optilotus_runProgramStart as runProgramStart_wasm,
+  optilotus_runProgramStatus as runProgramStatus_wasm,
   optilotus_runProgramWithInputs as runProgramWithInputs_wasm,
   optilotus_setEntry as setEntry_wasm,
   optilotus_setNext as setNext_wasm,
   optilotus_version as version_wasm,
+  optilotus_debugMode as debugMode_wasm,
+  optilotus_if as if_wasm,
 } from "../wasm/optilotus/optilotus.js";
 
 // Project rule: every function in the UI that originates from the
@@ -313,6 +321,8 @@ export type RunOk = {
   steps: number;
   prints: number;
   printed: string[];
+  /** Value returned by `main`; `null` when the run did not return a value. */
+  returned: unknown;
 };
 
 export type RunErr = {
@@ -325,10 +335,35 @@ export type RunErr = {
 
 export type RunResult = RunOk | RunErr;
 
+/** Pending input the run is waiting on (without consuming it). */
+export type PendingInput = {
+  command: number;
+  ty: OptilotusType;
+};
+
 export type RunStatus =
   | { status: "waiting_input"; command: number; ty: OptilotusType }
   | RunOk
   | RunErr;
+
+/** Status of the run when no session is active. */
+export type RunIdle = { status: "idle" };
+
+/**
+ * User-level command spec for building `if` bodies. Passed to
+ * `optilus_if` as native JS objects — no JSON strings, full type safety.
+ * The server validates, allocates ids and expands each spec into raw
+ * commands linked in order.
+ */
+export type CommandSpec =
+  | { kind: "declare"; var: string; ty: OptilotusType; init?: string }
+  | { kind: "assign"; var: string; expr: string }
+  | { kind: "print"; template: string }
+  | { kind: "input"; ty: OptilotusType }
+  | { kind: "cast"; var: string; to: OptilotusType; expr: string };
+
+/** Debug-enabled status (extra fields when debug mode is on). */
+export type DebugStatus = RunStatus & { step_count?: number; peek?: boolean };
 
 
 /**
@@ -346,17 +381,111 @@ export function optilotus_runProgramWithInputs(inputs: string[]): RunResult {
   return JSON.parse(runProgramWithInputs_wasm(JSON.stringify(inputs))) as RunResult;
 }
 
-export function optilotus_runProgramResumableStart(): RunStatus {
+/** Start a resumable run (non-resumable alias). Returns the initial status. */
+export function optilotus_runProgramStart(): RunStatus {
   assertReady();
-  return JSON.parse(runProgramResumableStart_wasm()) as RunStatus;
+  return JSON.parse(runProgramStart_wasm()) as RunStatus;
 }
 
-export function optilotus_runProgramResumableProvideInput(value: string): RunStatus {
+/** Provide input to an active resumable run (non-resumable alias). */
+export function optilotus_runProgramProvideInput(value: string): RunStatus {
   assertReady();
-  return JSON.parse(runProgramResumableProvideInput_wasm(value)) as RunStatus;
+  return JSON.parse(runProgramProvideInput_wasm(value)) as RunStatus;
 }
 
-export function optilotus_runProgramResumableCancel(): void {
+/** Poll the current status of an active resumable run. */
+export function optilotus_runProgramStatus(): RunStatus | RunIdle {
   assertReady();
-  runProgramResumableCancel_wasm();
+  return JSON.parse(runProgramStatus_wasm()) as RunStatus | RunIdle;
+}
+
+/** Cancel / clear the active resumable run. */
+export function optilotus_runProgramCancel(): void {
+  assertReady();
+  runProgramCancel_wasm();
+}
+
+/**
+ * Peek at the pending input without consuming it.
+ * Returns the pending input or `{"status":"idle"}` when nothing is pending.
+ */
+export function optilotus_peekPendingInput(): PendingInput | RunIdle {
+  assertReady();
+  return JSON.parse(runProgramPeekPending_wasm()) as PendingInput | RunIdle;
+}
+
+/** Reset / clear the active run session entirely. */
+export function optilotus_runProgramReset(): RunIdle {
+  assertReady();
+  return JSON.parse(runProgramReset_wasm()) as RunIdle;
+}
+
+/** Query the last recorded error. Returns `{"status":"idle"}` if none. */
+export function optilotus_lastError(): OptilotusError | RunIdle {
+  assertReady();
+  return JSON.parse(lastError_wasm()) as OptilotusError | RunIdle;
+}
+
+/**
+ * Batch provide multiple input values sequentially.
+ * Feeds each value in order, stopping at the first `waiting_input` or completion.
+ */
+export function optilotus_runProgramProvideInputs(inputs: string[]): RunStatus {
+  assertReady();
+  return JSON.parse(runProgramProvideInputs_wasm(JSON.stringify(inputs))) as RunStatus;
+}
+
+/**
+ * Provide a single typed input value (JSON-encoded).
+ * The library parses the JSON value according to the pending command's type.
+ * E.g. `optilotus_runProgramProvideInputTyped('42')` for an Int32 input,
+ * or `optilotus_runProgramProvideInputTyped('true')` for a Bool input.
+ */
+export function optilotus_runProgramProvideInputTyped(value: string): RunStatus {
+  assertReady();
+  return JSON.parse(runProgramProvideInputTyped_wasm(value)) as RunStatus;
+}
+
+/** Enable or disable debug mode (adds extra fields to status JSON). */
+export function optilotus_debugMode(enable: boolean): void {
+  assertReady();
+  debugMode_wasm(enable);
+}
+
+/**
+ * Create an `if` command in one call. The condition expression is
+ * evaluated into a hidden value appended to the main chain; each body
+ * spec is expanded into raw commands linked in order. No raw ids or IR
+ * cross the boundary.
+ *
+ * @returns the new if-command's user id, or a typed error.
+ * @example
+ *   const then = [{ kind: "print", template: '"big"' }];
+ *   const elseBody = [{ kind: "print", template: '"small"' }];
+ *   const ifCmd = optilotus_if(0, "{x} > 10", then, elseBody);
+ *   optilotus_setNext(0, prevTailId, ifCmd.id);
+ */
+export function optilotus_if(
+  fid: number,
+  condition: string,
+  thenBody: CommandSpec[],
+  elseBody?: CommandSpec[] | null,
+): { status: "ok"; id: number } | OptilotusError {
+  assertReady();
+  try {
+    const id = if_wasm(
+      fid,
+      condition,
+      thenBody,
+      elseBody === null || elseBody === undefined ? null : elseBody,
+    );
+    return { status: "ok", id };
+  } catch (e) {
+    return {
+      status: "error",
+      kind: "PackageError",
+      command: null,
+      message: String(e),
+    };
+  }
 }

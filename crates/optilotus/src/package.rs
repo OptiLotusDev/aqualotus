@@ -134,6 +134,83 @@ pub enum CommandKind {
     If,
 }
 
+/// User-level command spec: the frontend-facing shape for building `if`
+/// bodies. A flat struct with a `kind` tag so it serializes exactly like
+/// the TS `CommandSpec` union — the bridge passes it as a native JS
+/// object (`JsValue`) and deserializes server-side. The server
+/// validates, allocates ids and expands each spec into the same raw
+/// commands the builders produce; callers never build or pass raw IR.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct CommandSpec {
+    pub kind: CommandKind,
+    pub var: Option<String>,
+    pub ty: Option<Type>,
+    #[serde(default)]
+    pub init: Option<String>,
+    pub expr: Option<String>,
+    pub template: Option<String>,
+    pub to: Option<Type>,
+}
+
+impl CommandSpec {
+    /// Convenience constructors (used by tests and the TS bridge).
+    pub fn declare(var: &str, ty: Type, init: Option<String>) -> Self {
+        Self {
+            kind: CommandKind::Declare,
+            var: Some(var.to_string()),
+            ty: Some(ty),
+            init,
+            expr: None,
+            template: None,
+            to: None,
+        }
+    }
+    pub fn assign(var: &str, expr: &str) -> Self {
+        Self {
+            kind: CommandKind::Assign,
+            var: Some(var.to_string()),
+            ty: None,
+            init: None,
+            expr: Some(expr.to_string()),
+            template: None,
+            to: None,
+        }
+    }
+    pub fn print(template: &str) -> Self {
+        Self {
+            kind: CommandKind::Print,
+            var: None,
+            ty: None,
+            init: None,
+            expr: None,
+            template: Some(template.to_string()),
+            to: None,
+        }
+    }
+    pub fn input(ty: Type) -> Self {
+        Self {
+            kind: CommandKind::Input,
+            var: None,
+            ty: Some(ty),
+            init: None,
+            expr: None,
+            template: None,
+            to: None,
+        }
+    }
+    pub fn cast(var: &str, to: Type, expr: &str) -> Self {
+        Self {
+            kind: CommandKind::Cast,
+            var: Some(var.to_string()),
+            ty: None,
+            init: None,
+            expr: Some(expr.to_string()),
+            template: None,
+            to: Some(to),
+        }
+    }
+}
+
 /// User-facing command row for `list_commands`.
 /// `next` is the following user command head (`None` at the tail end or
 /// when the edge was cleared); it is filled from the live raw graph on
@@ -477,7 +554,10 @@ impl Package {
     fn declared_type(&self, fid: FunctionId, var: &str) -> Option<Type> {
         self.meta.get(&fid).and_then(|m| {
             m.values().find_map(|s| {
-                if s.kind == CommandKind::Declare && s.var.as_deref() == Some(var) {
+                // Both `declare` and `cast` introduce a variable.
+                if matches!(s.kind, CommandKind::Declare | CommandKind::Cast)
+                    && s.var.as_deref() == Some(var)
+                {
                     s.ty
                 } else {
                     None
@@ -553,6 +633,79 @@ impl Package {
             .ok_or(PackageError::UnknownFunction(fid))
     }
 
+    /// Build the raw `Lit` -> `Set` pair for a `declare` and push it into
+    /// the function's command list (not yet linked into the main chain).
+    /// Returns `(head, tail)` commands.
+    fn declare_group(
+        &mut self,
+        fid: FunctionId,
+        var: &str,
+        ty: Type,
+        value: Value,
+    ) -> Result<(Command, Command), PackageError> {
+        let vid = self.alloc_value_id();
+        let head_id = self.alloc_command_id();
+        let tail_id = self.alloc_command_id();
+        let head = Command {
+            id: head_id,
+            op: Op::Lit(value),
+            inputs: vec![],
+            outputs: vec![vid],
+            next: Some(tail_id),
+        };
+        let tail = Command {
+            id: tail_id,
+            op: Op::Set {
+                var: var.to_string(),
+                ty,
+            },
+            inputs: vec![vid],
+            outputs: vec![],
+            next: None,
+        };
+        let func = self.function_mut(fid)?;
+        func.commands.push(head.clone());
+        func.commands.push(tail.clone());
+        Ok((head, tail))
+    }
+
+    /// Link a freshly built group head onto the tail of the main chain
+    /// (or make it the entry when the chain is empty). Extracted so both
+    /// the main-chain builders and the `if`-body stager share one
+    /// implementation.
+    fn link_chain(&mut self, fid: FunctionId, head_id: CommandId) -> Result<(), PackageError> {
+        let prev_tail = self.functions.get(&fid).and_then(|f| {
+            if f.entry.is_none() {
+                None
+            } else {
+                Self::tail_of(f)
+            }
+        });
+        let func = self.function_mut(fid)?;
+        match prev_tail {
+            None => {
+                func.entry = Some(head_id);
+            }
+            Some(prev) => {
+                if prev == head_id {
+                    func.entry = Some(head_id);
+                } else if let Some(cmd) = func.commands.iter_mut().find(|c| c.id == prev) {
+                    // Only link if the previous tail is truly a tail (or at
+                    // least not the new head); never overwrite the internal
+                    // head->pair edge of the just-pushed group.
+                    if cmd.next.is_none() {
+                        cmd.next = Some(head_id);
+                    } else if func.entry.is_none() {
+                        func.entry = Some(head_id);
+                    }
+                } else {
+                    func.entry = Some(head_id);
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// `declare(name, ty, init?)`: optional `Lit` -> `Set`.
     pub fn declare(
         &mut self,
@@ -582,12 +735,38 @@ impl Package {
             }
             None => default_value(ty),
         };
+        let (head, _tail) = self.declare_group(fid, &var, ty, value)?;
+        self.link_chain(fid, head.id)?;
+        self.meta_mut(fid)?.insert(
+            head.id,
+            CommandSummary {
+                var: Some(var),
+                ty: Some(ty),
+                expr: init.map(|s| s.to_string()),
+                ..CommandSummary::blank(head.id, CommandKind::Declare)
+            },
+        );
+        Ok(head.id)
+    }
+
+    /// Build the raw `Compute` -> `Set` pair for an `assign` and push it
+    /// into the function's command list (not yet linked). Returns
+    /// `(head, tail)` commands.
+    fn assign_group(
+        &mut self,
+        fid: FunctionId,
+        var: &str,
+        ty: Type,
+        expr: &str,
+    ) -> Result<(Command, Command), PackageError> {
         let vid = self.alloc_value_id();
         let head_id = self.alloc_command_id();
         let tail_id = self.alloc_command_id();
         let head = Command {
             id: head_id,
-            op: Op::Lit(value),
+            op: Op::Compute {
+                expr: expr.to_string(),
+            },
             inputs: vec![],
             outputs: vec![vid],
             next: Some(tail_id),
@@ -595,24 +774,17 @@ impl Package {
         let tail = Command {
             id: tail_id,
             op: Op::Set {
-                var: var.clone(),
+                var: var.to_string(),
                 ty,
             },
             inputs: vec![vid],
             outputs: vec![],
             next: None,
         };
-        self.append_raw(fid, head, Some(tail));
-        self.meta_mut(fid)?.insert(
-            head_id,
-            CommandSummary {
-                var: Some(var),
-                ty: Some(ty),
-                expr: init.map(|s| s.to_string()),
-                ..CommandSummary::blank(head_id, CommandKind::Declare)
-            },
-        );
-        Ok(head_id)
+        let func = self.function_mut(fid)?;
+        func.commands.push(head.clone());
+        func.commands.push(tail.clone());
+        Ok((head, tail))
     }
 
     /// `assign(name, expr)`: `Compute` -> `Set` (type from declaration).
@@ -634,46 +806,28 @@ impl Package {
                 "assign expression must not be empty".to_string(),
             ));
         }
-        let vid = self.alloc_value_id();
-        let head_id = self.alloc_command_id();
-        let tail_id = self.alloc_command_id();
-        let head = Command {
-            id: head_id,
-            op: Op::Compute {
-                expr: expr.to_string(),
-            },
-            inputs: vec![],
-            outputs: vec![vid],
-            next: Some(tail_id),
-        };
-        let tail = Command {
-            id: tail_id,
-            op: Op::Set {
-                var: var.clone(),
-                ty,
-            },
-            inputs: vec![vid],
-            outputs: vec![],
-            next: None,
-        };
-        self.append_raw(fid, head, Some(tail));
+        let (head, _tail) = self.assign_group(fid, &var, ty, expr)?;
+        self.link_chain(fid, head.id)?;
         self.meta_mut(fid)?.insert(
-            head_id,
+            head.id,
             CommandSummary {
                 var: Some(var),
                 ty: Some(ty),
                 expr: Some(expr.to_string()),
-                ..CommandSummary::blank(head_id, CommandKind::Assign)
+                ..CommandSummary::blank(head.id, CommandKind::Assign)
             },
         );
-        Ok(head_id)
+        Ok(head.id)
     }
 
-    /// `print(template)`: `Lit(template)` -> `Print`.
-    pub fn print(&mut self, fid: FunctionId, template: &str) -> Result<CommandId, PackageError> {
-        if !self.functions.contains_key(&fid) {
-            return Err(PackageError::UnknownFunction(fid));
-        }
+    /// Build the raw `Lit` -> `Print` pair for a `print` and push it into
+    /// the function's command list (not yet linked). Returns
+    /// `(head, tail)` commands.
+    fn print_group(
+        &mut self,
+        fid: FunctionId,
+        template: &str,
+    ) -> Result<(Command, Command), PackageError> {
         let vid = self.alloc_value_id();
         let head_id = self.alloc_command_id();
         let tail_id = self.alloc_command_id();
@@ -691,15 +845,49 @@ impl Package {
             outputs: vec![],
             next: None,
         };
-        self.append_raw(fid, head, Some(tail));
+        let func = self.function_mut(fid)?;
+        func.commands.push(head.clone());
+        func.commands.push(tail.clone());
+        Ok((head, tail))
+    }
+
+    /// `print(template)`: `Lit(template)` -> `Print`.
+    pub fn print(&mut self, fid: FunctionId, template: &str) -> Result<CommandId, PackageError> {
+        if !self.functions.contains_key(&fid) {
+            return Err(PackageError::UnknownFunction(fid));
+        }
+        let (head, _tail) = self.print_group(fid, template)?;
+        self.link_chain(fid, head.id)?;
         self.meta_mut(fid)?.insert(
-            head_id,
+            head.id,
             CommandSummary {
                 template: Some(template.to_string()),
-                ..CommandSummary::blank(head_id, CommandKind::Print)
+                ..CommandSummary::blank(head.id, CommandKind::Print)
             },
         );
-        Ok(head_id)
+        Ok(head.id)
+    }
+
+    /// Build the raw `Input` command for an `input` and push it into the
+    /// function's command list (not yet linked). Returns the command as
+    /// both head and tail (single-command group).
+    fn input_group(
+        &mut self,
+        fid: FunctionId,
+        ty: Type,
+    ) -> Result<(Command, Command), PackageError> {
+        let vid = self.alloc_value_id();
+        let head_id = self.alloc_command_id();
+        let head = Command {
+            id: head_id,
+            op: Op::Input { ty },
+            inputs: vec![],
+            outputs: vec![vid],
+            next: None,
+        };
+        let func = self.function_mut(fid)?;
+        func.commands.push(head.clone());
+        Ok((head.clone(), head))
     }
 
     /// `input(ty)`: single `Op::Input` producing one typed value.
@@ -715,28 +903,74 @@ impl Package {
                 "cannot read a value of type void".to_string(),
             ));
         }
-        let vid = self.alloc_value_id();
-        let head_id = self.alloc_command_id();
-        let head = Command {
-            id: head_id,
-            op: Op::Input { ty },
-            inputs: vec![],
-            outputs: vec![vid],
-            next: None,
-        };
-        self.append_raw(fid, head, None);
+        let (head, _tail) = self.input_group(fid, ty)?;
+        self.link_chain(fid, head.id)?;
         self.meta_mut(fid)?.insert(
-            head_id,
+            head.id,
             CommandSummary {
                 ty: Some(ty),
-                ..CommandSummary::blank(head_id, CommandKind::Input)
+                ..CommandSummary::blank(head.id, CommandKind::Input)
             },
         );
-        Ok(head_id)
+        Ok(head.id)
+    }
+
+    /// Build the raw `Compute` -> `Cast` -> `Set` triple for a `cast` and
+    /// push it into the function's command list (not yet linked).
+    /// Returns `(compute, cast, set)` commands; the user-facing head is
+    /// the `set` command (matching `pair_tail`/`delete_command`).
+    fn cast_group(
+        &mut self,
+        fid: FunctionId,
+        var: &str,
+        to: Type,
+        expr: &str,
+    ) -> Result<(Command, Command, Command), PackageError> {
+        let temp = self.alloc_value_id();
+        let result = self.alloc_value_id();
+        let compute_id = self.alloc_command_id();
+        let cast_id = self.alloc_command_id();
+        let set_id = self.alloc_command_id();
+        let compute = Command {
+            id: compute_id,
+            op: Op::Compute {
+                expr: expr.to_string(),
+            },
+            inputs: vec![],
+            outputs: vec![temp],
+            next: Some(cast_id),
+        };
+        let cast = Command {
+            id: cast_id,
+            op: Op::Cast { to },
+            inputs: vec![temp],
+            outputs: vec![result],
+            next: Some(set_id),
+        };
+        let set = Command {
+            id: set_id,
+            op: Op::Set {
+                var: var.to_string(),
+                ty: to,
+            },
+            inputs: vec![result],
+            outputs: vec![],
+            next: None,
+        };
+        let func = self.function_mut(fid)?;
+        func.commands.push(compute.clone());
+        func.commands.push(cast.clone());
+        func.commands.push(set.clone());
+        Ok((compute, cast, set))
     }
 
     /// `cast(name, to, expr)`: declare `name` of type `to` initialized by
     /// casting `expr` to `to`. Expands to `Compute` -> `Cast` -> `Set`.
+    ///
+    /// The whole group is pushed first and then linked once onto the main
+    /// chain — linking in two steps (the old implementation) reset
+    /// `entry` to the `Set` because `tail_of` could not see the
+    /// not-yet-pushed command, orphaning the `Compute`/`Cast` pair.
     pub fn cast(
         &mut self,
         fid: FunctionId,
@@ -764,49 +998,18 @@ impl Package {
                 "cast expression must not be empty".to_string(),
             ));
         }
-        let temp = self.alloc_value_id();
-        let result = self.alloc_value_id();
-        let compute_id = self.alloc_command_id();
-        let cast_id = self.alloc_command_id();
-        let set_id = self.alloc_command_id();
-        let compute = Command {
-            id: compute_id,
-            op: Op::Compute {
-                expr: expr.to_string(),
-            },
-            inputs: vec![],
-            outputs: vec![temp],
-            next: Some(cast_id),
-        };
-        let cast = Command {
-            id: cast_id,
-            op: Op::Cast { to },
-            inputs: vec![temp],
-            outputs: vec![result],
-            next: Some(set_id),
-        };
-        let set = Command {
-            id: set_id,
-            op: Op::Set {
-                var: var.clone(),
-                ty: to,
-            },
-            inputs: vec![result],
-            outputs: vec![],
-            next: None,
-        };
-        self.append_raw(fid, compute, Some(cast));
-        self.append_raw(fid, set, None);
+        let (compute, _cast, set) = self.cast_group(fid, &var, to, expr)?;
+        self.link_chain(fid, compute.id)?;
         self.meta_mut(fid)?.insert(
-            set_id,
+            set.id,
             CommandSummary {
                 var: Some(var),
                 ty: Some(to),
                 expr: Some(expr.to_string()),
-                ..CommandSummary::blank(set_id, CommandKind::Cast)
+                ..CommandSummary::blank(set.id, CommandKind::Cast)
             },
         );
-        Ok(set_id)
+        Ok(set.id)
     }
 
     /// `return(expr)`: single `Op::Return`.
@@ -930,6 +1133,273 @@ impl Package {
             },
         );
         Ok(head_id)
+    }
+
+    // ------------------------------------------------------------------
+    // if-with-expression: frontend-friendly `if` creation.
+    // ------------------------------------------------------------------
+
+    /// Validate a user-level spec without mutating anything. All specs are
+    /// validated before any staging so a bad spec never leaves the
+    /// package half-built.
+    fn validate_spec(spec: &CommandSpec) -> Result<(), PackageError> {
+        match spec.kind {
+            CommandKind::Declare => {
+                let var = spec.var.as_deref().unwrap_or("");
+                check_var_name(var).map_err(|e| PackageError::InvalidName(e.to_string()))?;
+                let Some(ty) = spec.ty else {
+                    return Err(PackageError::InvalidCommand(
+                        "declare spec needs a type".to_string(),
+                    ));
+                };
+                if ty == Type::Void {
+                    return Err(PackageError::InvalidCommand(
+                        "cannot declare a variable of type void".to_string(),
+                    ));
+                }
+                if let Some(text) = &spec.init {
+                    parse_value(ty, text)
+                        .map_err(|e| PackageError::InvalidCommand(e.to_string()))?;
+                }
+                Ok(())
+            }
+            CommandKind::Assign => {
+                let var = spec.var.as_deref().unwrap_or("");
+                check_var_name(var).map_err(|e| PackageError::InvalidName(e.to_string()))?;
+                if spec
+                    .expr
+                    .as_deref()
+                    .map(|e| e.trim().is_empty())
+                    .unwrap_or(true)
+                {
+                    return Err(PackageError::InvalidCommand(
+                        "assign expression must not be empty".to_string(),
+                    ));
+                }
+                Ok(())
+            }
+            CommandKind::Print => Ok(()),
+            CommandKind::Input => {
+                let Some(ty) = spec.ty else {
+                    return Err(PackageError::InvalidCommand(
+                        "input spec needs a type".to_string(),
+                    ));
+                };
+                if ty == Type::Void {
+                    return Err(PackageError::InvalidCommand(
+                        "cannot read a value of type void".to_string(),
+                    ));
+                }
+                Ok(())
+            }
+            CommandKind::Cast => {
+                let var = spec.var.as_deref().unwrap_or("");
+                check_var_name(var).map_err(|e| PackageError::InvalidName(e.to_string()))?;
+                let Some(to) = spec.to else {
+                    return Err(PackageError::InvalidCommand(
+                        "cast spec needs a target type".to_string(),
+                    ));
+                };
+                if to == Type::Void {
+                    return Err(PackageError::InvalidCommand(
+                        "cannot cast to void".to_string(),
+                    ));
+                }
+                if spec
+                    .expr
+                    .as_deref()
+                    .map(|e| e.trim().is_empty())
+                    .unwrap_or(true)
+                {
+                    return Err(PackageError::InvalidCommand(
+                        "cast expression must not be empty".to_string(),
+                    ));
+                }
+                Ok(())
+            }
+            CommandKind::Return | CommandKind::If => Err(PackageError::InvalidCommand(
+                "return and if cannot be staged as if-body commands".to_string(),
+            )),
+        }
+    }
+
+    /// Expand one validated spec into raw commands, pushed into the
+    /// function but NOT linked into the main chain. Returns
+    /// `(head_id, all_ids)` where `all_ids` lists every raw command in
+    /// the group (head first, then hidden pair tails) so the caller can
+    /// build a body list the `Op::If` executor can walk.
+    fn stage_group(
+        &mut self,
+        fid: FunctionId,
+        spec: &CommandSpec,
+    ) -> Result<(CommandId, Vec<CommandId>), PackageError> {
+        match spec.kind {
+            CommandKind::Declare => {
+                let var = check_var_name(spec.var.as_deref().unwrap_or(""))
+                    .map_err(|e| PackageError::InvalidName(e.to_string()))?;
+                let Some(ty) = spec.ty else {
+                    return Err(PackageError::InvalidCommand(
+                        "declare spec needs a type".to_string(),
+                    ));
+                };
+                if ty == Type::Void {
+                    return Err(PackageError::InvalidCommand(
+                        "cannot declare a variable of type void".to_string(),
+                    ));
+                }
+                let value = match &spec.init {
+                    Some(text) => parse_value(ty, text)
+                        .map_err(|e| PackageError::InvalidCommand(e.to_string()))?,
+                    None => default_value(ty),
+                };
+                let (head, tail) = self.declare_group(fid, &var, ty, value)?;
+                Ok((head.id, vec![head.id, tail.id]))
+            }
+            CommandKind::Assign => {
+                let var = check_var_name(spec.var.as_deref().unwrap_or(""))
+                    .map_err(|e| PackageError::InvalidName(e.to_string()))?;
+                let Some(expr) = spec.expr.as_deref() else {
+                    return Err(PackageError::InvalidCommand(
+                        "assign spec needs an expression".to_string(),
+                    ));
+                };
+                if expr.trim().is_empty() {
+                    return Err(PackageError::InvalidCommand(
+                        "assign expression must not be empty".to_string(),
+                    ));
+                }
+                // Type comes from the visible declaration (declare/cast).
+                let Some(ty) = self.declared_type(fid, &var) else {
+                    return Err(PackageError::UndeclaredVariable(var));
+                };
+                let (head, tail) = self.assign_group(fid, &var, ty, expr)?;
+                Ok((head.id, vec![head.id, tail.id]))
+            }
+            CommandKind::Print => {
+                let Some(template) = spec.template.as_deref() else {
+                    return Err(PackageError::InvalidCommand(
+                        "print spec needs a template".to_string(),
+                    ));
+                };
+                let (head, tail) = self.print_group(fid, template)?;
+                Ok((head.id, vec![head.id, tail.id]))
+            }
+            CommandKind::Input => {
+                let Some(ty) = spec.ty else {
+                    return Err(PackageError::InvalidCommand(
+                        "input spec needs a type".to_string(),
+                    ));
+                };
+                if ty == Type::Void {
+                    return Err(PackageError::InvalidCommand(
+                        "cannot read a value of type void".to_string(),
+                    ));
+                }
+                let (head, _tail) = self.input_group(fid, ty)?;
+                Ok((head.id, vec![head.id]))
+            }
+            CommandKind::Cast => {
+                let var = check_var_name(spec.var.as_deref().unwrap_or(""))
+                    .map_err(|e| PackageError::InvalidName(e.to_string()))?;
+                let Some(to) = spec.to else {
+                    return Err(PackageError::InvalidCommand(
+                        "cast spec needs a target type".to_string(),
+                    ));
+                };
+                if to == Type::Void {
+                    return Err(PackageError::InvalidCommand(
+                        "cannot cast to void".to_string(),
+                    ));
+                }
+                let Some(expr) = spec.expr.as_deref() else {
+                    return Err(PackageError::InvalidCommand(
+                        "cast spec needs an expression".to_string(),
+                    ));
+                };
+                if expr.trim().is_empty() {
+                    return Err(PackageError::InvalidCommand(
+                        "cast expression must not be empty".to_string(),
+                    ));
+                }
+                if self.declared_type(fid, &var).is_some() {
+                    return Err(PackageError::DuplicateVariable(var));
+                }
+                let (compute, cast, set) = self.cast_group(fid, &var, to, expr)?;
+                Ok((compute.id, vec![compute.id, cast.id, set.id]))
+            }
+            CommandKind::Return | CommandKind::If => Err(PackageError::InvalidCommand(
+                "return and if cannot be staged as if-body commands".to_string(),
+            )),
+        }
+    }
+
+    /// Stage an ordered `if` body: expand each spec and link groups in
+    /// order. The last group's tail stays open (`next = None`) so the
+    /// executor's body walk stops at the body end. Returns ALL raw
+    /// command ids (heads + hidden tails) in execution order — the
+    /// `Op::If` executor walks `next` pointers and checks membership,
+    /// so every command in the group must appear in the body list.
+    fn stage_body(
+        &mut self,
+        fid: FunctionId,
+        specs: &[CommandSpec],
+    ) -> Result<Vec<CommandId>, PackageError> {
+        let mut all_ids = Vec::new();
+        let mut prev_tail: Option<CommandId> = None;
+        for spec in specs {
+            let (head, group_ids) = self.stage_group(fid, spec)?;
+            if let Some(prev) = prev_tail {
+                let func = self.function_mut(fid)?;
+                if let Some(cmd) = func.commands.iter_mut().find(|c| c.id == prev) {
+                    cmd.next = Some(head);
+                }
+            }
+            prev_tail = group_ids.last().copied();
+            all_ids.extend(group_ids);
+        }
+        Ok(all_ids)
+    }
+
+    /// Create an `Op::If` from a condition expression and ordered body
+    /// specs — the frontend-friendly alternative to `eval_cond` + `if_`.
+    ///
+    /// The condition expression is evaluated into a hidden `ValueId`
+    /// appended to the main chain; each body spec expands into the same
+    /// raw commands the builders produce, linked in order. No raw ids or
+    /// IR cross the boundary: the caller passes expressions and
+    /// user-level specs only.
+    pub fn if_with_expr(
+        &mut self,
+        fid: FunctionId,
+        cond_expr: &str,
+        then_specs: &[CommandSpec],
+        else_specs: Option<&[CommandSpec]>,
+    ) -> Result<CommandId, PackageError> {
+        if !self.functions.contains_key(&fid) {
+            return Err(PackageError::UnknownFunction(fid));
+        }
+        if cond_expr.trim().is_empty() {
+            return Err(PackageError::InvalidCommand(
+                "condition expression must not be empty".to_string(),
+            ));
+        }
+        // Validate everything first so a bad spec never leaves the
+        // package half-built (no partial staging on error).
+        for spec in then_specs {
+            Self::validate_spec(spec)?;
+        }
+        if let Some(specs) = else_specs {
+            for spec in specs {
+                Self::validate_spec(spec)?;
+            }
+        }
+        let then_body = self.stage_body(fid, then_specs)?;
+        let else_body = match else_specs {
+            Some(specs) => Some(self.stage_body(fid, specs)?),
+            None => None,
+        };
+        let condition = self.eval_cond(fid, cond_expr)?;
+        self.if_(fid, condition, then_body, else_body)
     }
 
     /// User kinds in execution order (reachable first), then orphans.

@@ -54,23 +54,50 @@ as required by the Rust compiler.
 
 Built with `npm run build:wasm` into `src/wasm/optilotus/`:
 
+**Core**
 - `optilotus_version(): string`
 - `optilotus_health(): string`
-- `optilotus_runProgram(): string` (JSON report, no JSON input)
+
+**Package CRUD**
 - `optilotus_listFunctions(): string`
 - `optilotus_createFunction(name: string): string`
 - `optilotus_getFunction(id: number): string`
 - `optilotus_deleteFunction(id: number): string`
 - `optilotus_renameFunction(id: number, name: string): string`
 - `optilotus_clearPackage(): string`
-- `optilotus_declare(fid: number, name: string, ty: string, init?: string): string`
-- `optilotus_assign(fid: number, name: string, expr: string): string`
-- `optilotus_print(fid: number, template: string): string`
-- `optilotus_return(fid: number, expr: string): string`
-- `optilotus_listCommands(fid: number): string`
-- `optilotus_setEntry(fid: number, cmd?: number): string` (`null`/omitted clears)
-- `optilotus_setNext(fid: number, cmd: number, next?: number): string`
-- `optilotus_deleteCommand(fid: number, cmd: number): string`
+
+**Command builders** (all take `fid: number`)
+- `optilotus_declare(fid, name, ty: string, init?: string): string`
+- `optilotus_assign(fid, name, expr: string): string`
+- `optilotus_print(fid, template: string): string`
+- `optilotus_input(fid, ty: string): string`
+- `optilotus_cast(fid, name, to: string, expr: string): string`
+- `optilotus_return(fid, expr: string): string`
+- `optilotus_listCommands(fid): string`
+- `optilotus_setEntry(fid, cmd?: number): string` (`null`/omitted clears)
+- `optilotus_setNext(fid, cmd, next?: number): string`
+- `optilotus_deleteCommand(fid, cmd): string`
+
+**Run**
+- `optilotus_runProgram(): string` (JSON report, no JSON input)
+- `optilotus_runProgramWithInputs(inputs_json: string): string`
+
+**Resumable run lifecycle** (one active run at a time)
+- `optilotus_runProgramStart(): string`
+- `optilotus_runProgramProvideInput(value: string): string`
+- `optilotus_runProgramProvideInputs(inputs_json: string): string`
+- `optilotus_runProgramProvideInputTyped(value_json: string): string`
+- `optilotus_runProgramStatus(): string`
+- `optilotus_runProgramPeekPending(): string`
+- `optilotus_runProgramCancel(): void`
+- `optilotus_runProgramReset(): string`
+
+**if-branching** (native types, no JSON)
+- `optilotus_if(fid, cond_expr: string, then_specs: any[], else_specs?: any[] | null): number`
+
+**Debug**
+- `optilotus_debugMode(enable: boolean): void`
+- `optilotus_lastError(): string`
 
 ## TypeScript bridge (`src/lib/optilotus.ts`)
 
@@ -79,34 +106,47 @@ wrappers throw an explicit error before init (P22). Package wrappers are
 typed (JSON is parsed once inside); UI call sites never build or pass IR
 JSON:
 
-- `optilotus_tryEnsure(): Promise<void>` — fallible load (`try_`, P9).
-- `optilotus_version(): string`
-- `optilotus_health(): string`
+- `optilus_tryEnsure(): Promise<void>` — fallible load (`try_`, P9).
+- `optilus_version(): string`
+- `optilus_health(): string`
 - Types: `FunctionId`, `CommandId`, `FunctionSummary`, `FunctionInfo`,
   `CommandSummary`, `RunResult` (`RunOk | RunErr`), `OptilotusError`,
-  `optilotus_type` (`optilotus_type.int32`, …) + `OptilotusType`.
+  `CommandSpec`, `optilotus_type` (`optilotus_type.int32`, …) + `OptilotusType`.
   Wire JSON uses `camelCase` (`isMain`, `commandCount`); Rust fields stay
   `snake_case`.
-- `optilotus_listFunctions(): {status:"ok",functions: FunctionSummary[]}`
-- `optilotus_createFunction(name): {status:"ok",id,name,isMain} | OptilotusError`
-- `optilotus_getFunction(id): ({status:"ok"} & FunctionInfo) | OptilotusError`
-- `optilotus_deleteFunction(id): {status:"ok",deleted} | OptilotusError`
-- `optilotus_renameFunction(id, name): {status:"ok",id,name,isMain} | OptilotusError`
+- `optilus_listFunctions(): {status:"ok",functions: FunctionSummary[]}`
+- `optilus_createFunction(name): {status:"ok",id,name,isMain} | OptilotusError`
+- `optilus_getFunction(id): ({status:"ok"} & FunctionInfo) | OptilotusError`
+- `optilus_deleteFunction(id): {status:"ok",deleted} | OptilotusError`
+- `optilus_renameFunction(id, name): {status:"ok",id,name,isMain} | OptilotusError`
 - `CommandSummary` gains kind `"if"` with optional `condition`,
   `then_body`, `else_body` fields.
-- `optilotus_clearPackage(): {status:"ok",cleared}`
-- `optilotus_declare(fid, name, ty: OptilotusType, init?): {status:"ok",id} | OptilotusError`
-- `optilotus_assign(fid, name, expr): {status:"ok",id} | OptilotusError`
-- `optilotus_print(fid, template): {status:"ok",id} | OptilotusError`
-- `optilotus_input(fid, ty): {status:"ok",id} | OptilotusError`
-- `optilotus_return(fid, expr): {status:"ok",id} | OptilotusError`
-- `optilotus_listCommands(fid): {status:"ok",commands: CommandSummary[]} | OptilotusError`
-- `optilotus_setEntry(fid, cmd: number | null): {status:"ok"} | OptilotusError`
-- `optilotus_setNext(fid, cmd, next?): {status:"ok"} | OptilotusError`
-- `optilotus_deleteCommand(fid, cmd): {status:"ok",deleted} | OptilotusError`
-- `optilotus_runProgram(): RunResult` — runs `main` by id only.
-- `optilotus_runProgramWithInputs(inputs: string[]): RunResult` — runs `main`
+- `optilus_clearPackage(): {status:"ok",cleared}`
+- `optilus_declare(fid, name, ty: OptilotusType, init?): {status:"ok",id} | OptilotusError`
+- `optilus_assign(fid, name, expr): {status:"ok",id} | OptilotusError`
+- `optilus_print(fid, template): {status:"ok",id} | OptilotusError`
+- `optilus_input(fid, ty): {status:"ok",id} | OptilotusError`
+- `optilus_cast(fid, name, to, expr): {status:"ok",id} | OptilotusError`
+- `optilus_return(fid, expr): {status:"ok",id} | OptilotusError`
+- `optilus_listCommands(fid): {status:"ok",commands: CommandSummary[]} | OptilotusError`
+- `optilus_setEntry(fid, cmd: number | null): {status:"ok"} | OptilotusError`
+- `optilus_setNext(fid, cmd, next?): {status:"ok"} | OptilotusError`
+- `optilus_deleteCommand(fid, cmd): {status:"ok",deleted} | OptilotusError`
+- `optilus_runProgram(): RunResult` — runs `main` by id only.
+- `optilus_runProgramWithInputs(inputs: string[]): RunResult` — runs `main`
   consuming the supplied lines in order.
+- `optilus_if(fid, condition, thenBody: CommandSpec[], elseBody?): {status:"ok",id} | OptilotusError`
+  — creates an `if` in one call; body specs cross as native JS objects.
+- `optilus_runProgramStart(): RunStatus`
+- `optilus_runProgramProvideInput(value): RunStatus`
+- `optilus_runProgramProvideInputs(inputs): RunStatus`
+- `optilus_runProgramProvideInputTyped(value): RunStatus`
+- `optilus_runProgramStatus(): RunStatus | RunIdle`
+- `optilus_runProgramPeekPending(): PendingInput | RunIdle`
+- `optilus_runProgramCancel(): void`
+- `optilus_runProgramReset(): RunIdle`
+- `optilus_lastError(): OptilotusError | RunIdle`
+- `optilus_debugMode(enable): void`
 
 ## Package API (the only API)
 
@@ -136,6 +176,89 @@ optilotus_listCommands(0);
 const result: RunResult = optilotus_runProgram();
 // {status:"ok", steps: 6, prints: 1, printed: ["42"]}
 ```
+
+### if-branching
+
+`optilus_if` creates an `Op::If` in one call. The condition expression is
+evaluated into a hidden `ValueId` appended to the main chain; each body
+spec is expanded into raw commands linked in order. No raw ids or IR cross
+the boundary — you pass expressions and user-level `CommandSpec` objects.
+
+```ts
+const thenBody: CommandSpec[] = [
+  { kind: "print", template: '"x is big"' },
+];
+const elseBody: CommandSpec[] = [
+  { kind: "print", template: '"x is small"' },
+];
+const ifCmd = optilotus_if(0, "{x} > 10", thenBody, elseBody);
+// {status:"ok", id: 7}  — the if-command's user id
+
+// Link it into the main chain (e.g. after the previous tail):
+optilus_setNext(0, prevTailId, ifCmd.id);
+// or make it the entry: optilotus_setEntry(0, ifCmd.id);
+```
+
+`CommandSpec` is a tagged union (native JS object, no JSON strings):
+
+```ts
+type CommandSpec =
+  | { kind: "declare"; var: string; ty: OptilotusType; init?: string }
+  | { kind: "assign"; var: string; expr: string }
+  | { kind: "print"; template: string }
+  | { kind: "input"; ty: OptilotusType }
+  | { kind: "cast"; var: string; to: OptilotusType; expr: string };
+```
+
+Rules:
+- The condition expression must produce a `Bool` at runtime (comparisons
+  or `true`/`false` literals). A non-bool condition is a typed error.
+- Body specs are validated before any mutation: a bad spec (unknown
+  variable, bad type, empty expression) returns a `PackageError` and the
+  package is left unchanged.
+- `declare` and `cast` introduce variables usable by later `assign`/`print`
+  specs in the same body and by the main chain after the if.
+- Body commands are hidden from `listCommands` (they are reachable only
+  through the if's `then_body`/`else_body`).
+- `return` and `if` cannot be staged as body commands (a typed error).
+- Delete an if with `optilus_deleteCommand(fid, ifCmd.id)`; this removes
+  the if command but leaves its body commands as orphans (they are no
+  longer reachable).
+
+### Resumable run workflow
+
+The resumable API runs `main` with interactive input. One active run at a
+time (the WASM bridge holds a single global session).
+
+```ts
+const status = optilotus_runProgramStart();
+// {status:"waiting_input", command: 5, ty:"int32"}  — paused at an input
+
+const peek = optilotus_runProgramPeekPending();
+// {status:"waiting_input", command: 5, ty:"int32"}  — same, non-consuming
+
+const next = optilotus_runProgramProvideInput("42");
+// {status:"ok", steps: 8, prints: 2, printed: [...]}  — finished
+
+optilotus_runProgramCancel();   // discard the active run
+optilotus_runProgramReset();    // same as cancel
+```
+
+- `optilus_runProgramStatus()` — poll without providing input.
+- `optilus_runProgramProvideInputs(["1","2"])` — batch; stops at the
+  first `waiting_input`.
+- `optilus_runProgramProvideInputTyped('42')` — provide a JSON-encoded
+  value matched to the pending command's type.
+- `optilus_lastError()` — the last execution error as a typed object.
+- Malformed input JSON returns a typed `InvalidInputs` error (never a
+  silent empty run).
+
+### Single-package limitation
+
+The WASM bridge exposes one global `Package` per WASM instance. Two tabs,
+two runs, or two packages cannot coexist through the bridge. For native
+(Rust) consumers needing multiple instances, use the crate API directly:
+`Package::new()` and `RunSession` are public and fully owner-based.
 
 ### Expression evaluation in templates
 

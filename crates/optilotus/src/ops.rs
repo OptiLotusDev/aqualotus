@@ -220,7 +220,7 @@ pub fn parse_input_line(line: &str, ty: Type) -> Result<Value, String> {
     }
 }
 
-fn narrow_input_int(raw: i128, ty: Type) -> Result<Value, crate::expr::ExprFail> {
+pub(crate) fn narrow_input_int(raw: i128, ty: Type) -> Result<Value, crate::expr::ExprFail> {
     // reuse package narrow logic via direct matching
     match ty {
         Type::Int8 => i8::try_from(raw)

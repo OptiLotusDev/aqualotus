@@ -170,6 +170,12 @@ impl RunSession {
         }
     }
 
+    /// Peek at the pending input without consuming it.
+    /// Returns `Some` when the run is paused waiting for input, `None` otherwise.
+    pub fn peek_pending(&self) -> Option<&PendingInput> {
+        self.pending.as_ref()
+    }
+
     pub fn cancel(&mut self) {
         self.frames.clear();
         self.pending = None;
@@ -525,4 +531,20 @@ pub fn status() -> RunStatus {
             RunStatus::Error(ExecError::InvalidState)
         }
     })
+}
+
+/// Peek at the pending input without consuming it.
+pub fn peek() -> Option<PendingInput> {
+    ACTIVE.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .and_then(|run| run.peek_pending().cloned())
+    })
+}
+
+/// Clear the active run session entirely (reset).
+pub fn reset() {
+    ACTIVE.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
 }
