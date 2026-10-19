@@ -169,11 +169,11 @@ fn error_envelope_carries_value_for_missing_value() {
 }
 
 #[test]
-fn loop_limit_error_has_no_command() {
+fn loop_limit_error_has_no_command_but_keeps_limit() {
     let err = ExecError::LoopLimit { limit: 1000 };
     assert_eq!(
         json_of(&exec_error_response(&err)),
-        r#"{"status":"error","kind":"LoopLimit","command":null,"message":"step limit 1000 exceeded"}"#
+        r#"{"status":"error","kind":"LoopLimit","command":null,"message":"step limit 1000 exceeded","limit":1000}"#
     );
 }
 

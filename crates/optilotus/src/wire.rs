@@ -54,6 +54,26 @@ pub struct ErrorResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub value: Option<u32>,
+    /// `Arity` only: the expected parameter shape.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
+    pub expected: Option<String>,
+    /// `Arity` only: how many arguments were actually supplied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
+    pub found: Option<usize>,
+    /// `LoopLimit` only: the step budget that was exceeded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
+    pub limit: Option<usize>,
+    /// `UnknownVariable` only: the variable name that was not declared.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
+    pub var: Option<String>,
+    /// `UnknownFunction` / `MissingReturn` only: the function name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
+    pub function: Option<String>,
 }
 
 impl ErrorResponse {
@@ -66,6 +86,11 @@ impl ErrorResponse {
             message: message.into(),
             detail: None,
             value: None,
+            expected: None,
+            found: None,
+            limit: None,
+            var: None,
+            function: None,
         }
     }
 
@@ -82,6 +107,11 @@ impl ErrorResponse {
             message: message.into(),
             detail: None,
             value: None,
+            expected: None,
+            found: None,
+            limit: None,
+            var: None,
+            function: None,
         }
     }
 
@@ -387,23 +417,37 @@ pub fn exec_error_response(err: &ExecError) -> ErrorResponse {
             command,
             expected,
             found,
-        } => ErrorResponse::at_command("Arity", *command, message)
-            .with_detail(format!("expected {expected}, found {found}")),
+        } => {
+            let mut response = ErrorResponse::at_command("Arity", *command, message);
+            response.expected = Some(expected.clone());
+            response.found = Some(*found);
+            response
+        }
         E::UnknownCommand { command } => {
             ErrorResponse::at_command("UnknownCommand", *command, message)
         }
-        E::LoopLimit { .. } => ErrorResponse::new("LoopLimit", message),
-        E::UnknownVariable { command, .. } => {
-            ErrorResponse::at_command("UnknownVariable", *command, message)
+        E::LoopLimit { limit } => {
+            let mut response = ErrorResponse::new("LoopLimit", message);
+            response.limit = Some(*limit);
+            response
+        }
+        E::UnknownVariable { command, var } => {
+            let mut response = ErrorResponse::at_command("UnknownVariable", *command, message);
+            response.var = Some(var.clone());
+            response
         }
         E::ExprError { command, detail } => {
             ErrorResponse::at_command("ExprError", *command, message).with_detail(detail)
         }
-        E::UnknownFunction { command, .. } => {
-            ErrorResponse::at_command("UnknownFunction", *command, message)
+        E::UnknownFunction { command, name } => {
+            let mut response = ErrorResponse::at_command("UnknownFunction", *command, message);
+            response.function = Some(name.clone());
+            response
         }
-        E::MissingReturn { command, .. } => {
-            ErrorResponse::at_command("MissingReturn", *command, message)
+        E::MissingReturn { command, function } => {
+            let mut response = ErrorResponse::at_command("MissingReturn", *command, message);
+            response.function = Some(function.clone());
+            response
         }
         E::InputEof { command } => ErrorResponse::at_command("InputEof", *command, message),
         E::InputParse { command, detail } => {
