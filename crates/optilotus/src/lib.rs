@@ -69,6 +69,7 @@ pub mod run_resumable;
 pub mod sink;
 pub mod types;
 pub mod value;
+pub mod wire;
 
 pub use bridge::{
     health_check, package_assign, package_clear, package_create_function, package_declare,

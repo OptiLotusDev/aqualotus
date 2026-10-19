@@ -12,6 +12,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde-wasm-bindgen = "0.6"
 console_error_panic_hook = "0.1"
+ts-rs = { version = "12", features = ["serde-compat"], optional = true }
+
+[features]
+# TypeScript binding generation. Off by default so the shipped wasm
+# binary never links a build-time codegen tool (P11/P12).
+ts-bindings = ["dep:ts-rs"]
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false

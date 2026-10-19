@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 ///
 /// 1:1 with the runtime [`crate::value::Value`] variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "ts-bindings", ts(export))]
 pub enum Type {
     Int8,
     Int16,

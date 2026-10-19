@@ -100,6 +100,8 @@ impl std::error::Error for PackageError {}
 /// Rust fields stay `snake_case`; wire JSON uses `camelCase` for the TS
 /// bridge (see `docs/api.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct FunctionSummary {
     pub id: FunctionId,
     pub name: String,
@@ -111,6 +113,8 @@ pub struct FunctionSummary {
 /// `command_count` is the user-visible count (matches `list_commands`
 /// length), not raw IR length.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct FunctionInfo {
     pub id: FunctionId,
     pub name: String,
@@ -123,7 +127,9 @@ pub struct FunctionInfo {
 
 /// User-facing kind, not raw `Op`. Serialized lowercase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "ts-bindings", ts(export))]
 pub enum CommandKind {
     Declare,
     Assign,
@@ -141,6 +147,8 @@ pub enum CommandKind {
 /// validates, allocates ids and expands each spec into the same raw
 /// commands the builders produce; callers never build or pass raw IR.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct CommandSpec {
     pub kind: CommandKind,
     pub var: Option<String>,
@@ -217,6 +225,8 @@ impl CommandSpec {
 /// every `list_commands` call, so rewires are always reflected. The
 /// stored meta keeps `None` — the raw `next` edges are the source of truth.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct CommandSummary {
     pub id: CommandId,
     pub kind: CommandKind,

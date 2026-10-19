@@ -6,6 +6,8 @@ use crate::types::Type;
 
 /// Runtime value. One variant per [`Type`]; no silent coercion.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export))]
 pub enum Value {
     Int8(i8),
     Int16(i16),
