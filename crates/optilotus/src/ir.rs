@@ -4,14 +4,20 @@ use crate::ops::Op;
 
 /// Stable identity of a function. Names are display only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(type = "number"))]
 pub struct FunctionId(pub u32);
 
 /// Stable identity of a command (control node).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(type = "number"))]
 pub struct CommandId(pub u32);
 
 /// Stable identity of a data value edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(type = "number"))]
 pub struct ValueId(pub u32);
 
 /// Authoritative program: versioned package of functions.

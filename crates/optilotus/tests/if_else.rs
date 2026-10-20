@@ -38,7 +38,7 @@ fn if_true_program() -> optilotus::Function {
 fn if_true_runs_then_body() {
     let f = if_true_program();
     let mut sink = VecSink::default();
-    run_function(&f, &mut sink).unwrap();
+    run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(sink.lines, vec!["then".to_string()]);
 }
 
@@ -78,7 +78,7 @@ fn if_false_runs_else_body() {
         ],
     );
     let mut sink = VecSink::default();
-    run_function(&f, &mut sink).unwrap();
+    run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(sink.lines, vec!["else".to_string()]);
 }
 
@@ -118,7 +118,7 @@ fn if_false_without_else_skips_and_continues() {
         ],
     );
     let mut sink = VecSink::default();
-    run_function(&f, &mut sink).unwrap();
+    run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(sink.lines, vec!["after".to_string()]);
 }
 
@@ -170,7 +170,7 @@ fn nested_if_executes_inner_branch() {
         ],
     );
     let mut sink = VecSink::default();
-    run_function(&f, &mut sink).unwrap();
+    run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap();
     assert_eq!(sink.lines, vec!["inner-else".to_string()]);
 }
 
@@ -194,7 +194,7 @@ fn non_bool_condition_is_typed_type_error() {
         ],
     );
     let mut sink = VecSink::default();
-    let err = run_function(&f, &mut sink).unwrap_err();
+    let err = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err();
     assert!(
         matches!(
             err,
@@ -224,7 +224,7 @@ fn missing_condition_value_is_typed() {
         )],
     );
     let mut sink = VecSink::default();
-    let err = run_function(&f, &mut sink).unwrap_err();
+    let err = run_function(&f, &mut sink, &mut optilotus::VecSource::default()).unwrap_err();
     assert!(
         matches!(
             err,

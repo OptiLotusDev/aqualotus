@@ -192,8 +192,9 @@ then drop nothing; the command names are the same.)
 3. **Respect the layers.** Language/runtime logic goes in `crates/optilotus` only.
    The UI calls it through `src/lib/optilotus.ts` — never copy engine logic into React.
 4. **Follow the naming rules.**
-    - Engine functions used by the UI: `optilotus_` prefix + camelCase rest
-      (`optilotus_execMath`, `optilotus_set`).
+    - Engine functions used by the UI: `optilotus_` prefix + PascalCase rest
+      (`optilotus_runProgram`, `optilotus_listFunctions`). The codebase
+      convention is PascalCase here, not camelCase.
    - Everything else: `camelCase` functions/variables, `PascalCase` types/components,
      `SCREAMING_SNAKE_CASE` constants. No `any` in TypeScript. Details in
      `design-principles.md` (Principle 9) and `docs/api.md`.

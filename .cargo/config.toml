@@ -1,0 +1,13 @@
+# Build-time configuration for the TypeScript binding generation.
+#
+# `ts-rs` writes its generated bindings into TS_RS_EXPORT_DIR. `relative`
+# resolves it against the workspace root, so the generated files land in
+# the UI's generated-wasm tree (which is git-ignored) instead of a stray
+# `bindings/` directory next to the crate.
+#
+# TS_RS_LARGE_INT: the engine's i64/u64/i128/u128 values cross the bridge
+# as JSON, where `bigint` is not representable. `number` matches what
+# serde_json actually emits and what the UI can consume.
+[env]
+TS_RS_EXPORT_DIR = { value = "apps/aqualotus-ui/src/wasm/optilotus/bindings", relative = true }
+TS_RS_LARGE_INT = "number"

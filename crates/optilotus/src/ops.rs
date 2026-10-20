@@ -17,6 +17,10 @@ pub enum Op {
     /// Effect: prints one value. 1 input, 0 outputs.
     /// `String` inputs are templates (see `crate::expr::render_template`).
     Print,
+    /// Effect: read one line and parse it as `ty`. 0 inputs, 1 output.
+    Input { ty: Type },
+    /// Convert a value to `to`. 1 input, 1 output.
+    Cast { to: Type },
     /// Declare/assign a function-scoped variable. 1 input, 0 outputs.
     /// The input value must match `ty`, and a re-declared variable keeps
     /// its original type.
@@ -171,4 +175,234 @@ impl_checked_arith!(i8, i16, i32, i64, i128, u8, u16, u32, u64, u128);
 /// every other value uses its `Display` form.
 pub fn print_text(value: &Value) -> String {
     value.to_string()
+}
+
+/// Parse one input line into a value of the declared type.
+pub fn parse_input_line(line: &str, ty: Type) -> Result<Value, String> {
+    match ty {
+        Type::String => Ok(Value::String(line.to_string())),
+        Type::Void => Err("cannot read a value of type void".to_string()),
+        Type::Bool => match line.trim().to_ascii_lowercase().as_str() {
+            "true" => Ok(Value::Bool(true)),
+            "false" => Ok(Value::Bool(false)),
+            _ => Err(format!(
+                "invalid bool input {line:?}: expected \"true\" or \"false\""
+            )),
+        },
+        Type::Char => {
+            let trimmed = line.trim();
+            let mut chars = trimmed.chars();
+            match (chars.next(), chars.next()) {
+                (Some(c), None) => Ok(Value::Char(c)),
+                _ => Err(format!(
+                    "invalid char input {line:?}: expected a single character"
+                )),
+            }
+        }
+        Type::Float32 | Type::Float64 => {
+            let number: f64 = line
+                .trim()
+                .parse()
+                .map_err(|_| format!("invalid {} input {line:?}", ty.tag()))?;
+            if ty == Type::Float32 {
+                Ok(Value::Float32(number as f32))
+            } else {
+                Ok(Value::Float64(number))
+            }
+        }
+        _ => {
+            let raw = line
+                .trim()
+                .parse::<i128>()
+                .map_err(|_| format!("invalid {} input {line:?}", ty.tag()))?;
+            narrow_input_int(raw, ty).map_err(|e| e.to_string())
+        }
+    }
+}
+
+pub(crate) fn narrow_input_int(raw: i128, ty: Type) -> Result<Value, crate::expr::ExprFail> {
+    // reuse package narrow logic via direct matching
+    match ty {
+        Type::Int8 => i8::try_from(raw)
+            .map(Value::Int8)
+            .map_err(|_| crate::expr::ExprFail::Overflow),
+        Type::Int16 => i16::try_from(raw)
+            .map(Value::Int16)
+            .map_err(|_| crate::expr::ExprFail::Overflow),
+        Type::Int32 => i32::try_from(raw)
+            .map(Value::Int32)
+            .map_err(|_| crate::expr::ExprFail::Overflow),
+        Type::Int64 => i64::try_from(raw)
+            .map(Value::Int64)
+            .map_err(|_| crate::expr::ExprFail::Overflow),
+        Type::Int128 => Ok(Value::Int128(raw)),
+        Type::Uint8 => u8::try_from(raw)
+            .map(Value::Uint8)
+            .map_err(|_| crate::expr::ExprFail::Overflow),
+        Type::Uint16 => u16::try_from(raw)
+            .map(Value::Uint16)
+            .map_err(|_| crate::expr::ExprFail::Overflow),
+        Type::Uint32 => u32::try_from(raw)
+            .map(Value::Uint32)
+            .map_err(|_| crate::expr::ExprFail::Overflow),
+        Type::Uint64 => u64::try_from(raw)
+            .map(Value::Uint64)
+            .map_err(|_| crate::expr::ExprFail::Overflow),
+        Type::Uint128 => u128::try_from(raw)
+            .map(Value::Uint128)
+            .map_err(|_| crate::expr::ExprFail::Overflow),
+        _ => Err(crate::expr::ExprFail::TypeMismatch(format!(
+            "cannot parse {} value from text",
+            ty.tag()
+        ))),
+    }
+}
+
+/// Convert a value into the target type.
+pub fn cast_value(value: &Value, to: Type) -> Result<Value, String> {
+    if value.ty() == to {
+        return Ok(value.clone());
+    }
+    match to {
+        Type::String => Ok(Value::String(value.to_string())),
+        Type::Bool => match value {
+            Value::Bool(b) => Ok(Value::Bool(*b)),
+            Value::Char(c) => Ok(Value::Bool(*c != '\0')),
+            Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
+                "true" => Ok(Value::Bool(true)),
+                "false" => Ok(Value::Bool(false)),
+                _ => s
+                    .trim()
+                    .parse::<f64>()
+                    .map(|n| Value::Bool(n != 0.0))
+                    .map_err(|_| format!("cannot cast {value:?} to bool")),
+            },
+            v if v.ty().is_numeric() => {
+                // numeric -> bool via zero check
+                let n = numeric_to_f64(v)?;
+                Ok(Value::Bool(n != 0.0))
+            }
+            _ => Err(format!("cannot cast {:?} to bool", value.ty())),
+        },
+        Type::Char => match value {
+            Value::Char(c) => Ok(Value::Char(*c)),
+            Value::String(s) => {
+                let mut chars = s.chars();
+                match (chars.next(), chars.next()) {
+                    (Some(c), None) => Ok(Value::Char(c)),
+                    _ => Err(format!("cannot cast string {s:?} to char")),
+                }
+            }
+            v if v.ty().is_numeric() => {
+                let n = numeric_to_i128(v)?;
+                char::from_u32(n as u32)
+                    .map(Value::Char)
+                    .ok_or_else(|| format!("cannot cast {value:?} to char"))
+            }
+            Value::Bool(b) => Ok(Value::Char(if *b { '1' } else { '0' })),
+            _ => Err(format!("cannot cast {:?} to char", value.ty())),
+        },
+        Type::Float32 => {
+            let n = to_f64(value)?;
+            Ok(Value::Float32(n as f32))
+        }
+        Type::Float64 => {
+            let n = to_f64(value)?;
+            Ok(Value::Float64(n))
+        }
+        Type::Void => Err("cannot cast to void".to_string()),
+        _ => {
+            let n = to_i128(value)?;
+            // range check
+            match to {
+                Type::Int8 => i8::try_from(n)
+                    .map(Value::Int8)
+                    .map_err(|_| format!("overflow casting {value:?} to int8")),
+                Type::Int16 => i16::try_from(n)
+                    .map(Value::Int16)
+                    .map_err(|_| format!("overflow casting {value:?} to int16")),
+                Type::Int32 => i32::try_from(n)
+                    .map(Value::Int32)
+                    .map_err(|_| format!("overflow casting {value:?} to int32")),
+                Type::Int64 => i64::try_from(n)
+                    .map(Value::Int64)
+                    .map_err(|_| format!("overflow casting {value:?} to int64")),
+                Type::Int128 => Ok(Value::Int128(n)),
+                Type::Uint8 => u8::try_from(n)
+                    .map(Value::Uint8)
+                    .map_err(|_| format!("overflow casting {value:?} to uint8")),
+                Type::Uint16 => u16::try_from(n)
+                    .map(Value::Uint16)
+                    .map_err(|_| format!("overflow casting {value:?} to uint16")),
+                Type::Uint32 => u32::try_from(n)
+                    .map(Value::Uint32)
+                    .map_err(|_| format!("overflow casting {value:?} to uint32")),
+                Type::Uint64 => u64::try_from(n)
+                    .map(Value::Uint64)
+                    .map_err(|_| format!("overflow casting {value:?} to uint64")),
+                Type::Uint128 => u128::try_from(n)
+                    .map(Value::Uint128)
+                    .map_err(|_| format!("overflow casting {value:?} to uint128")),
+                _ => unreachable!(),
+            }
+        }
+    }
+}
+
+fn to_f64(value: &Value) -> Result<f64, String> {
+    match value {
+        Value::Int8(v) => Ok(*v as f64),
+        Value::Int16(v) => Ok(*v as f64),
+        Value::Int32(v) => Ok(*v as f64),
+        Value::Int64(v) => Ok(*v as f64),
+        Value::Int128(v) => Ok(*v as f64),
+        Value::Uint8(v) => Ok(*v as f64),
+        Value::Uint16(v) => Ok(*v as f64),
+        Value::Uint32(v) => Ok(*v as f64),
+        Value::Uint64(v) => Ok(*v as f64),
+        Value::Uint128(v) => Ok(*v as f64),
+        Value::Float32(v) => Ok(*v as f64),
+        Value::Float64(v) => Ok(*v),
+        Value::Bool(v) => Ok(if *v { 1.0 } else { 0.0 }),
+        Value::Char(v) => Ok(*v as u32 as f64),
+        Value::String(s) => s
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| format!("cannot cast string {s:?} to number")),
+        Value::Void => Err("cannot cast void to number".to_string()),
+    }
+}
+
+fn to_i128(value: &Value) -> Result<i128, String> {
+    match value {
+        Value::Int8(v) => Ok(*v as i128),
+        Value::Int16(v) => Ok(*v as i128),
+        Value::Int32(v) => Ok(*v as i128),
+        Value::Int64(v) => Ok(*v as i128),
+        Value::Int128(v) => Ok(*v),
+        Value::Uint8(v) => Ok(*v as i128),
+        Value::Uint16(v) => Ok(*v as i128),
+        Value::Uint32(v) => Ok(*v as i128),
+        Value::Uint64(v) => Ok(*v as i128),
+        Value::Uint128(v) => {
+            i128::try_from(*v).map_err(|_| format!("cannot cast uint128 {v} to int"))
+        }
+        Value::Float32(v) => Ok(*v as i128),
+        Value::Float64(v) => Ok(*v as i128),
+        Value::Bool(v) => Ok(if *v { 1 } else { 0 }),
+        Value::Char(v) => Ok(*v as i128),
+        Value::String(s) => s
+            .trim()
+            .parse::<i128>()
+            .map_err(|_| format!("cannot cast string {s:?} to integer")),
+        Value::Void => Err("cannot cast void to integer".to_string()),
+    }
+}
+
+fn numeric_to_f64(value: &Value) -> Result<f64, String> {
+    to_f64(value)
+}
+
+fn numeric_to_i128(value: &Value) -> Result<i128, String> {
+    to_i128(value)
 }

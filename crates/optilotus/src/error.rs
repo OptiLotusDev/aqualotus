@@ -47,6 +47,15 @@ pub enum ExecError {
         command: CommandId,
         function: String,
     },
+    InputEof {
+        command: CommandId,
+    },
+    InputParse {
+        command: CommandId,
+        detail: String,
+    },
+    Paused,
+    InvalidState,
 }
 
 impl fmt::Display for ExecError {
@@ -97,6 +106,14 @@ impl fmt::Display for ExecError {
                     command.0
                 )
             }
+            ExecError::InputEof { command } => {
+                write!(f, "input EOF at {:?}", command.0)
+            }
+            ExecError::InputParse { command, detail } => {
+                write!(f, "input parse error at {:?}: {detail}", command.0)
+            }
+            ExecError::Paused => write!(f, "paused for input"),
+            ExecError::InvalidState => write!(f, "invalid runner state"),
         }
     }
 }

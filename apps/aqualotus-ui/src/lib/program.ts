@@ -1,19 +1,60 @@
-import type { CommandSummary, OptilotusError } from "./optilotus";
+import type { Access, CommandSpec, CommandSummary, OptilotusError } from "./optilotus";
 import { optilotus_type, type OptilotusType } from "./optilotus";
 
 /** Command kinds the editor supports (mirrors the bridge). */
 export type CommandKind = CommandSummary["kind"];
 
-/** Fields for creating / replacing a command (one shape per kind). */
+/**
+ * Fields for creating / replacing a command (one shape per kind).
+ *
+ * Every kind the bridge can report must appear here: `summaryToDraft`
+ * is the undo/restore path, so a kind missing from this union silently
+ * loses the user's block on undo. `if` carries its branch bodies as
+ * nested specs because that is the shape `optilotus_if` accepts.
+ */
 export type CommandDraft =
-  | { kind: "declare"; name: string; ty: OptilotusType; init: string }
+  | {
+      kind: "declare";
+      name: string;
+      ty: OptilotusType;
+      /**
+       * Visibility. Optional so existing call sites (and drafts built
+       * before access existed) keep compiling; an absent value means
+       * `private`, which is the engine default and the historical
+       * behaviour.
+       */
+      access?: Access;
+      init: string;
+    }
   | { kind: "assign"; name: string; expr: string }
   | { kind: "print"; template: string }
-  | { kind: "return"; expr: string };
+  | { kind: "input"; ty: OptilotusType }
+  | { kind: "cast"; name: string; to: OptilotusType; expr: string }
+  | { kind: "return"; expr: string }
+  | {
+      kind: "if";
+      condition: string;
+      then: readonly CommandSpec[];
+      else: readonly CommandSpec[] | null;
+    };
+
+/**
+ * Exhaustiveness guard. A new `CommandKind` in Rust must break the
+ * build here rather than degrade to `undefined` at runtime — the
+ * failure mode this file previously had for `input`/`cast`/`if`.
+ */
+function unreachableKind(kind: never): never {
+  throw new Error(`Unhandled command kind: ${String(kind)}`);
+}
 
 /**
  * Rebuild an editable draft from a stored summary (delete-undo,
  * function restore). Pure projection of bridge data, no semantics.
+ *
+ * Total over `CommandSummary["kind"]`: the `default` branch is a
+ * compile-time error if a kind is unhandled, so undo can never capture
+ * `undefined` for a block it is supposed to restore.
+ *
  * String/char initializers display quoted (`"hi"`, `'a'`) — the input
  * rectangle and the block always show the literal form; the bridge
  * layer unwraps it again on replay (`normalizeDeclareInit`), so
@@ -26,14 +67,39 @@ export function summaryToDraft(cmd: CommandSummary): CommandDraft {
         kind: "declare",
         name: cmd.var ?? "",
         ty: (cmd.ty ?? optilotus_type.int32) as OptilotusType,
+        // Summaries written before access existed omit it; those
+        // variables behaved as `private`, which is also the default.
+        access: cmd.access ?? "private",
         init: displayDeclareValue(cmd.ty, cmd.expr),
       };
     case "assign":
       return { kind: "assign", name: cmd.var ?? "", expr: cmd.expr ?? "" };
     case "print":
       return { kind: "print", template: cmd.template ?? "" };
+    case "input":
+      return {
+        kind: "input",
+        ty: (cmd.ty ?? optilotus_type.int32) as OptilotusType,
+      };
+    case "cast":
+      return {
+        kind: "cast",
+        name: cmd.var ?? "",
+        to: (cmd.ty ?? optilotus_type.int32) as OptilotusType,
+        expr: cmd.expr ?? "",
+      };
     case "return":
       return { kind: "return", expr: cmd.expr ?? "" };
+    case "if":
+      // Branch bodies are stored as raw command ids; a draft carries
+      // specs. The bridge does not expose a body-id → spec projection,
+      // so an `if` cannot be faithfully rebuilt here. Failing loudly
+      // beats restoring a block with silently empty branches.
+      throw new Error(
+        `Cannot rebuild a draft for 'if' (#${cmd.id}): branch bodies are not recoverable from a summary.`,
+      );
+    default:
+      return unreachableKind(cmd.kind);
   }
 }
 
@@ -70,6 +136,10 @@ export function commandDraftEqual(
         next.kind === "declare" &&
         next.name === current.name &&
         next.ty === current.ty &&
+        // An absent modifier means `private` (the engine default), so
+        // compare the resolved values: otherwise re-applying a draft that
+        // omits `access` would look like an edit and churn history.
+        (next.access ?? "private") === (current.access ?? "private") &&
         next.init === current.init
       );
     case "assign":
@@ -80,9 +150,61 @@ export function commandDraftEqual(
       );
     case "print":
       return next.kind === "print" && next.template === current.template;
+    case "input":
+      return next.kind === "input" && next.ty === current.ty;
+    case "cast":
+      return (
+        next.kind === "cast" &&
+        next.name === current.name &&
+        next.to === current.to &&
+        next.expr === current.expr
+      );
     case "return":
       return next.kind === "return" && next.expr === current.expr;
+    case "if":
+      return (
+        next.kind === "if" &&
+        next.condition === current.condition &&
+        commandSpecListEqual(next.then, current.then) &&
+        commandSpecListEqual(next.else, current.else)
+      );
+    default:
+      return unreachableDraft(current);
   }
+}
+
+/**
+ * Exhaustiveness guard for `commandDraftEqual`. Takes the whole draft
+ * because the `kind` field is already narrowed to `never` by the
+ * preceding `kind` comparison.
+ */
+function unreachableDraft(draft: never): never {
+  throw new Error(
+    `Unhandled command draft kind: ${String((draft as { kind?: string }).kind)}`,
+  );
+}
+
+/** Structural equality for `if` branch bodies (specs are flat objects). */
+function commandSpecListEqual(
+  a: readonly CommandSpec[] | null,
+  b: readonly CommandSpec[] | null,
+): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.length !== b.length) return false;
+  return a.every((spec, i) => {
+    const other = b[i];
+    if (other === undefined) return false;
+    const keys = new Set([...Object.keys(spec), ...Object.keys(other)]);
+    for (const key of keys) {
+      if (
+        (spec as Record<string, unknown>)[key] !==
+        (other as Record<string, unknown>)[key]
+      ) {
+        return false;
+      }
+    }
+    return true;
+  });
 }
 
 export const COMMAND_KINDS: readonly CommandKind[] = [
@@ -117,8 +239,16 @@ export function commandMainLine(cmd: CommandSummary): string {
       return `${cmd.var ?? "?"} = ${cmd.expr ?? ""}`;
     case "print":
       return cmd.template ?? "";
+    case "input":
+      return `input ${cmd.ty ?? "?"}`;
+    case "cast":
+      return `${cmd.var ?? "?"} = cast(${cmd.expr ?? ""}, ${cmd.ty ?? "?"})`;
     case "return":
       return `return ${cmd.expr ?? ""}`;
+    case "if":
+      return `if ${cmd.condition ?? "?"}`;
+    default:
+      return unreachableKind(cmd.kind);
   }
 }
 
@@ -133,8 +263,16 @@ export function commandSubLine(cmd: CommandSummary): string {
       return "assignment";
     case "print":
       return "print to output";
+    case "input":
+      return "read from input";
+    case "cast":
+      return "converts and stores";
     case "return":
       return "ends the function";
+    case "if":
+      return "conditional branch";
+    default:
+      return unreachableKind(cmd.kind);
   }
 }
 

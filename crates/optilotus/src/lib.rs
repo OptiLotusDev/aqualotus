@@ -64,15 +64,20 @@ pub mod expr;
 pub mod ir;
 pub mod ops;
 pub mod package;
+pub mod resumable;
+pub mod run_resumable;
 pub mod sink;
 pub mod types;
 pub mod value;
+pub mod wire;
 
 pub use bridge::{
     health_check, package_assign, package_clear, package_create_function, package_declare,
-    package_delete_command, package_delete_function, package_get_function, package_list_commands,
-    package_list_functions, package_print, package_rename_function, package_return,
-    package_set_entry, package_set_next, run_program, version, VERSION,
+    package_delete_command, package_delete_function, package_get_function, package_input,
+    package_list_commands, package_list_functions, package_print, package_rename_function,
+    package_return, package_set_entry, package_set_next, run_program, run_program_cancel,
+    run_program_provide_input, run_program_start, run_program_status, run_program_with_inputs,
+    version, VERSION,
 };
 pub use error::ExecError;
 pub use exec::{
@@ -84,11 +89,13 @@ pub use expr::{
     check_var_name, eval_expr, eval_expr_with, render_template, ExprFail, MAX_EXPR_DEPTH,
 };
 pub use ir::{Command, CommandId, Function, FunctionId, Program, ValueId};
-pub use ops::{apply_arith, print_text, ArithKind, Op, OpError};
+pub use ops::{apply_arith, cast_value, parse_input_line, print_text, ArithKind, Op, OpError};
 pub use package::{
-    CommandKind, CommandSummary, FunctionInfo, FunctionSummary, Package, PackageError, MAIN_ID,
-    MAIN_NAME, PACKAGE_NAME,
+    Access, CommandKind, CommandSpec, CommandSummary, FunctionInfo, FunctionSummary, Package,
+    PackageError, MAIN_ID, MAIN_NAME, PACKAGE_NAME,
 };
-pub use sink::{PrintSink, VecSink};
+pub use resumable::ResumableRun;
+pub use run_resumable::{PendingInput, RunSession, RunStatus};
+pub use sink::{InputSource, PrintSink, VecSink, VecSource};
 pub use types::Type;
 pub use value::Value;

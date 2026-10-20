@@ -24,6 +24,8 @@ pub enum ExprFail {
     /// A callee already failed with a fully-typed error (keeps its own
     /// command id); the executor propagates it unwrapped.
     Callee(Box<crate::error::ExecError>),
+    /// Expression evaluation paused for input.
+    Paused,
 }
 
 impl fmt::Display for ExprFail {
@@ -39,6 +41,7 @@ impl fmt::Display for ExprFail {
                 write!(f, "function {name:?} returned no value")
             }
             ExprFail::Callee(inner) => write!(f, "{inner}"),
+            ExprFail::Paused => write!(f, "paused for input"),
         }
     }
 }
