@@ -72,6 +72,17 @@ Everything here must keep working headlessly (`cargo test` proves it).
 the UI, name it this way. UI-only helpers (hooks, components) keep normal names
 (`useIsMobile`, `OptilotusPanel`, …).
 
+**Visual layer:** the night-mode shell is built from three presentation-only
+pieces. None of them touches the bridge, the program model, or the editor
+state, so they can be restyled freely:
+
+| Piece                     | Where                                              | What it does |
+|---------------------------|----------------------------------------------------|--------------|
+| Token layer               | `index.css` (`:root` blocks)                      | Every colour, radius, shadow, blur, and timing value. Components never hard-code palette hex. |
+| Atmosphere                | `components/FluidBackdrop.tsx`, `lib/fluid.ts`     | Decorative canvas ink layer behind the whole app: `pointer-events: none`, reduced-motion aware, hidden in light mode, and stopped while the tab is hidden. |
+| Entrance motion           | `index.css` (`.enter-*`), `components/RevealText.tsx` | Staggered fade/rise on first paint plus a word-by-word reveal for presentation text. |
+| Start page                | `components/StartIntro.tsx`, `components/startIntro.css` | The intro that plays before the canvas: code fragments converge, a white burst releases, and the **AquaLotus** wordmark resolves out of it. Pure CSS timeline; `App.tsx` mounts it over the app and unmounts it when it ends. |
+
 ### Shells — native wrappers (usually leave alone)
 
 | Path            | What it is                                              | Touch it? |

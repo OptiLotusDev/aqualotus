@@ -1,0 +1,403 @@
+/* Start-page intro.
+ *
+ * Every selector here is scoped to `.intro-*`: the main application
+ * page is not styled, restyled, or affected by this file. The tokens
+ * it reads (`--sans`, `--rounded`, `--mono`) come from the existing
+ * Aqualotus design system.
+ *
+ * The whole sequence is one CSS timeline. JavaScript only unmounts the
+ * overlay when the timeline ends, so nothing re-renders per frame.
+ */
+
+.intro-root {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  overflow: hidden;
+  /* Near-black night surface with restrained blue-violet light. */
+  background:
+    radial-gradient(120vmax 80vmax at 12% -12%, rgba(59, 130, 246, 0.1), transparent 62%),
+    radial-gradient(100vmax 70vmax at 92% 108%, rgba(139, 92, 246, 0.1), transparent 62%),
+    #0a0a0f;
+  color: #fafafa;
+  font-family: var(--sans);
+  /* Exit: the overlay dissolves into light and the canvas shows through. */
+  animation: intro-exit var(--intro-exit-dur) ease-in var(--intro-exit-at) forwards;
+}
+
+@keyframes intro-exit {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* ---------- Ambient light: brightens as the code converges ---------- */
+
+.intro-glow {
+  position: absolute;
+  inset: -12%;
+  background:
+    radial-gradient(46vmax 46vmax at 50% 50%, rgba(59, 130, 246, 0.22), transparent 70%),
+    radial-gradient(30vmax 30vmax at 50% 50%, rgba(139, 92, 246, 0.18), transparent 70%);
+  opacity: 0;
+  animation: intro-glow var(--intro-fragment-dur) cubic-bezier(0.5, 0, 0.85, 0.4) forwards;
+}
+
+@keyframes intro-glow {
+  0% {
+    opacity: 0.22;
+    transform: scale(0.88);
+  }
+  55% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  85% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1.14);
+  }
+}
+
+/* ---------- Code fragments ---------- */
+
+.intro-fragment {
+  position: absolute;
+  left: calc(50vw + var(--ox) * 1vw);
+  top: calc(50vh + var(--oy) * 1vh);
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: rgba(159, 196, 255, 0.92);
+  opacity: 0;
+  transform-origin: 50% 50%;
+  /* Two animations, two properties: the motion (transform) and the
+   * visibility ramp (opacity) never fight over the same property.
+   * The travel runs on the global timeline so every fragment reaches
+   * the centre exactly when the burst starts; the visibility ramp is
+   * offset per slot for the staggered emergence and shortened to
+   * match, so nothing is still on screen at the climax. */
+  animation:
+    intro-frag var(--intro-fragment-dur) linear forwards,
+    intro-frag-vis calc(var(--intro-fragment-dur) - var(--delay)) linear var(--delay) forwards;
+}
+
+.intro-fragment--far {
+  font-size: 11px;
+  color: rgba(138, 168, 226, 0.8);
+  --fop: 0.42;
+  --fscale: 0.86;
+}
+
+.intro-fragment--mid {
+  font-size: 13px;
+  color: rgba(167, 197, 255, 0.9);
+  --fop: 0.62;
+  --fscale: 1;
+}
+
+.intro-fragment--near {
+  font-size: 15px;
+  color: rgba(199, 189, 255, 0.94);
+  --fop: 0.8;
+  --fscale: 1.14;
+}
+
+/* The second text of each slot fades in as the first one fades out:
+ * the code visibly changes while it travels. */
+.intro-fragment--alt {
+  animation:
+    intro-frag var(--intro-fragment-dur) linear forwards,
+    intro-frag-vis-alt calc(var(--intro-fragment-dur) - var(--delay)) linear var(--delay) forwards;
+}
+
+/* Travel: slow emergence, then a steady acceleration into the centre. */
+@keyframes intro-frag {
+  0% {
+    transform: translate(-50%, -50%) scale(calc(var(--fscale) * 0.9));
+  }
+  30% {
+    transform: translate(
+        calc(-50% + var(--ox) * -0.05 * 1vw + var(--drift) * 0.5 * 1vw),
+        calc(-50% + var(--oy) * -0.05 * 1vh)
+      )
+      scale(var(--fscale));
+  }
+  55% {
+    transform: translate(
+        calc(-50% + var(--ox) * -0.2 * 1vw + var(--drift) * 1vw),
+        calc(-50% + var(--oy) * -0.2 * 1vh)
+      )
+      scale(calc(var(--fscale) * 1.03));
+  }
+  75% {
+    transform: translate(
+        calc(-50% + var(--ox) * -0.55 * 1vw + var(--drift) * 0.6 * 1vw),
+        calc(-50% + var(--oy) * -0.55 * 1vh)
+      )
+      scale(calc(var(--fscale) * 1.12));
+  }
+  90% {
+    transform: translate(
+        calc(-50% + var(--ox) * -0.9 * 1vw),
+        calc(-50% + var(--oy) * -0.9 * 1vh)
+      )
+      scale(calc(var(--fscale) * 1.22));
+  }
+  100% {
+    transform: translate(
+        calc(-50% + var(--ox) * -1 * 1vw),
+        calc(-50% + var(--oy) * -1 * 1vh)
+      )
+      scale(calc(var(--fscale) * 1.3));
+  }
+}
+
+@keyframes intro-frag-vis {
+  0% {
+    opacity: 0;
+  }
+  7% {
+    opacity: var(--fop);
+  }
+  50% {
+    opacity: var(--fop);
+  }
+  58% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes intro-frag-vis-alt {
+  0% {
+    opacity: 0;
+  }
+  52% {
+    opacity: 0;
+  }
+  60% {
+    opacity: var(--fop);
+  }
+  88% {
+    opacity: calc(var(--fop) * 0.45);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---------- The burst ---------- */
+
+/* Thin radial streaks: one element, one gradient, no particles. */
+.intro-streaks {
+  position: absolute;
+  inset: 0;
+  background: repeating-conic-gradient(
+    from 0deg at 50% 50%,
+    rgba(214, 228, 255, 0.16) 0deg 0.35deg,
+    rgba(0, 0, 0, 0) 0.35deg 7deg
+  );
+  -webkit-mask-image: radial-gradient(
+    circle at 50% 50%,
+    rgba(0, 0, 0, 0) 8%,
+    #000 38%,
+    rgba(0, 0, 0, 0) 68%
+  );
+  mask-image: radial-gradient(
+    circle at 50% 50%,
+    rgba(0, 0, 0, 0) 8%,
+    #000 38%,
+    rgba(0, 0, 0, 0) 68%
+  );
+  opacity: 0;
+  animation: intro-streaks 760ms cubic-bezier(0.1, 0.6, 0.2, 1) var(--intro-burst-at) forwards;
+}
+
+@keyframes intro-streaks {
+  0% {
+    opacity: 0;
+    transform: scale(0.35) rotate(-6deg);
+  }
+  18% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.6) rotate(6deg);
+  }
+}
+
+/* The expanding release of light. */
+.intro-burst {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 60vmin;
+  height: 60vmin;
+  margin: -30vmin 0 0 -30vmin;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.98) 0%,
+    rgba(196, 214, 255, 0.55) 28%,
+    rgba(120, 140, 255, 0.18) 55%,
+    rgba(120, 140, 255, 0) 75%
+  );
+  opacity: 0;
+  mix-blend-mode: screen;
+  animation: intro-burst var(--intro-burst-dur) cubic-bezier(0.15, 0.7, 0.3, 1) var(--intro-burst-at) forwards;
+}
+
+@keyframes intro-burst {
+  0% {
+    opacity: 0;
+    transform: scale(0.15);
+  }
+  8% {
+    opacity: 1;
+    transform: scale(0.5);
+  }
+  38% {
+    opacity: 0.68;
+    transform: scale(1.5);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(3.4);
+  }
+}
+
+/* The flash: one brief near-white moment, then it is gone. */
+.intro-flash {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(255, 255, 255, 1) 0%,
+    rgba(248, 251, 255, 0.86) 20%,
+    rgba(205, 222, 255, 0.42) 46%,
+    rgba(180, 200, 255, 0.1) 70%,
+    rgba(255, 255, 255, 0) 90%
+  );
+  opacity: 0;
+  animation: intro-flash 420ms ease-out var(--intro-burst-at) forwards;
+}
+
+@keyframes intro-flash {
+  0% {
+    opacity: 0;
+  }
+  6% {
+    opacity: 1;
+  }
+  18% {
+    opacity: 0.42;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---------- The wordmark ---------- */
+
+.intro-word {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--rounded);
+  font-size: clamp(42px, 8.5vw, 104px);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+  color: #fafafa;
+  white-space: nowrap;
+  opacity: 0;
+  animation: intro-word var(--intro-word-dur) cubic-bezier(0.16, 1, 0.3, 1) var(--intro-word-at) forwards;
+}
+
+@keyframes intro-word {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 12px)) scale(0.94);
+    letter-spacing: 0.08em;
+    text-shadow: 0 0 80px rgba(150, 180, 255, 0.85);
+  }
+  30% {
+    opacity: 1;
+  }
+  62% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    letter-spacing: -0.015em;
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    letter-spacing: -0.015em;
+    text-shadow: 0 0 46px rgba(96, 140, 255, 0.4);
+  }
+}
+
+/* ---------- Reduced motion ---------- */
+
+/* A brief, low-motion reveal: the wordmark fades in over a still
+ * dark surface, then the overlay steps aside. No fragments, no burst,
+ * no motion. The durations are re-declared here because the global
+ * reduced-motion rule collapses every animation in the app. */
+@media (prefers-reduced-motion: reduce) {
+  .intro-root--reduced .intro-fragment,
+  .intro-root--reduced .intro-glow,
+  .intro-root--reduced .intro-streaks,
+  .intro-root--reduced .intro-burst,
+  .intro-root--reduced .intro-flash {
+    display: none;
+  }
+
+  .intro-root--reduced {
+    animation: intro-exit 320ms ease-in 620ms forwards !important;
+  }
+
+  .intro-root--reduced .intro-word {
+    animation: intro-word-reduced 420ms ease-out 80ms forwards !important;
+  }
+}
+
+@keyframes intro-word-reduced {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* ---------- Small screens ---------- */
+
+/* Narrow viewports cannot carry the far layer without turning into
+ * clutter: it is dropped and the remaining fragments get more air. */
+@media (max-width: 767px) {
+  .intro-fragment--far {
+    display: none;
+  }
+
+  .intro-fragment--mid {
+    font-size: 12px;
+  }
+
+  .intro-fragment--near {
+    font-size: 14px;
+  }
+}

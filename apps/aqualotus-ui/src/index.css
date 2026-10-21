@@ -68,6 +68,15 @@
   --surface-selected: rgba(56, 68, 100, 0.55);
   --surface-inset: rgba(7, 8, 13, 0.55);
 
+  /* Liquid Glass chrome — the translucency the whole shell is built
+   * from, plus the hairline highlight that reads as a lit edge. */
+  --glass-border: rgba(255, 255, 255, 0.16);
+  --glass-highlight: rgba(255, 255, 255, 0.1);
+  --glass-blur: 22px;
+  /* Fallback for engines without backdrop blur: a denser translucent
+   * fill keeps the same separation without the blur cost. */
+  --glass-fallback: rgba(15, 17, 28, 0.92);
+
   /* Borders — subtle, with one stronger step. */
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.16);
@@ -104,15 +113,28 @@
   --shadow-soft: 0 8px 32px rgba(0, 0, 0, 0.38);
   --shadow-lift: 0 16px 48px rgba(0, 0, 0, 0.5);
 
+  /* Motion — one timing vocabulary for the whole shell. */
+  --transition-fast: 150ms;
+  --transition-entrance: 700ms;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Fluid backdrop — the atmospheric ink palette. Read by the canvas
+   * layer through the token layer, never hard-coded in components. */
+  --fluid-bg: #04050c;
+  --fluid-cyan: #22d3ee;
+  --fluid-blue: #3b82f6;
+  --fluid-violet: #8b5cf6;
+  --fluid-magenta: #d946ef;
+
   /* Type + spacing. */
-  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
-    "Segoe UI", Roboto, sans-serif;
+  --sans: "Onest Variable", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    system-ui, "Segoe UI", Roboto, sans-serif;
   --hand: "Segoe Print", "Bradley Hand", "Chalkboard SE", "Comic Sans MS",
     cursive;
-  --heading: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont,
-    system-ui, sans-serif;
-  --rounded: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont,
-    system-ui, sans-serif;
+  --heading: "Onest Variable", ui-rounded, "SF Pro Rounded", -apple-system,
+    BlinkMacSystemFont, system-ui, sans-serif;
+  --rounded: "Onest Variable", ui-rounded, "SF Pro Rounded", -apple-system,
+    BlinkMacSystemFont, system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   --space-1: 4px;
   --space-2: 8px;
@@ -186,6 +208,11 @@
   --surface-selected: rgba(47, 107, 255, 0.12);
   --surface-inset: rgba(255, 255, 255, 0.6);
 
+  /* Liquid Glass chrome — lighter values, same roles. */
+  --glass-border: rgba(20, 30, 60, 0.12);
+  --glass-highlight: rgba(255, 255, 255, 0.75);
+  --glass-fallback: rgba(238, 236, 246, 0.94);
+
   --border: rgba(20, 30, 60, 0.1);
   --border-strong: rgba(20, 30, 60, 0.2);
 
@@ -233,6 +260,43 @@ body {
   min-height: 100svh;
   display: flex;
   flex-direction: column;
+  /* Sits above the atmospheric backdrop layer. */
+  position: relative;
+  z-index: 1;
+}
+
+/* ---------- Atmospheric backdrop ---------- */
+
+/* Decorative ink layer: colorful fluid drifting through dark water.
+ * It never receives pointer or touch events, so the editor's
+ * selection, dragging, wiring, and execution are untouched. The
+ * night atmosphere is the product default — light mode keeps the
+ * static gradient stack instead. */
+.fluid-backdrop {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* Behind every layer of the app, whatever its stacking context:
+   * the root element owns a stacking context of its own, so the
+   * backdrop can never paint over a screen. */
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  animation: fluid-in 1400ms ease-out forwards;
+}
+
+:root[data-theme="light"] .fluid-backdrop {
+  display: none;
+}
+
+@keyframes fluid-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* Readable focus everywhere (keyboard navigation). */
@@ -295,11 +359,11 @@ p {
   margin: 8px 12px 0;
   padding: var(--space-2) var(--space-3);
   border-radius: 16px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--glass-border);
   background: var(--surface);
-  -webkit-backdrop-filter: blur(22px) saturate(1.4);
-  backdrop-filter: blur(22px) saturate(1.4);
-  box-shadow: var(--shadow-soft);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-highlight);
 }
 
 /* Desktop: the rounded bar floats over the canvas so the black
@@ -358,11 +422,11 @@ p {
 
 .pane {
   background: var(--surface);
-  -webkit-backdrop-filter: blur(22px) saturate(1.4);
-  backdrop-filter: blur(22px) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-soft);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-highlight);
   min-width: 0;
   overflow: hidden;
 }
@@ -372,12 +436,15 @@ p {
   overflow: hidden;
 }
 
-/* Full-bleed black canvas pane (desktop floating layout). */
+/* Full-bleed canvas pane (desktop floating layout). The pane is a
+ * transparent frame: the board inside it carries the translucent
+ * canvas surface, so the atmospheric layer shows through exactly
+ * once instead of being filtered by two stacked translucencies. */
 @media (min-width: 768px) {
   .pane-editor {
     position: absolute;
     inset: 0;
-    background: var(--color-canvas);
+    background: transparent;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     border: none;
@@ -456,11 +523,11 @@ p {
   z-index: 10;
   padding: 6px;
   border-radius: var(--radius-full);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--glass-border);
   background: var(--surface-elevated);
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
-  box-shadow: var(--shadow-soft);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-highlight);
 }
 
 .runner-inline {
@@ -505,21 +572,28 @@ p {
   min-height: 40px;
   padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-full);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--glass-border);
   background: var(--surface-elevated);
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
   font-weight: 600;
   font-size: 14px;
-  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+  transition:
+    transform var(--transition-fast) var(--ease-out-expo),
+    background var(--transition-fast) ease,
+    border-color var(--transition-fast) ease,
+    box-shadow var(--transition-fast) ease,
+    opacity var(--transition-fast) ease;
 }
 
 .btn:hover {
   background: var(--surface-selected);
+  transform: translateY(-1px);
 }
 
 .btn:active {
-  transform: scale(0.98);
+  transform: translateY(0) scale(0.98);
 }
 
 .btn-primary {
@@ -602,10 +676,54 @@ p {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   background: var(--surface-inset);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.24);
+  transition:
+    border-color var(--transition-fast) ease,
+    box-shadow var(--transition-fast) ease,
+    background var(--transition-fast) ease;
+}
+
+.field input:hover,
+.field select:hover {
+  border-color: var(--glass-border);
+}
+
+.field input:focus,
+.field select:focus {
+  border-color: var(--accent-border);
+  background: color-mix(in srgb, var(--surface-inset) 70%, var(--accent-soft));
 }
 
 .field input::placeholder {
   color: var(--text-muted);
+}
+
+/* Inline rename inputs sit outside the labelled field layout; they
+ * share the same glass treatment so no control keeps the browser's
+ * default chrome in the dark shell. */
+.glass-input {
+  min-height: 36px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-inset);
+  color: var(--text-primary);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.24);
+  transition:
+    border-color var(--transition-fast) ease,
+    box-shadow var(--transition-fast) ease;
+}
+
+.glass-input::placeholder {
+  color: var(--text-muted);
+}
+
+.glass-input:hover {
+  border-color: var(--glass-border);
+}
+
+.glass-input:focus {
+  border-color: var(--accent-border);
 }
 
 .field-hint {
@@ -634,11 +752,24 @@ p {
   display: flex;
   align-items: center;
   gap: 4px;
+  animation: item-in var(--transition-fast) ease-out;
 }
 
 .fn-row .fn-item {
   flex: 1;
   min-width: 0;
+}
+
+/* A new list row fades in with a subtle scale. */
+@keyframes item-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .fn-rename {
@@ -656,11 +787,16 @@ p {
   background: transparent;
   text-align: left;
   font-size: 13.5px;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition:
+    background var(--transition-fast) ease,
+    border-color var(--transition-fast) ease,
+    color var(--transition-fast) ease,
+    transform var(--transition-fast) var(--ease-out-expo);
 }
 
 .fn-item:hover {
   background: var(--accent-soft);
+  transform: translateX(2px);
 }
 
 .fn-item[aria-current="true"] {
@@ -698,6 +834,10 @@ p {
   border: 1px solid var(--accent-border);
   color: var(--color-primary);
   flex: none;
+  transition:
+    background var(--transition-fast) ease,
+    border-color var(--transition-fast) ease,
+    color var(--transition-fast) ease;
 }
 
 /* ---------- Editor / canvas ---------- */
@@ -847,7 +987,9 @@ p {
   overflow: auto;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  background-color: var(--color-canvas);
+  /* Translucent canvas: the atmospheric layer reads through the
+   * sketch without dimming the ink on the blocks. */
+  background-color: color-mix(in srgb, var(--color-canvas) 78%, transparent);
   background-image: radial-gradient(circle, var(--color-dot) 1px, transparent 1px);
   background-size: 26px 26px;
   /* Canvas-only gestures: single-finger pans natively; browser
@@ -880,6 +1022,8 @@ p {
   fill: none;
   stroke: var(--color-flow);
   stroke-width: 1.5;
+  /* Selection and state changes cross-fade instead of snapping. */
+  transition: stroke var(--transition-fast) ease;
 }
 
 .edge-selected {
@@ -889,6 +1033,112 @@ p {
 .edge-preview {
   stroke: var(--color-flow-preview);
   stroke-dasharray: 6 5;
+}
+
+/* ---------- Connection stretch ---------- */
+
+/* A newly created connection draws itself in: the path is normalized
+ * with `pathLength="1"`, so one dash of the full length reveals it
+ * from source to destination without measuring anything. */
+.edge-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: edge-draw-in 110ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes edge-draw-in {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The arrowhead arrives with the end of the line: the marker lives on
+ * a copy of the path that shows nothing but its head. */
+.edge-draw-head {
+  fill: none;
+  stroke: none;
+  opacity: 0;
+  animation: edge-draw-head 110ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes edge-draw-head {
+  0%,
+  62% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* ---------- Execution flow glow ---------- */
+
+/* A luminous head travelling along a connection, in the colour of the
+ * arrow itself. The dash pattern is normalized by `pathLength="1"`,
+ * so the head travels the whole path with one short dash. */
+.edge-flow {
+  fill: none;
+  stroke: var(--color-flow);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-dasharray: 0.06 1;
+  opacity: 0;
+  animation: edge-flow-travel var(--flow-segment, 220ms)
+    cubic-bezier(0.35, 0, 0.25, 1) var(--flow-delay, 0ms) forwards;
+}
+
+.edge-flow.edge-selected {
+  stroke: var(--color-flow-selected);
+}
+
+/* The softer trail behind the head. */
+.edge-flow-trail {
+  fill: none;
+  stroke: var(--color-flow);
+  stroke-width: 9;
+  stroke-linecap: round;
+  stroke-dasharray: 0.28 1;
+  opacity: 0;
+  animation: edge-flow-travel-trail var(--flow-segment, 220ms)
+    cubic-bezier(0.35, 0, 0.25, 1) var(--flow-delay, 0ms) forwards;
+}
+
+.edge-flow-trail.edge-selected {
+  stroke: var(--color-flow-selected);
+}
+
+@keyframes edge-flow-travel {
+  0% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  72% {
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 1;
+    opacity: 0;
+  }
+}
+
+@keyframes edge-flow-travel-trail {
+  0% {
+    stroke-dashoffset: -0.28;
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.32;
+  }
+  72% {
+    opacity: 0.32;
+  }
+  100% {
+    stroke-dashoffset: 0.72;
+    opacity: 0;
+  }
 }
 
 .marker-flow {
@@ -909,6 +1159,12 @@ p {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  /* Selection, error and connect states cross-fade; the block itself
+   * is never moved by a transition (dragging writes left/top). */
+  transition:
+    border-color var(--transition-fast) ease,
+    box-shadow var(--transition-fast) ease,
+    opacity var(--transition-fast) ease;
 }
 
 .vblock:active {
@@ -969,7 +1225,10 @@ p {
   border-radius: 50%;
   background: var(--color-canvas);
   border: 2px solid var(--color-port-in);
-  transition: transform 120ms ease, background 120ms ease;
+  transition:
+    transform var(--transition-fast) var(--ease-out-expo),
+    background var(--transition-fast) ease,
+    border-color var(--transition-fast) ease;
 }
 
 .vport-left {
@@ -1071,6 +1330,27 @@ p {
   align-items: center;
   gap: var(--space-2);
   min-height: 36px;
+  transition: color var(--transition-fast) ease;
+}
+
+.lib-category > summary:hover {
+  color: var(--text-secondary);
+}
+
+/* Expanding a section unfolds its list instead of snapping it open. */
+.lib-category[open] .lib-flat {
+  animation: fold-in var(--transition-fast) ease-out;
+}
+
+@keyframes fold-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .lib-category > summary::-webkit-details-marker {
@@ -1106,10 +1386,18 @@ p {
   border: none;
   border-radius: var(--radius-sm);
   color: var(--text-primary);
+  transition:
+    color var(--transition-fast) ease,
+    background var(--transition-fast) ease,
+    transform var(--transition-fast) var(--ease-out-expo);
 }
 
 button.lib-item {
   cursor: pointer;
+}
+
+button.lib-item:hover:not([disabled]) {
+  transform: translateX(2px);
 }
 
 button.lib-item:hover:not([disabled]) .lib-name {
@@ -1136,6 +1424,7 @@ button.lib-item[disabled] {
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.01em;
+  transition: color var(--transition-fast) ease;
 }
 
 /* Ghost following the cursor during a library drag. Portaled to the
@@ -1156,6 +1445,18 @@ button.lib-item[disabled] {
   pointer-events: none;
   white-space: nowrap;
   transform: translate(-50%, -50%);
+  animation: ghost-in var(--transition-fast) ease-out;
+}
+
+@keyframes ghost-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
 }
 
 .lib-ghost .lib-name {
@@ -1179,6 +1480,7 @@ button.lib-item[disabled] {
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   font-size: 13.5px;
+  animation: item-in var(--transition-fast) ease-out;
 }
 
 .props > div + div {
@@ -1241,6 +1543,7 @@ button.lib-item[disabled] {
   overflow-wrap: anywhere;
   max-height: 240px;
   overflow: auto;
+  animation: notice-in var(--transition-fast) ease-out;
 }
 
 .notice {
@@ -1250,6 +1553,20 @@ button.lib-item[disabled] {
   background: var(--surface-elevated);
   font-size: 14px;
   color: var(--text-secondary);
+  animation: notice-in var(--transition-fast) ease-out;
+}
+
+/* Notices and printed output arrive with the interface's standard
+ * 150ms settle. */
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .notice-error {
@@ -1293,6 +1610,10 @@ button.lib-item[disabled] {
   border: 1px solid var(--border);
   background: var(--surface-inset);
   white-space: nowrap;
+  transition:
+    background var(--transition-fast) ease,
+    border-color var(--transition-fast) ease,
+    color var(--transition-fast) ease;
 }
 
 .status-dot i {
@@ -1301,6 +1622,7 @@ button.lib-item[disabled] {
   border-radius: 50%;
   background: var(--warning);
   flex: none;
+  transition: background var(--transition-fast) ease;
 }
 
 .status-dot[data-state="ready"] i {
@@ -1356,6 +1678,16 @@ button.lib-item[disabled] {
   background: color-mix(in srgb, var(--color-bg) 60%, transparent);
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
+  animation: fade-in var(--transition-fast) ease-out;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .sheet {
@@ -1369,10 +1701,22 @@ button.lib-item[disabled] {
   background: var(--surface-elevated);
   -webkit-backdrop-filter: blur(28px) saturate(1.5);
   backdrop-filter: blur(28px) saturate(1.5);
-  border-top: 1px solid var(--border-strong);
+  border-top: 1px solid var(--glass-border);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  box-shadow: var(--shadow-lift);
+  box-shadow: var(--shadow-lift), inset 0 1px 0 var(--glass-highlight);
   padding: var(--space-4) var(--space-4) var(--space-6);
+  animation: sheet-in var(--transition-fast) var(--ease-out-expo);
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .sheet-grip {
@@ -1394,9 +1738,21 @@ button.lib-item[disabled] {
   background: var(--surface-elevated);
   -webkit-backdrop-filter: blur(28px) saturate(1.5);
   backdrop-filter: blur(28px) saturate(1.5);
-  border-right: 1px solid var(--border-strong);
-  box-shadow: var(--shadow-lift);
+  border-right: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-lift), inset 1px 0 0 var(--glass-highlight);
   padding: var(--space-4);
+  animation: drawer-in var(--transition-fast) var(--ease-out-expo);
+}
+
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .only-compact {
@@ -1418,15 +1774,33 @@ button.lib-item[disabled] {
   padding: var(--space-6);
   border-radius: var(--radius-lg);
   background: var(--surface);
-  -webkit-backdrop-filter: blur(22px) saturate(1.4);
-  backdrop-filter: blur(22px) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow-soft);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-highlight);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   text-align: center;
   align-items: center;
+}
+
+/* Engines without backdrop blur get a denser translucent fill: the
+ * separation survives, the unsupported effect is simply dropped. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .appbar,
+  .pane,
+  .float-pill,
+  .drawer,
+  .sheet,
+  .boot-card,
+  .lib-ghost {
+    background: var(--glass-fallback);
+  }
+
+  .btn:not(.btn-primary):not(.btn-panel):not(.btn-ghost) {
+    background: var(--glass-fallback);
+  }
 }
 
 /* ---------- Responsive ---------- */
@@ -1446,7 +1820,7 @@ button.lib-item[disabled] {
   }
   .pane-editor {
     position: static;
-    background: var(--color-canvas);
+    background: transparent;
     border: none;
     border-radius: 0;
     box-shadow: none;
@@ -1491,23 +1865,132 @@ button.lib-item[disabled] {
 
 /* ---------- Motion ---------- */
 
+/* Coordinated entrance. The sequence follows the screen hierarchy:
+ * toolbar → status → heading → supporting copy → primary action →
+ * secondary metadata. The `translate` property is used instead of
+ * `transform` so elements that are centred with a transform (the
+ * canvas toolbar) keep their position while they fade in. */
+@keyframes enter-up {
+  from {
+    opacity: 0;
+    translate: 0 10px;
+  }
+  to {
+    opacity: 1;
+    translate: none;
+  }
+}
+
+@keyframes enter-down {
+  from {
+    opacity: 0;
+    translate: 0 -10px;
+  }
+  to {
+    opacity: 1;
+    translate: none;
+  }
+}
+
+@keyframes enter-panel {
+  from {
+    opacity: 0;
+    translate: 0 14px;
+    scale: 0.99;
+  }
+  to {
+    opacity: 1;
+    translate: none;
+    scale: 1;
+  }
+}
+
+.enter-up {
+  animation: enter-up var(--transition-entrance) var(--ease-out-expo) both;
+}
+
+.enter-down {
+  animation: enter-down var(--transition-entrance) var(--ease-out-expo) both;
+}
+
+.enter-panel {
+  animation: enter-panel var(--transition-fast) var(--ease-out-expo) both;
+}
+
+.enter-delay-toolbar {
+  animation-delay: 150ms;
+}
+
+.enter-delay-status {
+  animation-delay: 320ms;
+}
+
+.enter-delay-heading {
+  animation-delay: 480ms;
+}
+
+.enter-delay-action {
+  animation-delay: 1450ms;
+}
+
+.enter-delay-meta {
+  animation-delay: 1650ms;
+}
+
+/* A focused control must never be hidden by an entrance animation:
+ * keyboard users reach it before the sequence has finished. */
+.enter-up:focus-visible,
+.enter-down:focus-visible,
+.enter-panel:focus-visible {
+  animation: none;
+  opacity: 1;
+  translate: none;
+  scale: 1;
+}
+
+/* Word-by-word reveal for presentation text. The full text is in the
+ * DOM from the first paint, so assistive technology is unaffected. */
+.reveal-words {
+  display: inline;
+}
+
+.reveal-word {
+  display: inline-block;
+  opacity: 0;
+  animation: reveal-word 620ms var(--ease-out-expo) both;
+}
+
+@keyframes reveal-word {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+  to {
+    opacity: 1;
+    translate: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     transition-duration: 0.01ms !important;
   }
 }
 
 .vblock {
-  animation: rise 180ms ease;
+  animation: rise var(--transition-fast) var(--ease-out-expo);
 }
 
+/* A block that appears fades in with a subtle scale — the same 150ms
+ * vocabulary the rest of the interface uses. */
 @keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(6px) scale(0.97);
   }
   to {
     opacity: 1;

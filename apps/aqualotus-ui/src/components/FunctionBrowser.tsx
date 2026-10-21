@@ -48,6 +48,7 @@ export default function FunctionBrowser(
               >
                 <input
                   aria-label="New function name"
+                  className="glass-input"
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   autoComplete="off"

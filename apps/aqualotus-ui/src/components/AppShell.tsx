@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useInheritPosition } from "../hooks/useInheritPosition";
+import { useFlowGlow } from "../hooks/useFlowGlow";
 import { useLayout } from "../hooks/useLayout";
 import { useTheme } from "../hooks/useTheme";
 import type { RuntimeStatus } from "../hooks/useRuntime";
@@ -14,6 +15,7 @@ import { LAYOUT_ROW_Y, LAYOUT_START_X } from "../lib/layout";
 import type { CommandId, FunctionId, RunResult } from "../lib/optilotus";
 import Inspector from "./Inspector";
 import ProjectNavigator from "./ProjectNavigator";
+import RevealText from "./RevealText";
 import Runner from "./Runner";
 import VisualEditor from "./VisualEditor";
 import { breadcrumbPath } from "../lib/workspace";
@@ -115,6 +117,9 @@ export default function AppShell(props: AppShellProps): ReactElement {
   // exact result until a new run arrives. Without this, auto-opening the
   // panel on every run would make the ▾ collapse button a no-op.
   const [shelvedRun, setShelvedRun] = useState<RunResult | null>(null);
+  // Execution-flow visualisation: the run action freezes the executed
+  // chain and the canvas animates it. The engine call is untouched.
+  const { flow, startFlow } = useFlowGlow(program);
 
   const fid = program.selectedId;
   const commandIds = useMemo(
@@ -227,6 +232,15 @@ export default function AppShell(props: AppShellProps): ReactElement {
     props.undoLabel !== null ? `Undo ${props.undoLabel}` : "Nothing to undo";
   const redoTitle =
     props.redoLabel !== null ? `Redo ${props.redoLabel}` : "Nothing to redo";
+
+  /**
+   * Run the program and start the flow visualisation. The engine call
+   * is unchanged — the flow only reads the graph it already produced.
+   */
+  const runAll = useCallback((): void => {
+    startFlow();
+    props.onRun();
+  }, [props, startFlow]);
 
   /** Deleting the selected block closes the inspector with it. */
   const deleteBlock = useCallback(
@@ -591,7 +605,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
         busy={program.busy}
         canRun={fid !== null}
         onShowBlock={showBlock}
-        onRun={props.onRun}
+        onRun={runAll}
       />
     </div>
   );
@@ -633,7 +647,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
 
   return (
     <div className="shell">
-      <header className="appbar">
+      <header className="appbar enter-down enter-delay-toolbar">
         {compact ? (
           <button
             type="button"
@@ -657,14 +671,20 @@ export default function AppShell(props: AppShellProps): ReactElement {
         <div style={{ minWidth: 0 }}>
           <div className="appbar-title">Aqualotus</div>
           <div className="appbar-sub">
-            {program.selected !== null
-              ? breadcrumbPath(program.selected.name)
-              : "Visual programming"}
+            <RevealText
+              text={
+                program.selected !== null
+                  ? breadcrumbPath(program.selected.name)
+                  : "Visual programming"
+              }
+              delay={1150}
+              stagger={45}
+            />
           </div>
         </div>
         <div className="appbar-spacer" />
         <span
-          className="status-dot"
+          className="status-dot enter-up enter-delay-status"
           data-state={runtime.phase === "ready" ? "ready" : "error"}
           role="status"
           title={
@@ -692,9 +712,9 @@ export default function AppShell(props: AppShellProps): ReactElement {
             </button>
             <button
               type="button"
-              className="btn btn-primary btn-sm"
+              className="btn btn-primary btn-sm enter-up enter-delay-action"
               disabled={program.busy || program.running || fid === null}
-              onClick={props.onRun}
+              onClick={runAll}
               aria-label="Run program"
             >
               ▶
@@ -713,9 +733,9 @@ export default function AppShell(props: AppShellProps): ReactElement {
             </button>
             <button
               type="button"
-              className="btn btn-primary btn-sm"
+              className="btn btn-primary btn-sm enter-up enter-delay-action"
               disabled={program.busy || program.running || fid === null}
-              onClick={props.onRun}
+              onClick={runAll}
               title="Run (Ctrl/Cmd + Enter)"
             >
               ▶ Run
@@ -729,7 +749,9 @@ export default function AppShell(props: AppShellProps): ReactElement {
           <div className="pane-head editor-head">
             {program.selected !== null ? (
               <div className="fn-header">
-                <h2>{program.selected.name}()</h2>
+                <h2 className="enter-up enter-delay-heading">
+                  {program.selected.name}()
+                </h2>
                 {program.selected.isMain ? (
                   <span className="main-badge">MAIN</span>
                 ) : null}
@@ -765,6 +787,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
                 }}
                 onRegisterDrop={registerDrop}
                 onRegisterZoom={registerZoom}
+                flow={flow}
                 toolbarExtra={undoRedoTheme("")}
                 onRequestLibrary={() => {
                   if (compact) {
@@ -786,12 +809,18 @@ export default function AppShell(props: AppShellProps): ReactElement {
         {compact ? null : (
           <>
             {leftOpen ? (
-              <aside className="pane float-left" aria-label="Library and functions">
+              <aside
+                className="pane float-left enter-panel"
+                aria-label="Library and functions"
+              >
                 {leftPanel}
               </aside>
             ) : null}
             {inspOpen ? (
-              <aside className="pane float-right" aria-label="Inspector">
+              <aside
+                className="pane float-right enter-panel"
+                aria-label="Inspector"
+              >
                 <div className="pane-head float-head">
                   <h2 className="pane-title">Inspector</h2>
                   <button
@@ -807,7 +836,10 @@ export default function AppShell(props: AppShellProps): ReactElement {
               </aside>
             ) : null}
             {runnerVisible ? (
-              <section className="pane float-runner" aria-label="Runner">
+              <section
+                className="pane float-runner enter-panel"
+                aria-label="Runner"
+              >
                 <div className="pane-head float-head">
                   <h2 className="pane-title">Runner</h2>
                   <button
@@ -827,7 +859,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
             ) : (
               <button
                 type="button"
-                className="float-pill"
+                className="float-pill enter-up enter-delay-meta"
                 onClick={() => setRunOpen(true)}
                 aria-label="Expand runner"
               >

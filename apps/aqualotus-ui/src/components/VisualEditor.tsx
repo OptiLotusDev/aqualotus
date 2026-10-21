@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -14,6 +15,7 @@ import type {
   FunctionSummary,
 } from "../lib/optilotus";
 import { edgeEnds, edgePath, type BlockSide } from "../lib/graph";
+import type { FlowState, FlowStyle } from "../lib/flow";
 import type { LayoutMap, Pos } from "../lib/layout";
 import {
   LAYOUT_ROW_Y,
@@ -41,6 +43,7 @@ import {
 import { isTauriShell } from "../lib/env";
 import VisualBlock from "./VisualBlock";
 import PackageContainer from "./PackageContainer";
+import RevealText from "./RevealText";
 import StructContainer from "./StructContainer";
 import FunctionContainer from "./FunctionContainer";
 
@@ -85,6 +88,8 @@ interface VisualEditorProps {
   readonly onZoomSettled?: (before: number, after: number) => void;
   /** Compact-only extra toolbar controls (desktop keeps them in the appbar). */
   readonly toolbarExtra?: ReactNode;
+  /** Running execution-flow visualisation (presentation only). */
+  readonly flow?: FlowState | null;
 }
 
 interface Size {
@@ -122,6 +127,23 @@ const FUNC_MIN_WIDTH = 600;
 const FUNC_MIN_HEIGHT = 200;
 const FUNC_GAP = 28;
 const BLOCK_MIN_Y = 36;
+
+/** Stretch animation of a freshly created connection, in milliseconds. */
+const EDGE_DRAW_MS = 110;
+
+/** Shared empty set for the "currently drawing" edges. */
+const EMPTY_EDGE_KEYS: ReadonlySet<string> = new Set<string>();
+
+/** Style of one glow path: when it starts and how long it travels. */
+function glowStyle(glow: {
+  readonly delayMs: number;
+  readonly segmentMs: number;
+}): FlowStyle {
+  return {
+    "--flow-delay": `${glow.delayMs}ms`,
+    "--flow-segment": `${glow.segmentMs}ms`,
+  };
+}
 
 function toCanvas(
   board: HTMLDivElement,
@@ -175,6 +197,7 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     onRegisterZoom,
     onZoomSettled,
     toolbarExtra,
+    flow = null,
   } = props;
 
   const boardRef = useRef<HTMLDivElement | null>(null);
@@ -573,6 +596,61 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     selectedFunctionId === null
       ? 0
       : (commandsByFunction[selectedFunctionId]?.length ?? 0);
+
+  // New connections stretch into place (a fast 110ms draw). The set
+  // holds the edges that were not on screen before, so the animation
+  // runs once per created connection and never on load.
+  const [drawing, setDrawing] = useState<ReadonlySet<string>>(EMPTY_EDGE_KEYS);
+  const knownEdges = useRef<ReadonlySet<string> | null>(null);
+  const drawTimer = useRef<number | null>(null);
+  useEffect(() => {
+    const keys = new Set(edges.map((edge) => edge.key));
+    const known = knownEdges.current;
+    knownEdges.current = keys;
+    if (known === null) return;
+    const added = [...keys].filter((key) => !known.has(key));
+    if (added.length === 0) return;
+    setDrawing(new Set(added));
+    if (drawTimer.current !== null) window.clearTimeout(drawTimer.current);
+    drawTimer.current = window.setTimeout(() => {
+      drawTimer.current = null;
+      setDrawing(EMPTY_EDGE_KEYS);
+    }, EDGE_DRAW_MS + 80);
+  }, [edges]);
+  useEffect(
+    () => () => {
+      if (drawTimer.current !== null) window.clearTimeout(drawTimer.current);
+    },
+    [],
+  );
+
+  // Glow paths of the running flow, matched to the edges on screen.
+  // A connection that no longer exists (edited mid-run) simply has no
+  // glow: the visualisation never invents geometry.
+  const flowPaths = useMemo(() => {
+    if (flow === null || flow === undefined) return [];
+    const byKey = new Map(edges.map((edge) => [edge.key, edge]));
+    const out: {
+      key: string;
+      d: string;
+      selected: boolean;
+      delayMs: number;
+      segmentMs: number;
+    }[] = [];
+    flow.edges.forEach((edge, index) => {
+      const drawn = byKey.get(`${edge.fid}:${edge.from}`);
+      if (drawn === undefined) return;
+      out.push({
+        key: `flow-${drawn.key}`,
+        d: drawn.d,
+        selected:
+          edge.from === selectedCommandId && edge.fid === selectedFunctionId,
+        delayMs: index * flow.staggerMs,
+        segmentMs: flow.segmentMs,
+      });
+    });
+    return out;
+  }, [edges, flow, selectedCommandId, selectedFunctionId]);
 
   // Block geometry via ResizeObserver subscription (Issue 12): sizes
   // update on observed resize events, never as a set-state-in-layout
@@ -1325,7 +1403,11 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
 
   return (
     <div className="canvas-wrap">
-      <div className="canvas-toolbar" role="toolbar" aria-label="Canvas view">
+      <div
+        className="canvas-toolbar enter-down enter-delay-heading"
+        role="toolbar"
+        aria-label="Canvas view"
+      >
         <span className="canvas-title" title="Package / Struct / Function">
           <span className="crumb">{PACKAGE_NAME}</span>
           <span className="crumb-sep" aria-hidden="true">/</span>
@@ -1335,7 +1417,7 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
             {selectedFunc !== null ? `${selectedFunc.name}()` : "—"}
           </span>
           {selectedFunc?.isMain ? <span className="main-badge">MAIN</span> : null}
-          <span className="cmd-count">
+          <span className="cmd-count enter-up enter-delay-meta">
             {selectedCount} {selectedCount === 1 ? "block" : "blocks"}
           </span>
           {culledBlocks > 0 ? (
@@ -1444,18 +1526,52 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                     <path d="M 0 1 L 9 5 L 0 9 z" className="marker-flow" />
                   </marker>
                 </defs>
-                {edges.map((edge) => (
-                  <path
-                    key={edge.key}
-                    d={edge.d}
-                    data-fid={edge.fid}
-                    markerEnd="url(#arrow-flow)"
-                    className={
-                      edge.from === selectedCommandId && edge.fid === selectedFunctionId
-                        ? "edge edge-selected"
-                        : "edge"
-                    }
-                  />
+                {edges.map((edge) => {
+                  const isSelected =
+                    edge.from === selectedCommandId &&
+                    edge.fid === selectedFunctionId;
+                  const isDrawing = drawing.has(edge.key);
+                  return (
+                    <Fragment key={edge.key}>
+                      <path
+                        d={edge.d}
+                        data-fid={edge.fid}
+                        pathLength={1}
+                        markerEnd={isDrawing ? undefined : "url(#arrow-flow)"}
+                        className={`${isSelected ? "edge edge-selected" : "edge"}${
+                          isDrawing ? " edge-draw" : ""
+                        }`}
+                      />
+                      {isDrawing ? (
+                        <path
+                          d={edge.d}
+                          pathLength={1}
+                          markerEnd="url(#arrow-flow)"
+                          className="edge-draw-head"
+                        />
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+                {flowPaths.map((glow) => (
+                  <Fragment key={glow.key}>
+                    <path
+                      d={glow.d}
+                      pathLength={1}
+                      className={`edge-flow-trail${
+                        glow.selected ? " edge-selected" : ""
+                      }`}
+                      style={glowStyle(glow)}
+                    />
+                    <path
+                      d={glow.d}
+                      pathLength={1}
+                      className={`edge-flow${
+                        glow.selected ? " edge-selected" : ""
+                      }`}
+                      style={glowStyle(glow)}
+                    />
+                  </Fragment>
                 ))}
                 {preview !== null
                   ? (() => {
@@ -1506,18 +1622,52 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                   </marker>
                 </defs>
                 <g transform={`translate(${-viewport.x} ${-viewport.y})`}>
-                  {edges.map((edge) => (
-                    <path
-                      key={edge.key}
-                      d={edge.d}
-                      data-fid={edge.fid}
-                      markerEnd="url(#arrow-flow)"
-                      className={
-                        edge.from === selectedCommandId && edge.fid === selectedFunctionId
-                          ? "edge edge-selected"
-                          : "edge"
-                      }
-                    />
+                  {edges.map((edge) => {
+                    const isSelected =
+                      edge.from === selectedCommandId &&
+                      edge.fid === selectedFunctionId;
+                    const isDrawing = drawing.has(edge.key);
+                    return (
+                      <Fragment key={edge.key}>
+                        <path
+                          d={edge.d}
+                          data-fid={edge.fid}
+                          pathLength={1}
+                          markerEnd={isDrawing ? undefined : "url(#arrow-flow)"}
+                          className={`${
+                            isSelected ? "edge edge-selected" : "edge"
+                          }${isDrawing ? " edge-draw" : ""}`}
+                        />
+                        {isDrawing ? (
+                          <path
+                            d={edge.d}
+                            pathLength={1}
+                            markerEnd="url(#arrow-flow)"
+                            className="edge-draw-head"
+                          />
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
+                  {flowPaths.map((glow) => (
+                    <Fragment key={glow.key}>
+                      <path
+                        d={glow.d}
+                        pathLength={1}
+                        className={`edge-flow-trail${
+                          glow.selected ? " edge-selected" : ""
+                        }`}
+                        style={glowStyle(glow)}
+                      />
+                      <path
+                        d={glow.d}
+                        pathLength={1}
+                        className={`edge-flow${
+                          glow.selected ? " edge-selected" : ""
+                        }`}
+                        style={glowStyle(glow)}
+                      />
+                    </Fragment>
                   ))}
                   {preview !== null
                     ? (() => {
@@ -1652,11 +1802,14 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
           </div>
         </div>
         {emptyWorkspace ? (
-          <div className="canvas-empty">
+          <div className="canvas-empty enter-up enter-delay-heading">
             <strong>No blocks yet</strong>
             <span>
-              Drag a block from the library to start building{" "}
-              {breadcrumbPath(selectedFunc?.name ?? null)}.
+              <RevealText
+                text={`Drag a block from the library to start building ${breadcrumbPath(selectedFunc?.name ?? null)}.`}
+                delay={700}
+                stagger={28}
+              />
             </span>
             <button
               type="button"
