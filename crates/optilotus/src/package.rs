@@ -444,6 +444,26 @@ fn narrow_int(raw: i128, ty: Type) -> Result<Value, ExprFail> {
     }
 }
 
+/// Which branch of an `if` command the caller wants to target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IfSide {
+    /// The `then_body` branch of an `if`.
+    Then,
+    /// The `else_body` branch of an `if`.
+    Else,
+}
+
+impl IfSide {
+    /// Wire spelling of the side (`"then"` / `"else"`), used only for
+    /// serialisation / display round-trips.
+    pub fn tag(self) -> &'static str {
+        match self {
+            IfSide::Then => "then",
+            IfSide::Else => "else",
+        }
+    }
+}
+
 impl Package {
     /// Empty package with a single empty `main`.
     pub fn new() -> Self {
@@ -1233,6 +1253,104 @@ impl Package {
             },
         );
         Ok(head_id)
+    }
+
+    /// Append a freshly created command to the end of an `if` branch.
+    ///
+    /// The new command becomes the new head of the branch (its `next` is
+    /// chained off the previous tail), and the `if`'s summary is refreshed
+    /// so the UI keeps seeing the updated branch list. The `if`'s own
+    /// `next` (the join after the whole `if`/`else`) is untouched.
+    pub fn if_append(
+        &mut self,
+        fid: FunctionId,
+        cmd_id: CommandId,
+        side: IfSide,
+        new_id: CommandId,
+    ) -> Result<(), PackageError> {
+        // Step 1: get the tail of the target branch (immutable borrow,
+        // released when the block ends).
+        let tail_id = {
+            let function = self
+                .functions
+                .get(&fid)
+                .ok_or(PackageError::UnknownFunction(fid))?;
+            let command = function
+                .find_command(cmd_id)
+                .ok_or(PackageError::UnknownCommand(cmd_id))?;
+            match &command.op {
+                Op::If { then_body, else_body, .. } => match side {
+                    IfSide::Then => then_body.last().copied(),
+                    IfSide::Else => else_body.as_ref().and_then(|v| v.last()).copied(),
+                },
+                _ => {
+                    return Err(PackageError::InvalidCommand(
+                        "expected an `if` command".to_string(),
+                    ))
+                }
+            }
+        };
+
+        // Step 2: chain `new_id` off the current tail (mutable borrow,
+        // released when the block ends).
+        {
+            let function = self
+                .functions
+                .get_mut(&fid)
+                .ok_or(PackageError::UnknownFunction(fid))?;
+            if let Some(t) = tail_id {
+                if let Some(new_cmd) = function.find_command_mut(new_id) {
+                    new_cmd.next = Some(t);
+                }
+            }
+        }
+
+        // Step 3: push `new_id` to the branch and clone the updated list
+        // (mutable borrow, released when the block ends).
+        let branch_clone = {
+            let function = self
+                .functions
+                .get_mut(&fid)
+                .ok_or(PackageError::UnknownFunction(fid))?;
+            let command = function
+                .find_command_mut(cmd_id)
+                .ok_or(PackageError::UnknownCommand(cmd_id))?;
+            let Op::If {
+                then_body,
+                else_body,
+                ..
+            } = &mut command.op
+            else {
+                return Err(PackageError::InvalidCommand(
+                    "expected an `if` command".to_string(),
+                ));
+            };
+            let branch = match side {
+                IfSide::Then => then_body,
+                IfSide::Else => (*else_body)
+                    .as_mut()
+                    .ok_or(PackageError::InvalidCommand(
+                        "targeted `if` branch is empty".to_string(),
+                    ))?,
+            };
+            branch.push(new_id);
+            branch.clone()
+        };
+
+        // Step 4: refresh the `if`'s summary in the meta map so the UI
+        // sees the enlarged branch list on the next `list_commands`.
+        if let Some(meta) = self.meta.get_mut(&fid) {
+            if let Some(summary) = meta.get_mut(&cmd_id) {
+                let mut updated = summary.clone();
+                match side {
+                    IfSide::Then => updated.then_body = Some(branch_clone),
+                    IfSide::Else => updated.else_body = Some(branch_clone),
+                }
+                *summary = updated;
+            }
+        }
+
+        Ok(())
     }
 
     // ------------------------------------------------------------------

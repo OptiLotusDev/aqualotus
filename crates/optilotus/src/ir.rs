@@ -44,6 +44,11 @@ impl Function {
     pub fn find_command(&self, id: CommandId) -> Option<&Command> {
         self.commands.iter().find(|c| c.id == id)
     }
+
+    /// Mutable look-up of a command by id.
+    pub fn find_command_mut(&mut self, id: CommandId) -> Option<&mut Command> {
+        self.commands.iter_mut().find(|c| c.id == id)
+    }
 }
 
 /// One control node: data in/out via `ValueId`, control out via `next`.
