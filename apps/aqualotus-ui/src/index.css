@@ -1586,6 +1586,42 @@ p {
   display: none;
 }
 
+/* If block: taller than the rest so the two branch ports read clearly. */
+.vblock[data-kind="if"] {
+  min-height: 156px;
+}
+
+/* Port labels: tiny "true"/"false" tags beside the if branch outputs. */
+.vport-label {
+  position: absolute;
+  right: 4px;
+  width: 36px;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.85;
+  transition: opacity var(--transition-fast) var(--ease-out-expo);
+  pointer-events: none;
+  user-select: none;
+}
+.vblock[data-kind="if"] .vport-label {
+  color: var(--neon-amber);
+}
+.vblock[data-connect-from="true"] .vport-label {
+  opacity: 1;
+}
+
+.vport-label-then {
+  top: 25%;
+  margin-top: -6px;
+}
+.vport-label-else {
+  top: 75%;
+  margin-top: -6px;
+}
+
 /* Library category dashes: toolbox chrome aids, not canvas semantics.
  * Variables live at function level (blue); Output prints values
  * (data green); Program holds toolbox actions (restrained violet). */

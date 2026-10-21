@@ -91,11 +91,12 @@ export function summaryToDraft(cmd: CommandSummary): CommandDraft {
     case "return":
       return { kind: "return", expr: cmd.expr ?? "" };
     case "if":
-      // Branch bodies are stored as raw command ids; a draft carries
-      // specs. The bridge does not expose a body-id → spec projection,
-      // so an `if` cannot be faithfully rebuilt here. Show the condition
-      // read-only and keep branches empty; Apply is disabled to avoid
-      // corrupting the block.
+      // Branch bodies are stored as raw command ids, so a draft never
+      // replays them (then/else stay empty). The condition here is the
+      // raw summary value (a temp id); the Inspector overlays the real
+      // expression via `ifConditionText` before showing it, and editing
+      // is routed through `if_set_condition` in place so bodies are
+      // never reconstructed.
       return {
         kind: "if",
         condition: cmd.condition !== undefined ? String(cmd.condition) : "",

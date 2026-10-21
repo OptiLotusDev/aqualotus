@@ -67,6 +67,7 @@ interface VisualEditorProps {
     sourceId: CommandId,
     targetId: CommandId | null,
     where: "after" | "before" | "end",
+    side?: BlockSide,
   ) => boolean;
   readonly onMoveBlock: (
     fid: FunctionId,
@@ -583,6 +584,48 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
             fid: fn.id,
             d: edgePath(ends.x1, ends.y1, ends.x2, ends.y2, ends.horizontal),
           });
+        }
+
+        // Branch edges: only the if block's then/else port → branch head
+        // wire. Branch chains themselves (body[i] → body[i+1]) are real
+        // `next` pointers, so the generic next-edges loop above already
+        // draws them — the engine chains forward tail.next = appended.
+        for (const cmd of cmds) {
+          if (cmd.kind !== "if") continue;
+          const cmdIndex = byId.get(cmd.id) ?? 0;
+          const origin = blockWorld(fn.id, cmd, cmdIndex);
+          const size = sizes.get(`${fn.id}:${cmd.id}`) ?? FALLBACK_SIZE;
+          const ox = origin.x + size.w;
+
+          const addBranch = (
+            side: "then" | "else",
+            body: readonly number[] | null | undefined,
+          ): void => {
+            if (!body || body.length === 0) return;
+            const oy =
+              side === "then"
+                ? origin.y + size.h * 0.25
+                : origin.y + size.h * 0.75;
+            // if block port → first body command
+            const firstId = body[0];
+            const firstIndex = byId.get(firstId);
+            if (firstIndex !== undefined) {
+              const first = cmds[firstIndex];
+              if (first) {
+                const b = blockWorld(fn.id, first, firstIndex);
+                const sb = sizes.get(`${fn.id}:${first.id}`) ?? FALLBACK_SIZE;
+                out.push({
+                  key: `${fn.id}:branch:${side}:${cmd.id}:head`,
+                  from: cmd.id,
+                  fid: fn.id,
+                  d: edgePath(ox, oy, b.x, b.y + sb.h / 2, true),
+                });
+              }
+            }
+          };
+
+          addBranch("then", cmd.then_body ?? null);
+          addBranch("else", cmd.else_body ?? null);
         }
       }
       return out;
@@ -1259,7 +1302,7 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
             : null;
       if (block === null) {
         if (movedRef.current) {
-          const applied = onReconnect(gesture.fid, gesture.sourceId, null, "end");
+          const applied = onReconnect(gesture.fid, gesture.sourceId, null, "end", gesture.side);
           if (!applied) flashHint("That block is already last.");
         }
       } else {
@@ -1284,6 +1327,7 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
               gesture.sourceId,
               targetId,
               inPort !== undefined ? "before" : "after",
+              gesture.side,
             );
             if (!applied) flashHint("Those blocks are already connected.");
           }
@@ -1606,6 +1650,7 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                       return (
                         <path
                           d={edgePath(ox, oy, preview.x, preview.y, true)}
+                          markerEnd="url(#arrow-flow)"
                           className="edge edge-preview"
                         />
                       );
@@ -1707,6 +1752,7 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                         return (
                           <path
                             d={edgePath(ox, oy, preview.x, preview.y, true)}
+                            markerEnd="url(#arrow-flow)"
                             className="edge edge-preview"
                           />
                         );

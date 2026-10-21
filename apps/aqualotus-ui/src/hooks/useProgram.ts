@@ -18,6 +18,9 @@ import {
   optilotus_deleteFunction,
   optilotus_getFunction,
   optilotus_if,
+  optilotus_if_append,
+  optilotus_if_condition,
+  optilotus_if_set_condition,
   optilotus_input,
   optilotus_listCommands,
   optilotus_listFunctions,
@@ -211,6 +214,20 @@ export function useProgram(
   ) => void;
   deleteCommand: (fid: FunctionId, cmd: CommandId) => void;
   applyLinks: (fid: FunctionId, plan: LinkPlan) => void;
+  /**
+   * Append an existing block to an `if` branch (then/else port wiring).
+   * The engine owns branch membership; undo rewires the `next` edges
+   * captured before/after but branch membership itself stays — the
+   * engine exposes no branch-list reverse operation yet.
+   */
+  applyIfAppend: (
+    fid: FunctionId,
+    ifId: CommandId,
+    branch: "then" | "else",
+    targetId: CommandId,
+  ) => boolean;
+  /** The expression an `if`'s condition was built from (null on error). */
+  ifConditionText: (fid: FunctionId, ifId: CommandId) => string | null;
   clearEntry: (fid: FunctionId) => void;
   clearPackage: () => void;
   run: () => void;
@@ -960,6 +977,59 @@ export function useProgram(
           commandErrorId: null,
           recoveryVar: null,
         }));
+        // An `if` Apply must never go through delete + recreate: the
+        // branch bodies hold raw command ids a reconstruction cannot
+        // preserve, so editing rewrites only the condition expression in
+        // place (the engine keeps branches and linkage as they are).
+        if (draft.kind === "if") {
+          const previous = optilotus_if_condition(fid, oldId);
+          if (isOptilotusError(previous)) {
+            setSnapshot((prev) => failCommand(prev, previous));
+            return;
+          }
+          // No-op Apply: the trimmed condition text matches.
+          const expr = draft.condition.trim();
+          if (expr === previous.expr.trim()) {
+            setSnapshot((prev) => ({ ...prev, busy: false }));
+            return;
+          }
+          const applied = optilotus_if_set_condition(fid, oldId, expr);
+          if (isOptilotusError(applied)) {
+            setSnapshot((prev) => failCommand(prev, applied));
+            return;
+          }
+          load(fid);
+          const beforeExpr = previous.expr;
+          const afterExpr = expr;
+          pushHistory({
+            label: "Edit if condition",
+            undo: () => {
+              setSnapshot((prev) => ({ ...prev, busy: true }));
+              const id = remapRef.current.resolve(oldId);
+              const back = optilotus_if_set_condition(fid, id, beforeExpr);
+              if (isOptilotusError(back)) {
+                setSnapshot((prev) => failCommand(prev, back));
+                load(fid);
+                return false;
+              }
+              load(fid);
+              return true;
+            },
+            redo: () => {
+              setSnapshot((prev) => ({ ...prev, busy: true }));
+              const id = remapRef.current.resolve(oldId);
+              const forward = optilotus_if_set_condition(fid, id, afterExpr);
+              if (isOptilotusError(forward)) {
+                setSnapshot((prev) => failCommand(prev, forward));
+                load(fid);
+                return false;
+              }
+              load(fid);
+              return true;
+            },
+          });
+          return;
+        }
         const ordered = snapshot.commands;
         const info = optilotus_getFunction(fid);
         const entryNow =
@@ -1510,6 +1580,80 @@ export function useProgram(
   );
 
   /**
+   * Wire a block into an `if` branch (then/else port drop). The engine
+   * call is authoritative for branch membership; undo/redo replay the
+   * captured `next`-edge state so the wires revert, though membership
+   * stays (the bridge exposes no branch-list reverse operation —
+   * documented limitation, never a silent divergence).
+   */
+  const applyIfAppend = useCallback(
+    (
+      fid: FunctionId,
+      ifId: CommandId,
+      branch: "then" | "else",
+      targetId: CommandId,
+    ): boolean => {
+      try {
+        const before = readLinks(fid);
+        setSnapshot((prev) => ({
+          ...prev,
+          busy: true,
+          actionError: "",
+          commandErrorId: null,
+          recoveryVar: null,
+        }));
+        const result = optilotus_if_append(fid, ifId, branch, targetId);
+        if (isOptilotusError(result)) {
+          setSnapshot((prev) => failCommand(prev, result));
+          load(fid);
+          return false;
+        }
+        const after = readLinks(fid);
+        load(fid);
+        if (before !== null && after !== null) {
+          const beforeLinks = before.links;
+          const beforeEntry = before.entry;
+          const afterLinks = after.links;
+          const afterEntry = after.entry;
+          pushHistory({
+            label: "Wire if branch",
+            undo: () => {
+              setSnapshot((prev) => ({ ...prev, busy: true }));
+              const ok = restoreLinks(fid, beforeLinks, beforeEntry, false);
+              load(fid);
+              return ok;
+            },
+            redo: () => {
+              setSnapshot((prev) => ({ ...prev, busy: true }));
+              const ok = restoreLinks(fid, afterLinks, afterEntry, false);
+              load(fid);
+              return ok;
+            },
+          });
+        }
+        return true;
+      } catch (e: unknown) {
+        setSnapshot((prev) => failThrown(prev, e));
+        return false;
+      }
+    },
+    [load, pushHistory, restoreLinks],
+  );
+
+  /** Read an `if`'s condition expression (null on bridge error). */
+  const ifConditionText = useCallback(
+    (fid: FunctionId, ifId: CommandId): string | null => {
+      try {
+        const result = optilotus_if_condition(fid, ifId);
+        return isOptilotusError(result) ? null : result.expr;
+      } catch {
+        return null;
+      }
+    },
+    [],
+  );
+
+  /**
    * Clear a function's entry point (`setEntry(fid, null)`). The commands
    * stay as orphans and runs become a no-op — exact engine semantics.
    * Undo restores the previous entry head (resolved through the
@@ -1811,6 +1955,8 @@ export function useProgram(
     replaceCommand,
     deleteCommand,
     applyLinks,
+    applyIfAppend,
+    ifConditionText,
     clearEntry,
     clearPackage,
     run,

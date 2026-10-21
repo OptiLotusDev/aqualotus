@@ -31,6 +31,9 @@ import init, {
   optilotus_version as version_wasm,
   optilotus_debugMode as debugMode_wasm,
   optilotus_if as if_wasm,
+  optilotus_if_append as if_append_wasm,
+  optilotus_if_condition as if_condition_wasm,
+  optilotus_if_set_condition as if_set_condition_wasm,
 } from "../wasm/optilotus/optilotus.js";
 
 // Project rule: every function in the UI that originates from the
@@ -468,6 +471,72 @@ export function optilotus_if(
       elseBody === null || elseBody === undefined ? null : elseBody,
     );
     return { status: "ok", id };
+  } catch (e) {
+    return {
+      status: "error",
+      kind: "PackageError",
+      command: null,
+      message: String(e),
+    };
+  }
+}
+
+export function optilotus_if_append(
+  fid: number,
+  cmdId: number,
+  side: "then" | "else",
+  newId: number,
+): { status: "ok" } | OptilotusError {
+  assertReady();
+  try {
+    if_append_wasm(fid, cmdId, side, newId);
+    return { status: "ok" };
+  } catch (e) {
+    return {
+      status: "error",
+      kind: "PackageError",
+      command: null,
+      message: String(e),
+    };
+  }
+}
+
+/**
+ * The expression an `if`'s condition was built from (hidden compute
+ * recovery). Requires init.
+ */
+export function optilotus_if_condition(
+  fid: number,
+  cmdId: number,
+): { status: "ok"; expr: string } | OptilotusError {
+  assertReady();
+  try {
+    const expr = if_condition_wasm(fid, cmdId);
+    return { status: "ok", expr };
+  } catch (e) {
+    return {
+      status: "error",
+      kind: "PackageError",
+      command: null,
+      message: String(e),
+    };
+  }
+}
+
+/**
+ * Replace an `if`'s condition expression in place. The branch bodies
+ * (raw command ids) stay untouched, so the inspector can edit the
+ * condition without destroying the block. Requires init.
+ */
+export function optilotus_if_set_condition(
+  fid: number,
+  cmdId: number,
+  expr: string,
+): { status: "ok" } | OptilotusError {
+  assertReady();
+  try {
+    if_set_condition_wasm(fid, cmdId, expr);
+    return { status: "ok" };
   } catch (e) {
     return {
       status: "error",

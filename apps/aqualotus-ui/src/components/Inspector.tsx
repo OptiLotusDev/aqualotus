@@ -20,6 +20,8 @@ interface InspectorProps {
   /** Recovery hint: attempted undeclared variable name, if any. */
   readonly recoveryVar?: string | null;
   readonly onReplace: (id: CommandId, draft: CommandDraft) => void;
+  /** The expression an `if`'s condition was built from (null on error). */
+  readonly onConditionText?: (ifId: CommandId) => string | null;
   readonly onDeleteBlock: (id: CommandId) => void;
   readonly onDeleteFunction: () => void;
   readonly onClearEntry: () => void;
@@ -403,24 +405,25 @@ function KindFields(props: {
         </div>
       );
     case "if":
-      // Branch bodies are raw command ids in the summary and the bridge
-      // exposes no body→spec projection, so an `if` cannot be rebuilt
-      // as an editable draft. Show the condition read-only rather than
-      // pretending the branches are editable (editing would drop them).
+      // Editing touches only the condition expression — the engine
+      // applies it in place (`if_set_condition`), so the branch bodies
+      // and their wiring are never reconstructed by this edit.
       return (
         <div className="field">
           <span>
-            <label htmlFor="in-cond">Condition (read-only)</label>
+            <label htmlFor="in-cond">Condition</label>
           </span>
           <input
             id="in-cond"
             value={draft.condition}
-            readOnly
+            onChange={(e) =>
+              onChange({ ...draft, condition: e.target.value })
+            }
             placeholder="{x} > 5"
             autoComplete="off"
           />
           <div className="hint">
-            Branch bodies cannot be edited from the inspector yet.
+            Only the condition changes; branch bodies keep their wiring.
           </div>
         </div>
       );
@@ -479,25 +482,38 @@ export default function Inspector(props: InspectorProps): ReactElement {
     busy,
     recoveryVar,
     onReplace,
+    onConditionText,
     onDeleteBlock,
     onDeleteFunction,
     onClearEntry,
     onDeclareVariable,
     onRenameFunction,
   } = props;
+  // An `if` draft's raw summary condition is a temp id; when the engine
+  // can report the expression the block was built from, overlay it so
+  // the field shows (and edits) the real text.
+  const initDraft = (sel: CommandSummary | null): CommandDraft | null => {
+    if (sel === null) return null;
+    const draft = summaryToDraft(sel);
+    if (draft.kind === "if" && onConditionText !== undefined) {
+      const text = onConditionText(sel.id);
+      if (text !== null) draft.condition = text;
+    }
+    return draft;
+  };
   // Edit draft derived from the selection during render (not synced in
   // an effect): when a different block is selected, the draft resets to
   // it; typing only touches local state. This keeps the "adjust state
   // during render" pattern instead of set-state-in-effect.
   const [edit, setEdit] = useState<CommandDraft | null>(() =>
-    selected === null ? null : summaryToDraft(selected),
+    initDraft(selected),
   );
   const [editFor, setEditFor] = useState<CommandId | null>(
     selected?.id ?? null,
   );
   if ((selected?.id ?? null) !== editFor) {
     setEditFor(selected?.id ?? null);
-    setEdit(selected === null ? null : summaryToDraft(selected));
+    setEdit(initDraft(selected));
   }
 
   if (selected !== null && edit !== null) {
@@ -562,7 +578,7 @@ export default function Inspector(props: InspectorProps): ReactElement {
           <button
             type="submit"
             className="btn btn-primary"
-            disabled={busy || editBlocked || edit.kind === "if"}
+            disabled={busy || editBlocked}
             title={
               editBlocked
                 ? "Fix the value error first (see above)"
