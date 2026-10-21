@@ -3,7 +3,10 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { useInheritPosition } from "../hooks/useInheritPosition";
 import { useFlowGlow } from "../hooks/useFlowGlow";
 import { useLayout } from "../hooks/useLayout";
-import { useTheme } from "../hooks/useTheme";
+import {
+  LIGHT_MODE_UNAVAILABLE_REASON,
+  useTheme,
+} from "../hooks/useTheme";
 import type { RuntimeStatus } from "../hooks/useRuntime";
 import type { ProgramSnapshot } from "../hooks/useProgram";
 import type { CommandDraft } from "../lib/program";
@@ -116,7 +119,7 @@ function runnerSummary(program: ProgramSnapshot): string {
 export default function AppShell(props: AppShellProps): ReactElement {
   const { runtime, program } = props;
   const compact = useIsMobile();
-  const { theme, toggle: toggleTheme } = useTheme();
+  const { theme, toggle: toggleTheme, lightModeAvailable } = useTheme();
   const [navOpen, setNavOpen] = useState<boolean>(false);
   const [sheetOpen, setSheetOpen] = useState<boolean>(false);
   const [leftOpen, setLeftOpen] = useState<boolean>(false);
@@ -273,7 +276,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
         (target instanceof HTMLElement && target.isContentEditable);
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
-        props.onRun();
+        runAll();
         return;
       }
       if ((e.ctrlKey || e.metaKey) && !typing) {
@@ -311,7 +314,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [props, fid, program.selectedCommandId, undoAll, redoAll, deleteBlock]);
+  }, [props, fid, program.selectedCommandId, undoAll, redoAll, deleteBlock, runAll]);
 
   const selectedCommand =
     program.selectedCommandId !== null
@@ -658,10 +661,24 @@ export default function AppShell(props: AppShellProps): ReactElement {
       <button
         type="button"
         className={`btn btn-ghost btn-sm icon-btn ${extraClass}`}
-        aria-label={theme === "night" ? "Switch to light mode" : "Switch to night mode"}
+        aria-label={
+          lightModeAvailable
+            ? theme === "night"
+              ? "Switch to light mode"
+              : "Switch to night mode"
+            : LIGHT_MODE_UNAVAILABLE_REASON
+        }
         aria-pressed={theme === "light"}
+        aria-disabled={lightModeAvailable ? undefined : true}
+        disabled={!lightModeAvailable}
         onClick={toggleTheme}
-        title={theme === "night" ? "Light mode" : "Night mode"}
+        title={
+          lightModeAvailable
+            ? theme === "night"
+              ? "Light mode"
+              : "Night mode"
+            : LIGHT_MODE_UNAVAILABLE_REASON
+        }
       >
         {theme === "night" ? "○" : "●"}
       </button>
@@ -796,7 +813,6 @@ export default function AppShell(props: AppShellProps): ReactElement {
                 functions={program.functions}
                 commandsByFunction={program.commandsByFunction}
                 layoutStore={layout.allPositions}
-                chromeLeft={!compact && leftOpen ? 300 : 0}
                 selectedFunctionId={program.selectedId}
                 selectedCommandId={program.selectedCommandId}
                 errorId={program.commandErrorId}

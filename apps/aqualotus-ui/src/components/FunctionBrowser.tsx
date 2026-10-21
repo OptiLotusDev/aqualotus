@@ -1,5 +1,6 @@
 import { useState, type ReactElement } from "react";
 import type { FunctionId, FunctionSummary } from "../lib/optilotus";
+import { useExitItems } from "../hooks/useExitItems";
 
 interface FunctionBrowserProps {
   readonly functions: readonly FunctionSummary[];
@@ -25,6 +26,9 @@ export default function FunctionBrowser(
   const { functions, selectedId, busy, onSelect, onDelete, onRename } = props;
   const [editingId, setEditingId] = useState<FunctionId | null>(null);
   const [draft, setDraft] = useState<string>("");
+  // A deleted function keeps its row for one exit animation: the list
+  // change already happened, the row only finishes leaving.
+  const exiting = useExitItems(functions, (fn) => String(fn.id));
 
   function commitRename(id: FunctionId): void {
     if (onRename === undefined) return;
@@ -105,6 +109,19 @@ export default function FunctionBrowser(
                 ) : null}
               </div>
             )}
+          </li>
+        ))}
+        {exiting.map((ghost) => (
+          <li key={`exit-${ghost.key}`} aria-hidden="true">
+            <div className="fn-row" data-exiting="true">
+              <div className="fn-item" data-main={ghost.item.isMain}>
+                <span className="fn-dot" aria-hidden="true" />
+                <span className="fn-name">{ghost.item.name}</span>
+                {ghost.item.isMain ? (
+                  <span className="main-badge">MAIN</span>
+                ) : null}
+              </div>
+            </div>
           </li>
         ))}
       </ul>

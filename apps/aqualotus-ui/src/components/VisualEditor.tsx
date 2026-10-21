@@ -15,7 +15,7 @@ import type {
   FunctionSummary,
 } from "../lib/optilotus";
 import { edgeEnds, edgePath, type BlockSide } from "../lib/graph";
-import type { FlowState, FlowStyle } from "../lib/flow";
+import type { FlowState } from "../lib/flow";
 import type { LayoutMap, Pos } from "../lib/layout";
 import {
   LAYOUT_ROW_Y,
@@ -41,6 +41,9 @@ import {
   PRESENTATION_STRUCT_NAME,
 } from "../lib/workspace";
 import { isTauriShell } from "../lib/env";
+import { useExitItems } from "../hooks/useExitItems";
+import { useReducedMotion } from "../hooks/useReducedMotion";
+import FlowTravel from "./FlowTravel";
 import VisualBlock from "./VisualBlock";
 import PackageContainer from "./PackageContainer";
 import RevealText from "./RevealText";
@@ -53,8 +56,6 @@ interface VisualEditorProps {
     Record<number, readonly CommandSummary[]>
   >;
   readonly layoutStore: Readonly<Record<number, LayoutMap>>;
-  /** Extra world-x shift so content clears the open left panel. */
-  readonly chromeLeft: number;
   readonly selectedFunctionId: FunctionId | null;
   readonly selectedCommandId: CommandId | null;
   readonly errorId: CommandId | null;
@@ -106,7 +107,8 @@ const VIEW_OVERSCAN = 800;
 /** Program-model geometry (world coordinates, before zoom). Titles sit
  *  on the top border, so heads consume no layout space. The package
  *  starts at the world center so panning is unbounded in all four
- *  directions (Excalidraw-style); only `chromeLeft`/`pkgOff` shift it.
+ *  directions (Excalidraw-style); only `pkgOff` shifts it. The panels
+ *  float above the canvas and never move the content.
  *
  *  The canvas stays unlimited (a 40000-unit scroll space): WebKit
  *  cost comes from mounted DOM/SVG surfaces, not from scrollable
@@ -134,17 +136,6 @@ const EDGE_DRAW_MS = 110;
 
 /** Shared empty set for the "currently drawing" edges. */
 const EMPTY_EDGE_KEYS: ReadonlySet<string> = new Set<string>();
-
-/** Style of one glow path: when it starts and how long it travels. */
-function glowStyle(glow: {
-  readonly delayMs: number;
-  readonly segmentMs: number;
-}): FlowStyle {
-  return {
-    "--flow-delay": `${glow.delayMs}ms`,
-    "--flow-segment": `${glow.segmentMs}ms`,
-  };
-}
 
 function toCanvas(
   board: HTMLDivElement,
@@ -182,7 +173,6 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     functions,
     commandsByFunction,
     layoutStore,
-    chromeLeft,
     selectedFunctionId,
     selectedCommandId,
     errorId,
@@ -203,6 +193,10 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
 
   const boardRef = useRef<HTMLDivElement | null>(null);
   const blockEls = useRef(new Map<string, HTMLDivElement>());
+  // The rendered connection paths: the travelling indicator rides them.
+  const edgeEls = useRef(new Map<string, SVGPathElement>());
+  // Reduced motion: the design guide drops the travel, not the fades.
+  const reducedMotion = useReducedMotion();
   const [sizes, setSizes] = useState<ReadonlyMap<string, Size>>(new Map());
   const [zoom, setZoom] = useState<number>(1);
   const zoomRef = useRef<number>(1);
@@ -340,8 +334,11 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     const pkgW = structW + PKG_PAD * 2;
     const pkgH = PKG_HEAD + PKG_PAD + structH + PKG_PAD;
     // Package/struct/function offsets shift whole subtrees together.
+    // The world origin never depends on the open panels: a floating
+    // panel overlays the canvas, it never reflows it, so opening one
+    // cannot move a single block.
     const pkgPos: Pos = {
-      x: WORLD_CENTER + chromeLeft + pkgOff.x,
+      x: WORLD_CENTER + pkgOff.x,
       y: WORLD_CENTER + pkgOff.y,
     };
     const structOrigin: Pos = {
@@ -378,7 +375,6 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     commandsByFunction,
     layoutStore,
     sizes,
-    chromeLeft,
     pkgOff,
   ]);
 
@@ -556,9 +552,21 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
   // the viewport-sized SVG overlay below (which clips), not by skipping
   // paths here: the graph itself is never altered, and path building
   // runs once per program edit — never per scroll frame.
-  const edges: { key: string; from: number; fid: number; d: string }[] =
+  const edges: {
+    key: string;
+    from: number;
+    to: number;
+    fid: number;
+    d: string;
+  }[] =
     useMemo(() => {
-      const out: { key: string; from: number; fid: number; d: string }[] = [];
+      const out: {
+        key: string;
+        from: number;
+        to: number;
+        fid: number;
+        d: string;
+      }[] = [];
       for (const fn of functions) {
         const cmds = commandsByFunction[fn.id] ?? [];
         const byId = new Map<number, number>();
@@ -581,6 +589,7 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
           out.push({
             key: `${fn.id}:${cmd.id}`,
             from: cmd.id,
+            to: target.id,
             fid: fn.id,
             d: edgePath(ends.x1, ends.y1, ends.x2, ends.y2, ends.horizontal),
           });
@@ -617,6 +626,7 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                 out.push({
                   key: `${fn.id}:branch:${side}:${cmd.id}:head`,
                   from: cmd.id,
+                  to: firstId,
                   fid: fn.id,
                   d: edgePath(ox, oy, b.x, b.y + sb.h / 2, true),
                 });
@@ -640,20 +650,28 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
       ? 0
       : (commandsByFunction[selectedFunctionId]?.length ?? 0);
 
-  // New connections stretch into place (a fast 110ms draw). The set
-  // holds the edges that were not on screen before, so the animation
-  // runs once per created connection and never on load.
+  // New connections stretch into place (a fast 110ms draw). The map
+  // holds the target of every connection that was on screen before, so
+  // the animation runs once per created or rewired connection and never
+  // on load. A block that merely moves keeps its target: its wire
+  // follows it live instead of redrawing.
   const [drawing, setDrawing] = useState<ReadonlySet<string>>(EMPTY_EDGE_KEYS);
-  const knownEdges = useRef<ReadonlySet<string> | null>(null);
+  const knownEdges = useRef<ReadonlyMap<string, number> | null>(null);
   const drawTimer = useRef<number | null>(null);
   useEffect(() => {
-    const keys = new Set(edges.map((edge) => edge.key));
+    const next = new Map(edges.map((edge) => [edge.key, edge.to]));
     const known = knownEdges.current;
-    knownEdges.current = keys;
+    knownEdges.current = next;
     if (known === null) return;
-    const added = [...keys].filter((key) => !known.has(key));
-    if (added.length === 0) return;
-    setDrawing(new Set(added));
+    const touched: string[] = [];
+    for (const [key, to] of next) {
+      const before = known.get(key);
+      // Created (no target yet) or rewired (a new destination): the wire
+      // stretches from its source to where it now ends.
+      if (before === undefined || before !== to) touched.push(key);
+    }
+    if (touched.length === 0) return;
+    setDrawing(new Set(touched));
     if (drawTimer.current !== null) window.clearTimeout(drawTimer.current);
     drawTimer.current = window.setTimeout(() => {
       drawTimer.current = null;
@@ -667,29 +685,20 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     [],
   );
 
-  // Glow paths of the running flow, matched to the edges on screen.
-  // A connection that no longer exists (edited mid-run) simply has no
-  // glow: the visualisation never invents geometry.
-  const flowPaths = useMemo(() => {
+  // The connections the running flow travels, matched to the edges on
+  // screen. A connection that no longer exists (edited mid-run) simply
+  // has no indicator: the visualisation never invents geometry.
+  const travelEdges = useMemo(() => {
     if (flow === null || flow === undefined) return [];
     const byKey = new Map(edges.map((edge) => [edge.key, edge]));
-    const out: {
-      key: string;
-      d: string;
-      selected: boolean;
-      delayMs: number;
-      segmentMs: number;
-    }[] = [];
-    flow.edges.forEach((edge, index) => {
+    const out: { key: string; selected: boolean }[] = [];
+    flow.edges.forEach((edge) => {
       const drawn = byKey.get(`${edge.fid}:${edge.from}`);
       if (drawn === undefined) return;
       out.push({
-        key: `flow-${drawn.key}`,
-        d: drawn.d,
+        key: drawn.key,
         selected:
           edge.from === selectedCommandId && edge.fid === selectedFunctionId,
-        delayMs: index * flow.staggerMs,
-        segmentMs: flow.segmentMs,
       });
     });
     return out;
@@ -1430,6 +1439,38 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     return filterVisibleBlocks(items, viewport, VIEW_OVERSCAN, pinnedBlocks)
       .visible;
   }
+
+  // Blocks that just left the model fade out where they stood instead of
+  // blinking out of existence. The application state already dropped
+  // them; this only keeps their picture for one exit animation.
+  const liveBlocks = useMemo(
+    () =>
+      functions.flatMap((fn) =>
+        (commandsByFunction[fn.id] ?? []).map((cmd, index) => ({
+          fid: fn.id,
+          cmd,
+          index,
+        })),
+      ),
+    [functions, commandsByFunction],
+  );
+
+  // Where every block stands while it is alive: the layout drops the
+  // positions of deleted commands, so the exit animation needs the last
+  // known spot.
+  const blockPos = useRef(new Map<string, Pos>());
+  for (const block of liveBlocks) {
+    blockPos.current.set(
+      `${block.fid}:${block.cmd.id}`,
+      dragEffectivePos(block.fid, block.cmd, block.index),
+    );
+  }
+
+  const exitingBlocks = useExitItems(
+    liveBlocks,
+    (block) => `${block.fid}:${block.cmd.id}`,
+  );
+
   let culledBlocks = 0;
   if (viewport !== null) {
     for (const fn of functions) {
@@ -1557,210 +1598,6 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
               SVG, no DOM per node); only their paint is clipped. Before
               layout is measured (`viewport === null`) the full-world SVG
               renders so nothing is missing in tests / first paint. */}
-            {viewport === null ? (
-              <svg
-                id="links"
-                className="links"
-                width={worldW}
-                height={worldH}
-                aria-hidden="true"
-              >
-                <defs>
-                  <marker
-                    id="arrow-flow"
-                    viewBox="0 0 10 10"
-                    refX="8"
-                    refY="5"
-                    markerWidth="7"
-                    markerHeight="7"
-                    orient="auto-start-reverse"
-                  >
-                    <path d="M 0 1 L 9 5 L 0 9 z" className="marker-flow" />
-                  </marker>
-                </defs>
-                {edges.map((edge) => {
-                  const isSelected =
-                    edge.from === selectedCommandId &&
-                    edge.fid === selectedFunctionId;
-                  const isDrawing = drawing.has(edge.key);
-                  return (
-                    <Fragment key={edge.key}>
-                      <path
-                        d={edge.d}
-                        data-fid={edge.fid}
-                        pathLength={1}
-                        markerEnd={isDrawing ? undefined : "url(#arrow-flow)"}
-                        className={`${isSelected ? "edge edge-selected" : "edge"}${
-                          isDrawing ? " edge-draw" : ""
-                        }`}
-                      />
-                      {isDrawing ? (
-                        <path
-                          d={edge.d}
-                          pathLength={1}
-                          markerEnd="url(#arrow-flow)"
-                          className="edge-draw-head"
-                        />
-                      ) : null}
-                    </Fragment>
-                  );
-                })}
-                {flowPaths.map((glow) => (
-                  <Fragment key={glow.key}>
-                    <path
-                      d={glow.d}
-                      pathLength={1}
-                      className={`edge-flow-trail${
-                        glow.selected ? " edge-selected" : ""
-                      }`}
-                      style={glowStyle(glow)}
-                    />
-                    <path
-                      d={glow.d}
-                      pathLength={1}
-                      className={`edge-flow${
-                        glow.selected ? " edge-selected" : ""
-                      }`}
-                      style={glowStyle(glow)}
-                    />
-                  </Fragment>
-                ))}
-                {preview !== null
-                  ? (() => {
-                      const sourceCmds = commandsByFunction[preview.fid] ?? [];
-                      const sourceIndex = sourceCmds.findIndex(
-                        (c) => c.id === preview.sourceId,
-                      );
-                      const source =
-                        sourceIndex >= 0 ? sourceCmds[sourceIndex] : undefined;
-                      if (source === undefined) return null;
-                      const origin = blockWorld(
-                        preview.fid,
-                        source,
-                        Math.max(0, sourceIndex),
-                      );
-                      const size = sizeOf(preview.fid, preview.sourceId);
-                      const ox = origin.x + size.w;
-                      const oy =
-                        preview.side === "then"
-                          ? origin.y + size.h * 0.25
-                          : preview.side === "else"
-                            ? origin.y + size.h * 0.75
-                            : origin.y + size.h / 2;
-                      return (
-                        <path
-                          d={edgePath(ox, oy, preview.x, preview.y, true)}
-                          markerEnd="url(#arrow-flow)"
-                          className="edge edge-preview"
-                        />
-                      );
-                    })()
-                  : null}
-              </svg>
-            ) : (
-              <svg
-                id="links"
-                className="links"
-                style={{ left: viewport.x, top: viewport.y }}
-                width={viewport.w}
-                height={viewport.h}
-                aria-hidden="true"
-              >
-                <defs>
-                  <marker
-                    id="arrow-flow"
-                    viewBox="0 0 10 10"
-                    refX="8"
-                    refY="5"
-                    markerWidth="7"
-                    markerHeight="7"
-                    orient="auto-start-reverse"
-                  >
-                    <path d="M 0 1 L 9 5 L 0 9 z" className="marker-flow" />
-                  </marker>
-                </defs>
-                <g transform={`translate(${-viewport.x} ${-viewport.y})`}>
-                  {edges.map((edge) => {
-                    const isSelected =
-                      edge.from === selectedCommandId &&
-                      edge.fid === selectedFunctionId;
-                    const isDrawing = drawing.has(edge.key);
-                    return (
-                      <Fragment key={edge.key}>
-                        <path
-                          d={edge.d}
-                          data-fid={edge.fid}
-                          pathLength={1}
-                          markerEnd={isDrawing ? undefined : "url(#arrow-flow)"}
-                          className={`${
-                            isSelected ? "edge edge-selected" : "edge"
-                          }${isDrawing ? " edge-draw" : ""}`}
-                        />
-                        {isDrawing ? (
-                          <path
-                            d={edge.d}
-                            pathLength={1}
-                            markerEnd="url(#arrow-flow)"
-                            className="edge-draw-head"
-                          />
-                        ) : null}
-                      </Fragment>
-                    );
-                  })}
-                  {flowPaths.map((glow) => (
-                    <Fragment key={glow.key}>
-                      <path
-                        d={glow.d}
-                        pathLength={1}
-                        className={`edge-flow-trail${
-                          glow.selected ? " edge-selected" : ""
-                        }`}
-                        style={glowStyle(glow)}
-                      />
-                      <path
-                        d={glow.d}
-                        pathLength={1}
-                        className={`edge-flow${
-                          glow.selected ? " edge-selected" : ""
-                        }`}
-                        style={glowStyle(glow)}
-                      />
-                    </Fragment>
-                  ))}
-                  {preview !== null
-                    ? (() => {
-                        const sourceCmds = commandsByFunction[preview.fid] ?? [];
-                        const sourceIndex = sourceCmds.findIndex(
-                          (c) => c.id === preview.sourceId,
-                        );
-                        const source =
-                          sourceIndex >= 0 ? sourceCmds[sourceIndex] : undefined;
-                        if (source === undefined) return null;
-                        const origin = blockWorld(
-                          preview.fid,
-                          source,
-                          Math.max(0, sourceIndex),
-                        );
-                        const size = sizeOf(preview.fid, preview.sourceId);
-                        const ox = origin.x + size.w;
-                        const oy =
-                        preview.side === "then"
-                          ? origin.y + size.h * 0.25
-                          : preview.side === "else"
-                            ? origin.y + size.h * 0.75
-                            : origin.y + size.h / 2;
-                        return (
-                          <path
-                            d={edgePath(ox, oy, preview.x, preview.y, true)}
-                            markerEnd="url(#arrow-flow)"
-                            className="edge edge-preview"
-                          />
-                        );
-                      })()
-                    : null}
-                </g>
-              </svg>
-            )}
             {/* Sketch wobble is CSS-only (Issue 8): the old
               `feTurbulence` displacement filter rasterized every
               container border on the GPU — prohibitive on HiDPI/HDR
@@ -1837,6 +1674,31 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                               />
                             </div>
                           ))}
+                          {exitingBlocks
+                            .filter((ghost) => ghost.item.fid === fn.id)
+                            .map((ghost) => {
+                              const cmd = ghost.item.cmd;
+                              const key = `${ghost.item.fid}:${cmd.id}`;
+                              return (
+                                <div key={`exit-${key}`}>
+                                  <VisualBlock
+                                    command={cmd}
+                                    fid={ghost.item.fid}
+                                    functionName={fn.name}
+                                    index={ghost.item.index}
+                                    position={
+                                      blockPos.current.get(key) ??
+                                      fallbackPos(ghost.item.index)
+                                    }
+                                    selected={false}
+                                    failed={false}
+                                    connectFrom={false}
+                                    interactive={false}
+                                    exiting
+                                  />
+                                </div>
+                              );
+                            })}
                           {cmds.length === 0 ? (
                             <div className="funcc-empty">
                               <strong>No blocks yet</strong>
@@ -1863,6 +1725,198 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                 </div>
               </PackageContainer>
             </div>
+            {viewport === null ? (
+              <svg
+                id="links"
+                className="links"
+                width={worldW}
+                height={worldH}
+                aria-hidden="true"
+              >
+                <defs>
+                  <marker
+                    id="arrow-flow"
+                    viewBox="0 0 10 10"
+                    refX="8"
+                    refY="5"
+                    markerWidth="7"
+                    markerHeight="7"
+                    orient="auto-start-reverse"
+                  >
+                    <path d="M 0 1 L 9 5 L 0 9 z" className="marker-flow" />
+                  </marker>
+                </defs>
+                {edges.map((edge) => {
+                  const isSelected =
+                    edge.from === selectedCommandId &&
+                    edge.fid === selectedFunctionId;
+                  const isDrawing = drawing.has(edge.key);
+                  return (
+                    <Fragment key={edge.key}>
+                      <path
+                        d={edge.d}
+                        data-fid={edge.fid}
+                        pathLength={1}
+                        markerEnd={isDrawing ? undefined : "url(#arrow-flow)"}
+                        className={`${isSelected ? "edge edge-selected" : "edge"}${
+                          isDrawing ? " edge-draw" : ""
+                        }`}
+                        ref={(el) => {
+                          if (el !== null) {
+                            edgeEls.current.set(edge.key, el);
+                          } else {
+                            edgeEls.current.delete(edge.key);
+                          }
+                        }}
+                      />
+                      {isDrawing ? (
+                        <path
+                          d={edge.d}
+                          pathLength={1}
+                          markerEnd="url(#arrow-flow)"
+                          className="edge-draw-head"
+                        />
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+                <FlowTravel
+                  edges={travelEdges}
+                  paths={edgeEls.current}
+                  linkMs={flow?.linkMs ?? 0}
+                  runId={flow?.runId ?? 0}
+                  reduced={reducedMotion}
+                />
+                {preview !== null
+                  ? (() => {
+                      const sourceCmds = commandsByFunction[preview.fid] ?? [];
+                      const sourceIndex = sourceCmds.findIndex(
+                        (c) => c.id === preview.sourceId,
+                      );
+                      const source =
+                        sourceIndex >= 0 ? sourceCmds[sourceIndex] : undefined;
+                      if (source === undefined) return null;
+                      const origin = blockWorld(
+                        preview.fid,
+                        source,
+                        Math.max(0, sourceIndex),
+                      );
+                      const size = sizeOf(preview.fid, preview.sourceId);
+                      const ox = origin.x + size.w;
+                      const oy =
+                        preview.side === "then"
+                          ? origin.y + size.h * 0.25
+                          : preview.side === "else"
+                            ? origin.y + size.h * 0.75
+                            : origin.y + size.h / 2;
+                      return (
+                        <path
+                          d={edgePath(ox, oy, preview.x, preview.y, true)}
+                          markerEnd="url(#arrow-flow)"
+                          className="edge edge-preview"
+                        />
+                      );
+                    })()
+                  : null}
+              </svg>
+            ) : (
+              <svg
+                id="links"
+                className="links"
+                style={{ left: viewport.x, top: viewport.y }}
+                width={viewport.w}
+                height={viewport.h}
+                aria-hidden="true"
+              >
+                <defs>
+                  <marker
+                    id="arrow-flow"
+                    viewBox="0 0 10 10"
+                    refX="8"
+                    refY="5"
+                    markerWidth="7"
+                    markerHeight="7"
+                    orient="auto-start-reverse"
+                  >
+                    <path d="M 0 1 L 9 5 L 0 9 z" className="marker-flow" />
+                  </marker>
+                </defs>
+                <g transform={`translate(${-viewport.x} ${-viewport.y})`}>
+                  {edges.map((edge) => {
+                    const isSelected =
+                      edge.from === selectedCommandId &&
+                      edge.fid === selectedFunctionId;
+                    const isDrawing = drawing.has(edge.key);
+                    return (
+                      <Fragment key={edge.key}>
+                        <path
+                          d={edge.d}
+                          data-fid={edge.fid}
+                          pathLength={1}
+                          markerEnd={isDrawing ? undefined : "url(#arrow-flow)"}
+                          className={`${
+                            isSelected ? "edge edge-selected" : "edge"
+                          }${isDrawing ? " edge-draw" : ""}`}
+                          ref={(el) => {
+                            if (el !== null) {
+                              edgeEls.current.set(edge.key, el);
+                            } else {
+                              edgeEls.current.delete(edge.key);
+                            }
+                          }}
+                        />
+                        {isDrawing ? (
+                          <path
+                            d={edge.d}
+                            pathLength={1}
+                            markerEnd="url(#arrow-flow)"
+                            className="edge-draw-head"
+                          />
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
+                  <FlowTravel
+                    edges={travelEdges}
+                    paths={edgeEls.current}
+                    linkMs={flow?.linkMs ?? 0}
+                    runId={flow?.runId ?? 0}
+                    reduced={reducedMotion}
+                  />
+                  {preview !== null
+                    ? (() => {
+                        const sourceCmds = commandsByFunction[preview.fid] ?? [];
+                        const sourceIndex = sourceCmds.findIndex(
+                          (c) => c.id === preview.sourceId,
+                        );
+                        const source =
+                          sourceIndex >= 0 ? sourceCmds[sourceIndex] : undefined;
+                        if (source === undefined) return null;
+                        const origin = blockWorld(
+                          preview.fid,
+                          source,
+                          Math.max(0, sourceIndex),
+                        );
+                        const size = sizeOf(preview.fid, preview.sourceId);
+                        const ox = origin.x + size.w;
+                        const oy =
+                        preview.side === "then"
+                          ? origin.y + size.h * 0.25
+                          : preview.side === "else"
+                            ? origin.y + size.h * 0.75
+                            : origin.y + size.h / 2;
+                        return (
+                          <path
+                            d={edgePath(ox, oy, preview.x, preview.y, true)}
+                            markerEnd="url(#arrow-flow)"
+                            className="edge edge-preview"
+                          />
+                        );
+                      })()
+                    : null}
+                </g>
+              </svg>
+            )}
           </div>
         </div>
         {emptyWorkspace ? (

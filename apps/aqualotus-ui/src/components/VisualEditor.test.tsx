@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import VisualEditor from "./VisualEditor";
 import type { CommandSummary } from "../lib/optilotus";
+import { EXIT_MS } from "../hooks/useExitItems";
+import type { FlowState } from "../lib/flow";
 
 const MAIN_COMMANDS: readonly CommandSummary[] = [
   { id: 1, kind: "declare", next: 2, var: "n", ty: "int32", expr: "41" },
@@ -33,7 +35,6 @@ function baseProps(): React.ComponentProps<typeof VisualEditor> {
         2: { x: 48, y: 240 },
       },
     },
-    chromeLeft: 0,
     selectedFunctionId: 0,
     selectedCommandId: null,
     errorId: null,
@@ -272,5 +273,140 @@ describe("VisualEditor", () => {
     expect(screen.getByText("var: n")).toBeDefined();
     const block = container.querySelector('[data-block-id="1"]');
     expect(block?.getAttribute("style") ?? "").toContain("300px");
+  });
+
+  it("fades a deleted block out where it stood, then removes it", () => {
+    vi.useFakeTimers();
+    try {
+      const { container, rerender } = render(<VisualEditor {...baseProps()} />);
+      expect(container.querySelector('[data-exiting="true"]')).toBeNull();
+
+      // The block left the model: it is gone from the program, but its
+      // picture finishes its exit animation in place.
+      rerender(
+        <VisualEditor
+          {...baseProps()}
+          commandsByFunction={{
+            0: [MAIN_COMMANDS[0], MAIN_COMMANDS[2]],
+            1: HELPER_COMMANDS,
+          }}
+        />,
+      );
+      const ghost = container.querySelector('[data-exiting="true"]');
+      expect(ghost).not.toBeNull();
+      expect(ghost?.getAttribute("data-block-id")).toBe("2");
+      // The ghost keeps the spot of the block it replaces.
+      expect(ghost?.getAttribute("style") ?? "").toContain("240px");
+      // It is inert: the model already dropped it.
+      expect(ghost?.getAttribute("aria-hidden")).toBe("true");
+
+      act(() => {
+        vi.advanceTimersByTime(EXIT_MS + 50);
+      });
+      expect(container.querySelector('[data-exiting="true"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("travels the executed chain along its own connections", () => {
+    const flow: FlowState = {
+      runId: 1,
+      edges: [
+        { fid: 0, from: 1, to: 2 },
+        { fid: 0, from: 2, to: 3 },
+      ],
+      linkMs: 300,
+    };
+    const { container } = render(<VisualEditor {...baseProps()} flow={flow} />);
+    // One indicator per travelled connection: the head and its trail.
+    expect(container.querySelectorAll("circle.flow-dot").length).toBe(2);
+    expect(container.querySelectorAll("circle.flow-trail").length).toBe(2);
+    // The connections themselves stay exactly as they were.
+    const edges = container.querySelectorAll("path.edge:not(.edge-preview)");
+    expect(edges.length).toBe(3);
+    for (const edge of edges) {
+      expect(edge.getAttribute("stroke")).toBeNull();
+      expect(edge.getAttribute("d")).toMatch(/^M .* C .*$/);
+    }
+  });
+
+  it("restarts the travel on a new run instead of stacking loops", () => {
+    const flow: FlowState = {
+      runId: 1,
+      edges: [{ fid: 0, from: 1, to: 2 }],
+      linkMs: 300,
+    };
+    const { container, rerender } = render(
+      <VisualEditor {...baseProps()} flow={flow} />,
+    );
+    expect(container.querySelectorAll("circle.flow-dot").length).toBe(1);
+    rerender(<VisualEditor {...baseProps()} flow={{ ...flow, runId: 2 }} />);
+    // A new run keeps exactly one indicator per connection.
+    expect(container.querySelectorAll("circle.flow-dot").length).toBe(1);
+  });
+
+  it("stretches a rewired connection into place", () => {
+    const { container, rerender } = render(<VisualEditor {...baseProps()} />);
+    expect(container.querySelectorAll("path.edge-draw").length).toBe(0);
+
+    // The wire of command 1 now ends at command 3: it stretches into its
+    // new place, arrowhead included.
+    rerender(
+      <VisualEditor
+        {...baseProps()}
+        commandsByFunction={{
+          0: [
+            { id: 1, kind: "declare", next: 3, var: "n", ty: "int32", expr: "41" },
+            MAIN_COMMANDS[2],
+          ],
+          1: HELPER_COMMANDS,
+        }}
+      />,
+    );
+    expect(container.querySelectorAll("path.edge-draw").length).toBe(1);
+    expect(container.querySelectorAll("path.edge-draw-head").length).toBe(1);
+  });
+
+  it("does not redraw a connection when a block only moves", () => {
+    const { container, rerender } = render(<VisualEditor {...baseProps()} />);
+    // The block moves, its wire keeps its destination: the wire follows
+    // the block live instead of redrawing.
+    rerender(
+      <VisualEditor
+        {...baseProps()}
+        layoutStore={{
+          0: {
+            1: { x: 300, y: 300 },
+            2: { x: 48, y: 240 },
+            3: { x: 48, y: 396 },
+          },
+          1: { 1: { x: 48, y: 84 }, 2: { x: 48, y: 240 } },
+        }}
+      />,
+    );
+    expect(container.querySelectorAll("path.edge-draw").length).toBe(0);
+  });
+
+  it("paints the connection layer in front of the blocks", () => {
+    const { container } = render(<VisualEditor {...baseProps()} />);
+    const world = container.querySelector(".board-world");
+    expect(world).not.toBeNull();
+    const children = [...(world?.children ?? [])];
+    const links = children.findIndex((c) => c.id === "links");
+    const pkg = children.findIndex((c) => c.classList.contains("pkg-pos"));
+    expect(pkg).toBeGreaterThanOrEqual(0);
+    expect(links).toBeGreaterThan(pkg);
+  });
+
+  it("gives every block a port on both edges", () => {
+    const { container } = render(<VisualEditor {...baseProps()} />);
+    const blocks = container.querySelectorAll(".vblock");
+    expect(blocks.length).toBe(5);
+    for (const block of blocks) {
+      // The ports are the connection targets: one per edge.
+      expect(block.querySelectorAll(".vport-left").length).toBe(1);
+      expect(block.querySelectorAll(".vport-right").length).toBe(1);
+    }
   });
 });

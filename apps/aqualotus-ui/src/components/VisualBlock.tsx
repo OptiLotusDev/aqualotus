@@ -13,6 +13,8 @@ interface VisualBlockProps {
   readonly failed: boolean;
   readonly connectFrom: boolean;
   readonly interactive: boolean;
+  /** The block left the model and is only playing its exit animation. */
+  readonly exiting?: boolean;
 }
 
 /**
@@ -39,6 +41,7 @@ function VisualBlock(props: VisualBlockProps): ReactElement {
     failed,
     connectFrom,
     interactive,
+    exiting = false,
   } = props;
   return (
     <div
@@ -51,9 +54,11 @@ function VisualBlock(props: VisualBlockProps): ReactElement {
       data-error={failed}
       data-connect-from={connectFrom}
       data-interactive={interactive}
+      data-exiting={exiting ? "true" : undefined}
       role="button"
       tabIndex={interactive ? 0 : -1}
       aria-pressed={selected}
+      aria-hidden={exiting ? true : undefined}
       aria-label={`${command.kind} block ${index + 1} in ${functionName}: ${commandMainLine(command)}`}
       style={{ left: position.x, top: position.y }}
     >
