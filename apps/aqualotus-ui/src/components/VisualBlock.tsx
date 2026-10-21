@@ -88,6 +88,7 @@ function VisualBlock(props: VisualBlockProps): ReactElement {
             aria-hidden="true"
             title="then branch"
           />
+          <span className="vport-label vport-label-then">true</span>
           <span
             className="vport vport-right vport-else"
             data-port="out"
@@ -97,6 +98,7 @@ function VisualBlock(props: VisualBlockProps): ReactElement {
             aria-hidden="true"
             title="else branch"
           />
+          <span className="vport-label vport-label-else">false</span>
         </>
       ) : (
         <span

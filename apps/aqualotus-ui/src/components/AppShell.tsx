@@ -9,7 +9,7 @@ import type { ProgramSnapshot } from "../hooks/useProgram";
 import type { CommandDraft } from "../lib/program";
 import { declareEditAffected, freshName } from "../lib/program";
 import type { LinkPlan } from "../lib/graph";
-import { planChainAll, planDropLink } from "../lib/graph";
+import { planChainAll, planDropLink, type BlockSide } from "../lib/graph";
 import { findAvailableBlock } from "../lib/blocks";
 import { LAYOUT_ROW_Y, LAYOUT_START_X } from "../lib/layout";
 import type { CommandId, FunctionId, RunResult } from "../lib/optilotus";
@@ -61,6 +61,15 @@ interface AppShellProps {
   ) => void;
   readonly onDeleteCommand: (fid: FunctionId, cmd: CommandId) => void;
   readonly onApplyLinks: (fid: FunctionId, plan: LinkPlan) => void;
+  /** Wire a block to an `if` branch (then/else port drop). */
+  readonly onAppendIfBranch: (
+    fid: FunctionId,
+    ifId: CommandId,
+    branch: "then" | "else",
+    targetId: CommandId,
+  ) => boolean;
+  /** The expression an `if`'s condition was built from (null on error). */
+  readonly onConditionText: (fid: FunctionId, ifId: CommandId) => string | null;
   readonly onClearEntry: (fid: FunctionId) => void;
   readonly onClearPackage: () => void;
   readonly onRun: () => void;
@@ -371,7 +380,18 @@ export default function AppShell(props: AppShellProps): ReactElement {
     sourceId: CommandId,
     targetId: CommandId | null,
     where: "after" | "before" | "end",
+    side?: BlockSide,
   ): boolean {
+    // If the source is an `if` block, connecting from its then/else port
+    // appends the target to the corresponding branch instead of rewiring
+    // `next` (which would clobber the other branch).
+    const sourceCmd = (program.commandsByFunction[target] ?? []).find(
+      (c) => c.id === sourceId,
+    );
+    if (sourceCmd?.kind === "if" && targetId !== null) {
+      const branch = side === "else" ? "else" : "then";
+      return props.onAppendIfBranch(target, sourceId, branch, targetId);
+    }
     const cmds = program.commandsByFunction[target] ?? [];
     const entry =
       target === fid ? (program.selected?.entry ?? null) : null;
@@ -528,10 +548,13 @@ export default function AppShell(props: AppShellProps): ReactElement {
       onDeclareVariable={
         fid !== null ? (name) => props.onDeclareVariable(fid, name) : undefined
       }
-      onReplace={(id, draft) =>
-        fid !== null ? replaceWithPosition(fid, id, draft) : undefined
-      }
-      onDeleteBlock={(id) => deleteBlock(id)}
+        onReplace={(id, draft) =>
+          fid !== null ? replaceWithPosition(fid, id, draft) : undefined
+        }
+        onConditionText={(ifId) =>
+          fid !== null ? props.onConditionText(fid, ifId) : null
+        }
+        onDeleteBlock={(id) => deleteBlock(id)}
       onDeleteFunction={() => {
         if (fid !== null) props.onDeleteFunction(fid);
       }}

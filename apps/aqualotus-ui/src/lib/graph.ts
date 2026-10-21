@@ -224,9 +224,24 @@ export function planDropLink(
   const preds = predecessorsOf(cmds);
   const sourceDetached =
     !preds.has(sourceId) && (links.get(sourceId) ?? null) === null;
-  return sourceDetached
-    ? planLinkBefore(cmds, entry, targetId, sourceId)
-    : planLinkAfter(cmds, entry, sourceId, targetId);
+  if (!sourceDetached) {
+    return planLinkAfter(cmds, entry, sourceId, targetId);
+  }
+  // Fan-in attach (multiple inputs, one output): when the drop target's
+  // input is already occupied, the detached source simply grows a second
+  // incoming wire — the target keeps its predecessor and its successor,
+  // so an in-port drop never yanks a block out of its chain. An
+  // unoccupied in-port keeps the prepend behavior (build chains forward).
+  if (preds.has(targetId)) {
+    if ((links.get(sourceId) ?? null) === targetId) return null;
+    const edits = [{ id: sourceId, next: targetId } as LinkEdit];
+    const entryUpdate: EntryUpdate =
+      entry === null
+        ? { type: "set", entry: headOf(predsAfter(cmds, edits), sourceId) }
+        : { type: "keep" };
+    return { edits, entry: entryUpdate };
+  }
+  return planLinkBefore(cmds, entry, targetId, sourceId);
 }
 
 /** Smooth cubic Bézier from source port to target port. */
@@ -323,4 +338,56 @@ export function planChainAll(
         ? { type: "set", entry: ids[0] as number }
         : { type: "keep" },
   };
+}
+
+export interface Edge {
+  readonly fid: number;
+  readonly from: number;
+  readonly to: number;
+}
+
+export function edgesOf(cmds: readonly { id: number; next: number | null; then_body?: number[]; else_body?: number[] }[]): Edge[] {
+  const out: Edge[] = [];
+  const seen = new Set<number>();
+  const byId = new Map<number, { next: number | null; then_body?: number[]; else_body?: number[] }>();
+  for (const c of cmds) byId.set(c.id, c);
+
+  for (const cmd of cmds) {
+    if (cmd.next !== null && !seen.has(cmd.id)) {
+      seen.add(cmd.id);
+      if (cmd.next !== undefined && byId.has(cmd.next)) {
+        out.push({ fid: 0, from: cmd.id, to: cmd.next });
+      }
+    }
+
+    if (cmd.then_body !== undefined && cmd.then_body.length > 0) {
+      for (let i = 0; i < cmd.then_body.length; i++) {
+        const cid = cmd.then_body[i];
+        if (seen.has(cid)) continue;
+        seen.add(cid);
+        if (i < cmd.then_body.length - 1) {
+          const nextId = cmd.then_body[i + 1];
+          if (byId.has(nextId)) {
+            out.push({ fid: 0, from: cid, to: nextId });
+          }
+        }
+      }
+    }
+
+    if (cmd.else_body !== undefined && cmd.else_body.length > 0) {
+      for (let i = 0; i < cmd.else_body.length; i++) {
+        const cid = cmd.else_body[i];
+        if (seen.has(cid)) continue;
+        seen.add(cid);
+        if (i < cmd.else_body.length - 1) {
+          const nextId = cmd.else_body[i + 1];
+          if (byId.has(nextId)) {
+            out.push({ fid: 0, from: cid, to: nextId });
+          }
+        }
+      }
+    }
+  }
+
+  return out;
 }

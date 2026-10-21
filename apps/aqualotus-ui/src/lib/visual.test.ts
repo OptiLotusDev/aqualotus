@@ -295,6 +295,20 @@ describe("planDropLink", () => {
     });
   });
 
+  it("attaches a detached source as an extra input without stealing the target", () => {
+    // Blocks allow many inputs: dropping onto an occupied in-port grows
+    // a second wire instead of yanking the block out of its chain.
+    const cmds = [
+      { id: 1, next: 2 },
+      { id: 2, next: null },
+      { id: 4, next: null },
+    ];
+    expect(planDropLink(cmds, 1, 4, 2, "before")).toEqual({
+      edits: [{ id: 4, next: 2 }],
+      entry: { type: "keep" },
+    });
+  });
+
   it("appends a detached target after a chained source", () => {
     const cmds = [
       { id: 1, next: 2 },

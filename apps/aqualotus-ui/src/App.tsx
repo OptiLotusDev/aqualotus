@@ -84,6 +84,8 @@ function App(): ReactElement {
             onReplaceCommand={program.replaceCommand}
             onDeleteCommand={program.deleteCommand}
             onApplyLinks={program.applyLinks}
+            onAppendIfBranch={program.applyIfAppend}
+            onConditionText={program.ifConditionText}
             onClearEntry={program.clearEntry}
             onClearPackage={program.clearPackage}
             onRun={program.run}
