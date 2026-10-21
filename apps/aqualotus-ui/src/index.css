@@ -455,6 +455,16 @@ p {
   letter-spacing: 0.02em;
 }
 
+/* AquaLotus release label next to the app name (app version, not the
+   Optilotus engine version shown in the status pill). */
+.appbar-version {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+}
+
 .appbar > div {
   min-width: 0;
 }
