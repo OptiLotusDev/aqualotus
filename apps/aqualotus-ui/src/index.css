@@ -176,6 +176,12 @@
   --shadow-soft: 0 8px 32px rgba(0, 0, 0, 0.38);
   --shadow-lift: 0 16px 48px rgba(0, 0, 0, 0.5);
 
+  /* The title chips of the hierarchy containers. The plate is opaque on
+   * purpose: the container rim passes behind the chip, and an opaque
+   * plate is what interrupts that rim under the label instead of
+   * letting a line cross the text. */
+  --chip-plate: rgb(11, 15, 32);
+
   /* Motion — one timing vocabulary for the whole shell. */
   --transition-fast: 150ms;
   --transition-entrance: 700ms;
@@ -230,6 +236,10 @@
   --color-fg: #17131f;
   --color-muted-fg: #5d566e;
   --color-dot: rgba(60, 40, 110, 0.12);
+
+  /* The hierarchy title chips keep an opaque plate in light mode too,
+   * so the container rim never crosses a label. */
+  --chip-plate: #f7f5fc;
 
   --color-primary: #2f6bff;
   --color-accent: #7c5cf0;
@@ -913,6 +923,25 @@ p {
   }
 }
 
+/* A removed row leaves the other way round: the state is already gone,
+ * only the picture fades out — same 150ms vocabulary. */
+@keyframes item-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* A function row that was just deleted fades out in place. */
+.fn-row[data-exiting="true"] {
+  animation: item-out var(--transition-fast) ease-in forwards;
+  pointer-events: none;
+}
+
 .fn-rename {
   flex: none;
 }
@@ -1236,78 +1265,37 @@ p {
   }
 }
 
-/* ---------- Execution flow glow ---------- */
+/* ---------- Execution flow travel ---------- */
 
-/* A luminous head travelling along a connection, in the colour of the
- * arrow itself. The dash pattern is normalized by `pathLength="1"`,
- * so the head travels the whole path with one short dash. */
-.edge-flow {
-  fill: none;
-  stroke: var(--color-flow);
-  stroke-width: 2.4;
-  stroke-linecap: round;
-  stroke-dasharray: 0.06 1;
-  opacity: 0;
-  /* The travelling head carries the bloom: execution is the one moment
-   * the board should glow hardest. */
-  filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.9))
-    drop-shadow(0 0 18px rgba(34, 211, 238, 0.45));
-  animation: edge-flow-travel var(--flow-segment, 220ms)
-    cubic-bezier(0.35, 0, 0.25, 1) var(--flow-delay, 0ms) forwards;
+/* The travelling indicator of a run: a small luminous head riding the
+ * actual connection path, in the colour of that very connection (the
+ * same tokens the connection itself uses, so a selected connection glows
+ * in the selected colour and a dashed preview stays dashed). The
+ * connection underneath is never touched. */
+.flow-dot {
+  --glow-color: var(--edge-flow, var(--color-flow));
+  fill: var(--glow-color);
+  /* The head carries the bloom: execution is the one moment the board
+   * should glow hardest. */
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--glow-color) 80%, white))
+    drop-shadow(0 0 12px color-mix(in srgb, var(--glow-color) 50%, transparent));
+  transition: opacity 120ms ease-out;
 }
 
-.edge-flow.edge-selected {
-  stroke: var(--color-flow-selected);
+.flow-dot.edge-selected {
+  --glow-color: var(--edge-flow-selected, var(--color-flow-selected));
 }
 
-/* The softer trail behind the head. */
-.edge-flow-trail {
-  fill: none;
-  stroke: var(--color-flow);
-  stroke-width: 9;
-  stroke-linecap: round;
-  stroke-dasharray: 0.28 1;
-  opacity: 0;
-  animation: edge-flow-travel-trail var(--flow-segment, 220ms)
-    cubic-bezier(0.35, 0, 0.25, 1) var(--flow-delay, 0ms) forwards;
+/* The soft trail behind the head. */
+.flow-trail {
+  --glow-color: var(--edge-flow, var(--color-flow));
+  fill: var(--glow-color);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--glow-color) 45%, transparent));
+  transition: opacity 120ms ease-out;
 }
 
-.edge-flow-trail.edge-selected {
-  stroke: var(--color-flow-selected);
-}
-
-@keyframes edge-flow-travel {
-  0% {
-    stroke-dashoffset: 0;
-    opacity: 0;
-  }
-  12% {
-    opacity: 1;
-  }
-  72% {
-    opacity: 1;
-  }
-  100% {
-    stroke-dashoffset: 1;
-    opacity: 0;
-  }
-}
-
-@keyframes edge-flow-travel-trail {
-  0% {
-    stroke-dashoffset: -0.28;
-    opacity: 0;
-  }
-  12% {
-    opacity: 0.32;
-  }
-  72% {
-    opacity: 0.32;
-  }
-  100% {
-    stroke-dashoffset: 0.72;
-    opacity: 0;
-  }
+.flow-trail.edge-selected {
+  --glow-color: var(--edge-flow-selected, var(--color-flow-selected));
 }
 
 .marker-flow {
@@ -1385,19 +1373,24 @@ p {
   user-select: none;
   -webkit-user-select: none;
   box-shadow:
+    /* The hierarchy colour runs around the whole perimeter: a crisp
+     * inner rim plus a restrained outer bloom. The top-edge stripe
+     * below is an accent on top of it, never the only colour. */
+    inset 0 0 0 1px color-mix(in srgb, var(--neon) 20%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.42),
     inset 0 0 18px rgba(6, 10, 26, 0.62),
     inset 0 -12px 24px rgba(8, 12, 30, 0.4),
     0 12px 30px rgba(1, 3, 12, 0.56),
     0 2px 8px rgba(1, 3, 12, 0.4),
-    /* Faint hue, just around the border. */
-    0 0 0 1px color-mix(in srgb, var(--neon) 12%, transparent),
-    0 0 6px color-mix(in srgb, var(--neon) 6%, transparent);
+    /* The rim itself, on every side. */
+    0 0 0 1px color-mix(in srgb, var(--neon) 34%, transparent),
+    0 0 10px color-mix(in srgb, var(--neon) 12%, transparent);
   transition:
     box-shadow var(--transition-fast) var(--ease-out-expo),
     transform var(--transition-fast) var(--ease-out-expo),
     opacity var(--transition-fast) ease;
-  overflow: hidden;
+  /* The ports sit half outside the block: they must not be clipped. */
+  overflow: visible;
   animation: rise var(--transition-fast) var(--ease-out-expo);
 }
 
@@ -1445,11 +1438,13 @@ p {
 
 .vblock:hover {
   box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--neon) 34%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.85),
     inset 0 0 26px rgba(6, 10, 26, 0.48),
     inset 0 -16px 30px rgba(8, 12, 30, 0.36),
     0 20px 44px rgba(1, 3, 12, 0.6),
     0 4px 12px rgba(1, 3, 12, 0.42),
+    0 0 0 1px color-mix(in srgb, var(--neon) 48%, transparent),
     0 0 26px color-mix(in srgb, var(--neon) 32%, transparent);
 }
 
@@ -1459,6 +1454,7 @@ p {
 
 .vblock[data-selected="true"] {
   box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--neon) 46%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.9),
     inset 0 0 24px rgba(6, 10, 26, 0.46),
     inset 0 -16px 30px rgba(8, 12, 30, 0.34),
@@ -1470,6 +1466,7 @@ p {
  * wire, not the selection. */
 .vblock[data-connect-from="true"] {
   box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--neon) 40%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.85),
     inset 0 0 24px rgba(6, 10, 26, 0.46),
     inset 0 -16px 30px rgba(8, 12, 30, 0.34),
@@ -1996,8 +1993,8 @@ button.lib-item[disabled] {
   height: 8px;
   border-radius: 50%;
   background: var(--warning);
-  /* The status light is a point source: a tight bloom around it. */
-  box-shadow: 0 0 6px currentColor, 0 0 14px currentColor;
+  /* A clean status light: a solid dot, no neon bloom around it. */
+  box-shadow: none;
   color: var(--warning);
   flex: none;
   transition: background var(--transition-fast) ease;
@@ -2376,6 +2373,24 @@ button.lib-item[disabled] {
   }
 }
 
+/* A block that was just deleted fades out where it stood. It is inert:
+ * the model already dropped it, the picture is only finishing its exit. */
+.vblock[data-exiting="true"] {
+  animation: block-out var(--transition-fast) ease-in forwards;
+  pointer-events: none;
+}
+
+@keyframes block-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
 /* ---------- Program-model hierarchy (Package → Struct → Function) ----
  * Liquid glass: no stroke, no wobble. Each container is a sheet of
  * translucent sapphire whose only edges are a top-lit specular rim and
@@ -2448,7 +2463,9 @@ button.lib-item[disabled] {
   /* The title sits on its own glass chip straddling the top edge, so
    * the rim passes behind it like a real label plate. */
   border-radius: var(--radius-full);
-  background: rgba(12, 16, 34, 0.78);
+  /* Opaque plate: the rim is interrupted under the chip, never drawn
+   * across the label. */
+  background: var(--chip-plate);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.28),
     inset 0 -6px 14px rgba(6, 10, 26, 0.5),
@@ -2523,7 +2540,9 @@ button.lib-item[disabled] {
   gap: 10px;
   padding: 3px 14px;
   border-radius: var(--radius-full);
-  background: rgba(12, 16, 34, 0.78);
+  /* Opaque plate: the rim is interrupted under the chip, never drawn
+   * across the label. */
+  background: var(--chip-plate);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.26),
     inset 0 -6px 14px rgba(6, 10, 26, 0.5),
@@ -2610,7 +2629,9 @@ button.lib-item[disabled] {
   gap: 8px;
   padding: 3px 14px;
   border-radius: var(--radius-full);
-  background: rgba(12, 16, 34, 0.8);
+  /* Opaque plate: the rim is interrupted under the chip, never drawn
+   * across the label. */
+  background: var(--chip-plate);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.3),
     inset 0 -6px 14px rgba(6, 10, 26, 0.5),

@@ -58,9 +58,9 @@ export function useFlowGlow(program: ProgramSnapshot): {
       setFlow(null);
       return;
     }
-    const { segmentMs, staggerMs } = flowTimings(edges.length);
+    const { linkMs } = flowTimings(edges.length);
     runIdRef.current += 1;
-    setFlow({ runId: runIdRef.current, edges, segmentMs, staggerMs });
+    setFlow({ runId: runIdRef.current, edges, linkMs });
   }, []);
 
   // Drop the snapshot once the sweep is over: the connections are back

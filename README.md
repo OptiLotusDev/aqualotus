@@ -82,6 +82,7 @@ state, so they can be restyled freely:
 | Atmosphere                | `components/FluidBackdrop.tsx`, `lib/fluid.ts`     | Decorative canvas ink layer behind the whole app: `pointer-events: none`, reduced-motion aware, hidden in light mode, and stopped while the tab is hidden. |
 | Entrance motion           | `index.css` (`.enter-*`), `components/RevealText.tsx` | Staggered fade/rise on first paint plus a word-by-word reveal for presentation text. |
 | Start page                | `components/StartIntro.tsx`, `components/startIntro.css` | The intro that plays before the canvas: code fragments converge, a white burst releases, and the **AquaLotus** wordmark resolves out of it. Pure CSS timeline; `App.tsx` mounts it over the app and unmounts it when it ends. |
+| Execution travel          | `components/FlowTravel.tsx`, `hooks/useFlowGlow.ts`, `lib/flow.ts` | The run visualisation: a luminous indicator rides the *actual* SVG path of every connection the engine walked, in that connection's own colour, one link after another (300 ms per link, the design guide's timing). Presentation only — it reads the graph the engine already produced, invents no execution events, and drops the travel under reduced motion. |
 
 ### Shells — native wrappers (usually leave alone)
 
