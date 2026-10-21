@@ -13,21 +13,21 @@
 :root {
   color-scheme: dark;
 
-  /* ---- Semantic colour system: foundation (charcoal, purple tint) ---- */
-  --color-bg: #0a0a0f;
-  --color-card: #121218;
-  --color-muted: #1c1b24;
-  --color-canvas: #0d0c13;
-  --color-line: #2a2833;
-  --color-fg: #fafafa;
-  --color-muted-fg: #a1a1aa;
-  --color-dot: #2a2833;
+  /* ---- Semantic colour system: deep space (navy + cyan/purple glow) ---- */
+  --color-bg: #05070f;
+  --color-card: #0b1120;
+  --color-muted: #131a33;
+  --color-canvas: #070b18;
+  --color-line: #1e2348;
+  --color-fg: #eef3ff;
+  --color-muted-fg: #98a3d4;
+  --color-dot: #232c55;
 
   /* ---- Actions and interaction ---- */
-  --color-primary: #3b82f6;
+  --color-primary: #22d3ee;
   --color-accent: #8b5cf6;
-  --color-indigo: #818cf8;
-  --color-ring: #3b82f6;
+  --color-indigo: #6366f1;
+  --color-ring: #22d3ee;
 
   /* ---- Program hierarchy: white → green → blue, outer to inner ---- */
   --color-hierarchy-package: #e8e8e8;
@@ -47,6 +47,11 @@
   --color-flow: #9fb2d8;
   --color-flow-selected: #5aa9e6;
   --color-flow-preview: #5aa9e6;
+  /* The connection line. Brighter than the semantic `--color-flow`
+   * token so the wire reads at a glance against the glass; its glow
+   * lives in `.edge` (night only). */
+  --edge-flow: #dbe7ff;
+  --edge-flow-selected: #22d3ee;
 
   /* ---- Runtime status (application-wide starting hues) ---- */
   --color-success: #22c55e;
@@ -68,16 +73,74 @@
   --surface-selected: rgba(56, 68, 100, 0.55);
   --surface-inset: rgba(7, 8, 13, 0.55);
 
-  /* Liquid Glass chrome — the translucency the whole shell is built
-   * from, plus the hairline highlight that reads as a lit edge. */
-  --glass-border: rgba(255, 255, 255, 0.16);
-  --glass-highlight: rgba(255, 255, 255, 0.1);
+  /* ---- Liquid glass surface system (dark) ----
+   * The canvas and its containers read as solid glass: no stroke, no
+   * flat fill. Light does the work — a top-lit rim, a soft inner
+   * falloff, and a long shadow below. `--glass-blur` is honored by the
+   * fixed chrome only; the board, containers and blocks render without
+   * `backdrop-filter` so panning and drag stay cheap on every target
+   * (Tauri, Capacitor WebViews, low-end GPUs). */
+  --glass-border: transparent;
+  --glass-highlight: rgba(255, 255, 255, 0.9);
   --glass-blur: 22px;
   /* Fallback for engines without backdrop blur: a denser translucent
    * fill keeps the same separation without the blur cost. */
   --glass-fallback: rgba(15, 17, 28, 0.92);
 
-  /* Borders — subtle, with one stronger step. */
+  /* The glass body itself. Deep sapphire, translucent so the fluid
+   * ink behind it tints the surface. */
+  --glass-fill: rgba(20, 26, 52, 0.34);
+  --glass-fill-strong: rgba(24, 30, 60, 0.46);
+  /* Top-lit specular edge: bright at the top, dissolving downward. */
+  --glass-rim: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.55) 0%,
+    rgba(255, 255, 255, 0.18) 22%,
+    rgba(255, 255, 255, 0.05) 55%,
+    transparent 100%
+  );
+  /* Sheen that sweeps the surface diagonally, like light across water. */
+  --glass-sheen: linear-gradient(
+    155deg,
+    rgba(255, 255, 255, 0.13) 0%,
+    rgba(255, 255, 255, 0.03) 28%,
+    transparent 46%,
+    rgba(140, 170, 255, 0.05) 74%,
+    transparent 100%
+  );
+  /* Inner shadows: light enters from above, the floor of the glass is
+   * darker, and the corners catch a cold blue bounce. */
+  --glass-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    inset 0 0 26px rgba(6, 10, 26, 0.55),
+    inset 0 -18px 34px rgba(8, 12, 30, 0.42),
+    inset 14px 0 34px rgba(6, 10, 26, 0.22),
+    inset -14px 0 34px rgba(6, 10, 26, 0.22),
+    0 18px 44px rgba(1, 3, 12, 0.58),
+    0 3px 10px rgba(1, 3, 12, 0.44);
+
+  /* Neon energy. The category stripe carries the hue; the outline and
+   * the flow lines bloom with it. */
+  --neon-cyan: #22d3ee;
+  --neon-violet: #8b5cf6;
+  --neon-magenta: #a855f7;
+  --neon-blue: #4f7cff;
+  --neon-green: #34d399;
+  --neon-amber: #fbbf24;
+  --neon-red: #f87171;
+  --neon-grey: #8a93c4;
+
+  /* Selected / connecting outline — luminous cyan, the depth cue that
+   * replaces a hard border everywhere. */
+  --glow-ring: 0 0 0 1px rgba(34, 211, 238, 0.72),
+    0 0 18px rgba(34, 211, 238, 0.45),
+    0 0 42px rgba(34, 211, 238, 0.2);
+  --glow-ring-soft: 0 0 0 1px rgba(34, 211, 238, 0.3),
+    0 0 14px rgba(34, 211, 238, 0.18);
+
+  /* Borders — subtle, with one stronger step. Retained for the few
+   * chrome elements that still want a hairline; the board, containers
+   * and blocks do not use them at all. */
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.16);
 
@@ -120,22 +183,18 @@
 
   /* Fluid backdrop — the atmospheric ink palette. Read by the canvas
    * layer through the token layer, never hard-coded in components. */
-  --fluid-bg: #04050c;
+  --fluid-bg: #030512;
   --fluid-cyan: #22d3ee;
-  --fluid-blue: #3b82f6;
+  --fluid-blue: #4f7cff;
   --fluid-violet: #8b5cf6;
-  --fluid-magenta: #d946ef;
+  --fluid-magenta: #a855f7;
 
   /* Type + spacing. */
-  --sans: "Onest Variable", -apple-system, BlinkMacSystemFont, "SF Pro Text",
-    system-ui, "Segoe UI", Roboto, sans-serif;
-  --hand: "Segoe Print", "Bradley Hand", "Chalkboard SE", "Comic Sans MS",
-    cursive;
-  --heading: "Onest Variable", ui-rounded, "SF Pro Rounded", -apple-system,
-    BlinkMacSystemFont, system-ui, sans-serif;
-  --rounded: "Onest Variable", ui-rounded, "SF Pro Rounded", -apple-system,
-    BlinkMacSystemFont, system-ui, sans-serif;
-  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --hand: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --heading: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --rounded: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -192,6 +251,10 @@
   --color-flow: rgba(70, 75, 105, 0.65);
   --color-flow-selected: #2f6bff;
   --color-flow-preview: #2f6bff;
+  /* Light mode keeps its original flow colour: the brighter night
+   * wire and its bloom are a night-only treatment. */
+  --edge-flow: var(--color-flow);
+  --edge-flow-selected: var(--color-flow-selected);
 
   --color-success: #1e9e62;
   --color-warning: #b45309;
@@ -208,7 +271,10 @@
   --surface-selected: rgba(47, 107, 255, 0.12);
   --surface-inset: rgba(255, 255, 255, 0.6);
 
-  /* Liquid Glass chrome — lighter values, same roles. */
+  /* Liquid Glass chrome — lighter values, same roles.
+   * Light mode is intentionally not part of the liquid-glass pass: its
+   * chrome keeps the original faint hairline + highlight, and its
+   * surfaces are the `--surface` fills. Night is the product default. */
   --glass-border: rgba(20, 30, 60, 0.12);
   --glass-highlight: rgba(255, 255, 255, 0.75);
   --glass-fallback: rgba(238, 236, 246, 0.94);
@@ -249,8 +315,8 @@ body {
 
 body {
   background:
-    radial-gradient(1200px 600px at 15% -5%, color-mix(in srgb, var(--color-accent) 10%, transparent), transparent 60%),
-    radial-gradient(1000px 500px at 90% 10%, color-mix(in srgb, var(--color-indigo) 8%, transparent), transparent 60%),
+    radial-gradient(1200px 600px at 15% -5%, color-mix(in srgb, var(--color-accent) 14%, transparent), transparent 60%),
+    radial-gradient(1000px 500px at 90% 10%, color-mix(in srgb, var(--color-primary) 12%, transparent), transparent 60%),
     linear-gradient(var(--night-1), var(--night-0));
   background-attachment: fixed;
   color: var(--text-primary);
@@ -358,12 +424,16 @@ p {
   gap: var(--space-2);
   margin: 8px 12px 0;
   padding: var(--space-2) var(--space-3);
-  border-radius: 16px;
-  border: 1px solid var(--glass-border);
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
   background: var(--surface);
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
   backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
-  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-highlight);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -10px 22px rgba(6, 10, 26, 0.3),
+    0 10px 30px rgba(1, 3, 12, 0.4),
+    0 0 30px rgba(34, 211, 238, 0.08);
 }
 
 /* Desktop: the rounded bar floats over the canvas so the black
@@ -424,9 +494,15 @@ p {
   background: var(--surface);
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
   backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
-  border: 1px solid var(--border);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-highlight);
+  /* Liquid glass panel: lit from above, floor in shadow, no stroke. */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 0 40px rgba(6, 10, 26, 0.34),
+    inset 0 -22px 40px rgba(6, 10, 26, 0.28),
+    0 20px 44px rgba(1, 3, 12, 0.44),
+    0 3px 12px rgba(1, 3, 12, 0.34);
   min-width: 0;
   overflow: hidden;
 }
@@ -564,6 +640,8 @@ p {
 
 /* ---------- Glass controls ---------- */
 
+/* Buttons are glass pills: the one chrome family that keeps real
+ * `backdrop-filter` (the fixed bars are cheap; the board is not). */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -572,38 +650,73 @@ p {
   min-height: 40px;
   padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-full);
-  border: 1px solid var(--glass-border);
-  background: var(--surface-elevated);
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
-  box-shadow: inset 0 1px 0 var(--glass-highlight);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.1),
+    rgba(255, 255, 255, 0.02)
+  );
+  -webkit-backdrop-filter: blur(14px) saturate(1.5);
+  backdrop-filter: blur(14px) saturate(1.5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -8px 16px rgba(6, 10, 26, 0.28),
+    0 6px 18px rgba(1, 3, 12, 0.36);
   font-weight: 600;
   font-size: 14px;
+  color: var(--text-primary);
   transition:
     transform var(--transition-fast) var(--ease-out-expo),
     background var(--transition-fast) ease,
-    border-color var(--transition-fast) ease,
     box-shadow var(--transition-fast) ease,
     opacity var(--transition-fast) ease;
 }
 
 .btn:hover {
-  background: var(--surface-selected);
   transform: translateY(-1px);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.16),
+    rgba(255, 255, 255, 0.05)
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.62),
+    inset 0 -10px 18px rgba(6, 10, 26, 0.26),
+    0 10px 24px rgba(1, 3, 12, 0.42),
+    0 0 22px rgba(34, 211, 238, 0.16);
 }
 
 .btn:active {
   transform: translateY(0) scale(0.98);
 }
 
+/* Primary: the action glows. */
 .btn-primary {
-  background: var(--accent-soft);
-  border-color: var(--accent-border);
-  color: var(--text-primary);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-primary) 42%, transparent),
+    color-mix(in srgb, var(--color-primary) 20%, transparent)
+  );
+  border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
+  color: #ffffff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -10px 20px rgba(6, 10, 26, 0.3),
+    0 6px 18px rgba(1, 3, 12, 0.4),
+    0 0 20px color-mix(in srgb, var(--color-primary) 34%, transparent);
 }
 
 .btn-primary:hover {
-  background: color-mix(in srgb, var(--color-primary) 24%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-primary) 54%, transparent),
+    color-mix(in srgb, var(--color-primary) 26%, transparent)
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    inset 0 -10px 20px rgba(6, 10, 26, 0.3),
+    0 10px 24px rgba(1, 3, 12, 0.44),
+    0 0 34px color-mix(in srgb, var(--color-primary) 52%, transparent);
 }
 
 .btn-danger {
@@ -611,7 +724,11 @@ p {
 }
 
 .btn-panel {
-  background: var(--danger-soft);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--danger) 26%, transparent),
+    color-mix(in srgb, var(--danger) 12%, transparent)
+  );
   border-color: var(--danger-border);
   color: var(--danger-text);
   font-weight: 650;
@@ -630,6 +747,7 @@ p {
   border-color: transparent;
   min-height: 36px;
   padding: var(--space-1) var(--space-3);
+  box-shadow: none;
 }
 
 .btn-ghost:hover {
@@ -674,9 +792,14 @@ p {
   min-height: 40px;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border-strong);
-  background: var(--surface-inset);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.24);
+  /* Inset glass: the field is a depression in the panel, so the light
+   * comes from the inside top edge instead of a lit outer border. */
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--surface-inset) 82%, transparent);
+  box-shadow:
+    inset 0 2px 6px rgba(2, 5, 14, 0.7),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
   transition:
     border-color var(--transition-fast) ease,
     box-shadow var(--transition-fast) ease,
@@ -685,13 +808,19 @@ p {
 
 .field input:hover,
 .field select:hover {
-  border-color: var(--glass-border);
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 .field input:focus,
 .field select:focus {
-  border-color: var(--accent-border);
-  background: color-mix(in srgb, var(--surface-inset) 70%, var(--accent-soft));
+  border-color: color-mix(in srgb, var(--color-primary) 60%, transparent);
+  background: color-mix(in srgb, var(--surface-inset) 74%, var(--accent-soft));
+  box-shadow:
+    inset 0 2px 6px rgba(2, 5, 14, 0.66),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.06),
+    0 0 0 1px color-mix(in srgb, var(--color-primary) 40%, transparent),
+    0 0 18px color-mix(in srgb, var(--color-primary) 26%, transparent);
+  outline: none;
 }
 
 .field input::placeholder {
@@ -705,10 +834,12 @@ p {
   min-height: 36px;
   padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border-strong);
-  background: var(--surface-inset);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--surface-inset) 82%, transparent);
   color: var(--text-primary);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.24);
+  box-shadow:
+    inset 0 2px 6px rgba(2, 5, 14, 0.7),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.05);
   transition:
     border-color var(--transition-fast) ease,
     box-shadow var(--transition-fast) ease;
@@ -986,12 +1117,25 @@ p {
   min-height: 280px;
   overflow: auto;
   border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  /* Translucent canvas: the atmospheric layer reads through the
-   * sketch without dimming the ink on the blocks. */
-  background-color: color-mix(in srgb, var(--color-canvas) 78%, transparent);
-  background-image: radial-gradient(circle, var(--color-dot) 1px, transparent 1px);
-  background-size: 26px 26px;
+  /* The canvas is a sheet of deep glass over the fluid ink: no
+   * stroke, only a top-lit rim and a long soft shadow. */
+  border: none;
+  background-color: color-mix(in srgb, var(--color-canvas) 62%, transparent);
+  background-image: radial-gradient(
+    circle,
+    var(--color-dot) 1px,
+    transparent 1px
+  );
+  background-size: 20px 20px;
+/* The canvas is a sheet of deep glass over the fluid ink: no
+   * stroke, only a top-lit rim and a long soft shadow. The inset
+   * shadow must be painted on the board's own box (the world inside
+   * scrolls with the content, which would drag the shading along). */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 0 60px rgba(5, 8, 20, 0.5),
+    inset 0 -28px 56px rgba(6, 10, 24, 0.36),
+    0 24px 54px rgba(1, 3, 12, 0.45);
   /* Canvas-only gestures: single-finger pans natively; browser
    * pinch-zoom is excluded (not listed) so two-finger pinch reaches
    * the board's own zoom handler instead of scaling the whole app. */
@@ -1020,19 +1164,30 @@ p {
 
 .edge {
   fill: none;
-  stroke: var(--color-flow);
-  stroke-width: 1.5;
+  stroke: var(--edge-flow, var(--color-flow));
+  stroke-width: 2.2;
+  stroke-linecap: round;
   /* Selection and state changes cross-fade instead of snapping. */
-  transition: stroke var(--transition-fast) ease;
+  transition:
+    stroke var(--transition-fast) ease,
+    stroke-width var(--transition-fast) ease,
+    filter var(--transition-fast) ease;
 }
 
 .edge-selected {
-  stroke: var(--color-flow-selected);
+  stroke: var(--edge-flow-selected, var(--color-flow-selected));
+  stroke-width: 2.6;
+  /* The neon line: a soft bloom around the connection so the flow reads
+   * as light travelling through the glass. */
+  filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.75))
+    drop-shadow(0 0 18px rgba(34, 211, 238, 0.4));
 }
 
 .edge-preview {
   stroke: var(--color-flow-preview);
-  stroke-dasharray: 6 5;
+  stroke-width: 2.2;
+  stroke-dasharray: 7 6;
+  filter: drop-shadow(0 0 5px rgba(79, 124, 255, 0.65));
 }
 
 /* ---------- Connection stretch ---------- */
@@ -1083,6 +1238,10 @@ p {
   stroke-linecap: round;
   stroke-dasharray: 0.06 1;
   opacity: 0;
+  /* The travelling head carries the bloom: execution is the one moment
+   * the board should glow hardest. */
+  filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.9))
+    drop-shadow(0 0 18px rgba(34, 211, 238, 0.45));
   animation: edge-flow-travel var(--flow-segment, 220ms)
     cubic-bezier(0.35, 0, 0.25, 1) var(--flow-delay, 0ms) forwards;
 }
@@ -1143,15 +1302,71 @@ p {
 
 .marker-flow {
   fill: var(--color-flow);
+  /* The arrowhead glows with the line it belongs to. */
+  filter: drop-shadow(0 0 3px rgba(34, 211, 238, 0.7));
 }
+
+/* ---------- Liquid glass utilities ----------
+ * Every container on the board shares these two layers: a body of
+ * translucent sapphire, and a stack of painted light (rim, sheen,
+ * inner shadow, drop shadow). Neither uses `backdrop-filter` — the
+ * fluid ink behind the glass still reads through the fill, and the
+ * board stays cheap to pan and drag on every target.
+ *
+ * NIGHT ONLY. The light theme is a separate, untouched surface system
+ * (solid `--surface` fills with a faint hairline); `:root` carries the
+ * glass tokens and light mode overrides them back at the end of this
+ * file, so a theme flip never inherits a midnight glass fill. */
+
+.glass {
+  position: relative;
+  background: var(--glass-fill);
+  border: none;
+  box-shadow: var(--glass-shadow);
+}
+
+/* The painted light. One pseudo-element, three stacked gradients plus
+ * the top specular line, so the rim never rasterizes over the text. */
+.glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    var(--glass-rim) top / 100% 14px no-repeat,
+    var(--glass-sheen);
+  pointer-events: none;
+}
+
+/* Deep-space neon palette. The category stripe keeps its hue family
+ * from the data model (identity/type/value), and the outline and the
+ * flow line bloom with the same hue — a block reads as one colour
+ * story rather than three unrelated accents. */
+.vblock[data-kind="declare"] { --neon: var(--neon-red); }
+.vblock[data-kind="assign"] { --neon: var(--neon-violet); }
+.vblock[data-kind="cast"] { --neon: var(--neon-violet); }
+.vblock[data-kind="print"],
+.vblock[data-kind="input"] { --neon: var(--neon-grey); }
+.vblock[data-kind="return"] { --neon: var(--neon-blue); }
+.vblock[data-kind="if"] { --neon: var(--neon-amber); }
+.vblock[data-kind="condition"] { --neon: var(--neon-amber); }
+.vblock[data-kind="flow"] { --neon: var(--neon-cyan); }
+
+/* Containers bloom in their hierarchy hue. */
+.pkg { --neon: var(--neon-magenta); }
+.structc { --neon: var(--neon-green); }
+.funcc { --neon: var(--neon-blue); }
 
 .vblock {
   position: absolute;
   width: 216px;
   padding: 12px 14px 14px;
-  border-radius: 12px 28px 14px 26px / 26px 14px 28px 12px;
-  border: 1.5px solid var(--color-hierarchy-function);
-  background: transparent;
+  border-radius: 14px;
+  /* Command surface: a dark base softly TINTED by the command's own
+   * category hue, so each block carries its colour identity without a
+   * bright wash over the text. Glow stays soft and outward (below). */
+  background: color-mix(in srgb, var(--neon) 4%, rgba(6, 8, 20, 0.82));
+  border: none;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1159,12 +1374,73 @@ p {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
-  /* Selection, error and connect states cross-fade; the block itself
-   * is never moved by a transition (dragging writes left/top). */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    inset 0 0 18px rgba(6, 10, 26, 0.62),
+    inset 0 -12px 24px rgba(8, 12, 30, 0.4),
+    0 12px 30px rgba(1, 3, 12, 0.56),
+    0 2px 8px rgba(1, 3, 12, 0.4),
+    /* Faint hue, just around the border. */
+    0 0 0 1px color-mix(in srgb, var(--neon) 12%, transparent),
+    0 0 6px color-mix(in srgb, var(--neon) 6%, transparent);
   transition:
-    border-color var(--transition-fast) ease,
-    box-shadow var(--transition-fast) ease,
+    box-shadow var(--transition-fast) var(--ease-out-expo),
+    transform var(--transition-fast) var(--ease-out-expo),
     opacity var(--transition-fast) ease;
+  overflow: hidden;
+  animation: rise var(--transition-fast) var(--ease-out-expo);
+}
+
+/* Soft hue on the surface: a low-opacity wash of the command's own
+ * category colour so the block reads as tinted glass, plus a faint
+ * lit-from-above rim. Kept low so it never washes over the text. */
+.vblock::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.14) 0%,
+      rgba(255, 255, 255, 0.03) 22%,
+      transparent 46%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--neon) 12%, transparent) 0%,
+      color-mix(in srgb, var(--neon) 4%, transparent) 26%,
+      transparent 62%
+    );
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* The category stripe is now a soft bloom of colour at the top edge
+ * instead of a flat 4px bar — same hue, far more depth. */
+.vblock::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 10px;
+  right: 10px;
+  height: 3px;
+  border-radius: 0 0 999px 999px;
+  background: var(--neon);
+  box-shadow:
+    0 0 8px var(--neon),
+    0 0 16px color-mix(in srgb, var(--neon) 45%, transparent);
+  pointer-events: none;
+}
+
+.vblock:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 0 26px rgba(6, 10, 26, 0.48),
+    inset 0 -16px 30px rgba(8, 12, 30, 0.36),
+    0 20px 44px rgba(1, 3, 12, 0.6),
+    0 4px 12px rgba(1, 3, 12, 0.42),
+    0 0 26px color-mix(in srgb, var(--neon) 32%, transparent);
 }
 
 .vblock:active {
@@ -1172,85 +1448,120 @@ p {
 }
 
 .vblock[data-selected="true"] {
-  border-color: var(--color-hierarchy-function-label);
-  box-shadow: 0 0 0 1px var(--color-hierarchy-function-label);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 0 24px rgba(6, 10, 26, 0.46),
+    inset 0 -16px 30px rgba(8, 12, 30, 0.34),
+    0 22px 48px rgba(1, 3, 12, 0.62),
+    var(--glow-ring);
+}
+
+/* Connecting: same luminous outline, quieter — the block is part of a
+ * wire, not the selection. */
+.vblock[data-connect-from="true"] {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 0 24px rgba(6, 10, 26, 0.46),
+    inset 0 -16px 30px rgba(8, 12, 30, 0.34),
+    0 20px 44px rgba(1, 3, 12, 0.6),
+    var(--glow-ring-soft);
 }
 
 .vblock[data-error="true"] {
-  border-color: var(--color-error);
-}
-
-.vblock[data-connect-from="true"] {
-  border-color: var(--color-hierarchy-function-label);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 0 24px rgba(6, 10, 26, 0.46),
+    inset 0 -16px 30px rgba(8, 12, 30, 0.34),
+    0 20px 44px rgba(1, 3, 12, 0.6),
+    0 0 0 1px rgba(248, 113, 113, 0.75),
+    0 0 20px rgba(248, 113, 113, 0.4);
 }
 
 .vblock-kind {
-  font-family: var(--hand);
+  font-family: var(--sans);
   font-size: 11px;
-  color: var(--color-muted-fg);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--neon);
+  opacity: 0.95;
 }
 
 .vblock-main {
-  font-family: var(--hand);
+  font-family: var(--sans);
   font-size: 15px;
   color: var(--color-fg);
   overflow-wrap: anywhere;
 }
 
-/* Reference palette for declares: red var line, green type/value. */
+/* Reference palette for declares: the identity line carries the block
+ * hue, types and values stay cool against the glass. */
 .vblock-var {
-  font-family: var(--hand);
+  font-family: var(--sans);
   font-size: 16px;
-  color: var(--color-data-identity);
+  color: var(--color-fg);
   overflow-wrap: anywhere;
 }
 
 .vblock-type {
-  font-family: var(--hand);
-  font-size: 13px;
-  color: var(--color-data-value);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--color-muted-fg);
   overflow-wrap: anywhere;
 }
 
 .vblock-error {
-  font-family: var(--hand);
+  font-family: var(--sans);
   font-size: 13px;
   color: var(--color-console-err);
 }
 
+/* Ports: hollow rings of glass. The output port fills with the flow
+ * colour and glows when it is the connection source. */
 .vport {
   position: absolute;
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
   border-radius: 50%;
-  background: var(--color-canvas);
-  border: 2px solid var(--color-port-in);
+  background: color-mix(in srgb, var(--color-canvas) 82%, var(--neon));
+  border: 1.5px solid var(--neon);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 0 10px color-mix(in srgb, var(--neon) 55%, transparent);
   transition:
     transform var(--transition-fast) var(--ease-out-expo),
     background var(--transition-fast) ease,
-    border-color var(--transition-fast) ease;
+    box-shadow var(--transition-fast) ease;
+  z-index: 2;
 }
 
 .vport-left {
   left: -8px;
   top: 50%;
-  margin-top: -6px;
+  margin-top: -6.5px;
 }
 
 .vport-right {
   right: -8px;
   top: 50%;
-  margin-top: -6px;
-  border-color: var(--color-port-out);
+  margin-top: -6.5px;
   cursor: crosshair;
 }
 
 .vport:hover {
-  transform: scale(1.25);
+  transform: scale(1.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 0 16px var(--neon),
+    0 0 30px color-mix(in srgb, var(--neon) 65%, transparent);
 }
 
 .vblock[data-connect-from="true"] .vport-right {
-  background: var(--color-port-out);
+  background: var(--neon);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 0 14px var(--neon),
+    0 0 34px color-mix(in srgb, var(--neon) 70%, transparent);
 }
 
 .vblock[data-interactive="false"] {
@@ -1607,12 +1918,16 @@ button.lib-item[disabled] {
   color: var(--text-secondary);
   padding: 6px 12px;
   border-radius: var(--radius-full);
-  border: 1px solid var(--border);
-  background: var(--surface-inset);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--surface-inset) 84%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -4px 10px rgba(6, 10, 26, 0.5),
+    0 4px 12px rgba(1, 3, 12, 0.34);
   white-space: nowrap;
   transition:
     background var(--transition-fast) ease,
-    border-color var(--transition-fast) ease,
+    box-shadow var(--transition-fast) ease,
     color var(--transition-fast) ease;
 }
 
@@ -1621,6 +1936,9 @@ button.lib-item[disabled] {
   height: 8px;
   border-radius: 50%;
   background: var(--warning);
+  /* The status light is a point source: a tight bloom around it. */
+  box-shadow: 0 0 6px currentColor, 0 0 14px currentColor;
+  color: var(--warning);
   flex: none;
   transition: background var(--transition-fast) ease;
 }
@@ -1999,10 +2317,12 @@ button.lib-item[disabled] {
 }
 
 /* ---------- Program-model hierarchy (Package → Struct → Function) ----
- * Hand-drawn Excalidraw look: sketchy wobbled outlines (rough radius +
- * turbulence filter), transparent fills over the charcoal canvas, titles
- * straddling the top border, handwritten ink. Colors follow the
- * reference: white package, green struct, blue functions/blocks. */
+ * Liquid glass: no stroke, no wobble. Each container is a sheet of
+ * translucent sapphire whose only edges are a top-lit specular rim and
+ * its own coloured bloom, so the hierarchy still reads (cyan package,
+ * green struct, blue function) but nothing looks hand-drawn. Uniform
+ * radius — the old asymmetric `22px 70px 26px 64px / …` was the
+ * Excalidraw sketch tell and is gone. */
 
 .pkg-pos,
 .struct-pos {
@@ -2014,29 +2334,42 @@ button.lib-item[disabled] {
 .pkg {
   position: absolute;
   border: none;
-  border-radius: 22px 70px 26px 64px / 64px 26px 70px 22px;
+  border-radius: 26px;
   background: transparent;
+  box-shadow:
+    0 0 0 1px rgba(168, 85, 247, 0.14),
+    0 0 14px rgba(168, 85, 247, 0.1),
+    0 0 32px rgba(168, 85, 247, 0.05);
   overflow: visible;
   cursor: grab;
 }
 
-/* Sketch wobble lives on a border-only layer so text inside the
- * containers is never rasterized through a filter. The wobble itself
- * is pure border-radius asymmetry (no SVG turbulence filter): cheap
- * on HiDPI/HDR multi-display compositors, same hand-drawn read. */
-.pkg::before,
-.structc::before,
-.funcc::before {
+/* Painted rim + bloom, never rasterized over the contents. */
+.pkg::before {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  border: 1.5px solid currentColor;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--neon) 10%, transparent) 0%,
+      color-mix(in srgb, var(--neon) 3%, transparent) 30%,
+      transparent 60%
+    );
   pointer-events: none;
 }
 
-.pkg::before {
-  color: var(--color-hierarchy-package);
+.pkg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    0 0 0 1px rgba(168, 85, 247, 0.16),
+    0 0 12px rgba(168, 85, 247, 0.1),
+    0 0 28px rgba(168, 85, 247, 0.05);
+  pointer-events: none;
 }
 
 .pkg:active {
@@ -2051,20 +2384,30 @@ button.lib-item[disabled] {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  padding: 2px 16px;
-  background: var(--color-canvas);
+  padding: 4px 18px;
+  /* The title sits on its own glass chip straddling the top edge, so
+   * the rim passes behind it like a real label plate. */
+  border-radius: var(--radius-full);
+  background: rgba(12, 16, 34, 0.78);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -6px 14px rgba(6, 10, 26, 0.5),
+    0 6px 18px rgba(1, 3, 12, 0.45),
+    0 0 4px rgba(168, 85, 247, 0.06);
   white-space: nowrap;
 }
 
 .pkg-name {
-  font-family: var(--hand);
+  font-family: var(--sans);
   font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--color-fg);
 }
 
 .pkg-meta {
-  font-family: var(--hand);
-  font-size: 13px;
+  font-family: var(--mono);
+  font-size: 12px;
   color: var(--color-muted-fg);
 }
 
@@ -2077,13 +2420,37 @@ button.lib-item[disabled] {
 .structc {
   position: absolute;
   border: none;
-  border-radius: 18px 60px 20px 56px / 56px 20px 60px 18px;
+  border-radius: 22px;
   background: transparent;
+  box-shadow:
+    0 0 0 1px rgba(52, 211, 153, 0.12),
+    0 0 12px rgba(52, 211, 153, 0.08),
+    0 0 26px rgba(52, 211, 153, 0.04);
   overflow: visible;
 }
 
 .structc::before {
-  color: var(--color-hierarchy-struct);
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--neon) 8%, transparent) 0%,
+      color-mix(in srgb, var(--neon) 2%, transparent) 30%,
+      transparent 60%
+    );
+  pointer-events: none;
+}
+
+.structc::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.1), 0 0 8px rgba(52, 211, 153, 0.05);
+  pointer-events: none;
 }
 
 .structc-head {
@@ -2094,21 +2461,28 @@ button.lib-item[disabled] {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  padding: 2px 12px;
-  background: var(--color-canvas);
+  padding: 3px 14px;
+  border-radius: var(--radius-full);
+  background: rgba(12, 16, 34, 0.78);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.26),
+    inset 0 -6px 14px rgba(6, 10, 26, 0.5),
+    0 6px 18px rgba(1, 3, 12, 0.45),
+    0 0 4px rgba(52, 211, 153, 0.05);
   white-space: nowrap;
 }
 
 .structc-name {
-  font-family: var(--hand);
+  font-family: var(--sans);
   font-size: 16px;
-  color: var(--color-hierarchy-struct-label);
+  font-weight: 600;
+  color: var(--color-fg);
 }
 
 .preview-badge {
-  font-family: var(--hand);
-  font-size: 12px;
-  padding: 0 9px;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 1px 9px;
   border-radius: 999px;
   border: 1px dashed var(--color-line);
   color: var(--color-muted-fg);
@@ -2120,21 +2494,50 @@ button.lib-item[disabled] {
   height: 100%;
 }
 
+/* Function: the innermost glass sheet. It floats free of the struct
+ * above it rather than nesting a fourth set of borders. */
 .funcc {
   position: absolute;
   border: none;
-  border-radius: 16px 48px 18px 44px / 44px 18px 48px 16px;
+  border-radius: 18px;
   background: transparent;
+  box-shadow:
+    0 0 0 1px rgba(90, 169, 230, 0.12),
+    0 0 12px rgba(90, 169, 230, 0.08),
+    0 0 26px rgba(90, 169, 230, 0.04);
   overflow: visible;
-  transition: none;
+  transition: box-shadow var(--transition-fast) var(--ease-out-expo);
 }
 
 .funcc::before {
-  color: var(--color-hierarchy-function);
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--neon) 8%, transparent) 0%,
+      color-mix(in srgb, var(--neon) 2%, transparent) 24%,
+      transparent 56%
+    );
+  pointer-events: none;
 }
 
-.funcc[data-selected="true"]::before {
-  color: var(--color-hierarchy-function-label);
+.funcc::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 1px rgba(90, 169, 230, 0.1), 0 0 8px rgba(90, 169, 230, 0.05);
+  pointer-events: none;
+  transition: box-shadow var(--transition-fast) ease;
+}
+
+.funcc[data-selected="true"]::after {
+  box-shadow:
+    0 0 0 1px rgba(90, 169, 230, 0.2),
+    0 0 6px rgba(90, 169, 230, 0.1);
 }
 
 .funcc-head {
@@ -2145,8 +2548,14 @@ button.lib-item[disabled] {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 2px 10px;
-  background: var(--color-canvas);
+  padding: 3px 14px;
+  border-radius: var(--radius-full);
+  background: rgba(12, 16, 34, 0.8);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -6px 14px rgba(6, 10, 26, 0.5),
+    0 6px 18px rgba(1, 3, 12, 0.45),
+    0 0 4px rgba(90, 169, 230, 0.05);
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
@@ -2154,13 +2563,15 @@ button.lib-item[disabled] {
 }
 
 .funcc-name {
-  font-family: var(--hand);
+  font-family: var(--sans);
   font-size: 14px;
+  font-weight: 600;
   color: var(--color-hierarchy-function-label);
 }
 
 .funcc-name .fn-call {
   color: var(--color-muted-fg);
+  font-family: var(--mono);
 }
 
 .funcc-body {
@@ -2175,14 +2586,20 @@ button.lib-item[disabled] {
   top: 36px;
   right: 48px;
   padding: var(--space-4);
-  border-radius: 12px 26px 14px 24px / 24px 14px 26px 12px;
-  border: 1.5px dashed var(--color-line);
+  /* Inset glass: a quiet depression inside the function's own sheet,
+   * no stroke. */
+  border: none;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-canvas) 44%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 2px 10px rgba(2, 5, 14, 0.5);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   align-items: flex-start;
   color: var(--color-muted-fg);
-  font-family: var(--hand);
+  font-family: var(--sans);
   font-size: 14px;
 }
 
@@ -2273,4 +2690,305 @@ button.lib-item[disabled] {
   font-size: 12px;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
+}
+
+/* ==========================================================================
+ * LIGHT THEME — the liquid-glass pass is night-only.
+ *
+ * Every rule below restores the light theme's original surfaces: solid
+ * fills with a faint hairline instead of translucent midnight glass,
+ * plain borders instead of the neon bloom, and the original flow
+ * colour for the connection lines. Nothing here is new styling; it is
+ * the light theme put back exactly as it was, so flipping the theme
+ * never inherits a night surface.
+ * ========================================================================== */
+
+:root[data-theme="light"] .board {
+  border: 1px solid var(--border);
+  background-color: color-mix(in srgb, var(--color-canvas) 78%, transparent);
+  background-size: 26px 26px;
+  box-shadow: none;
+}
+
+/* Blocks: original solid card, plain border, no neon rim or bloom. */
+:root[data-theme="light"] .vblock {
+  border-radius: 12px 28px 14px 26px / 26px 14px 28px 12px;
+  border: 1.5px solid var(--color-hierarchy-function);
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Keep light mode's block pseudo-elements exactly as before the
+ * night-only dimming pass: the original neon rim and stripe glow. */
+:root[data-theme="light"] .vblock::before {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--neon) 88%, #ffffff) 0%,
+    color-mix(in srgb, var(--neon) 46%, transparent) 8%,
+    color-mix(in srgb, var(--neon) 14%, transparent) 30%,
+    transparent 62%
+  );
+  opacity: 0.85;
+}
+
+:root[data-theme="light"] .vblock::after {
+  box-shadow:
+    0 0 10px var(--neon),
+    0 0 22px color-mix(in srgb, var(--neon) 70%, transparent);
+}
+
+:root[data-theme="light"] .vblock:hover {
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .vblock[data-selected="true"] {
+  border-color: var(--color-hierarchy-function-label);
+  box-shadow: 0 0 0 1px var(--color-hierarchy-function-label);
+}
+
+:root[data-theme="light"] .vblock[data-error="true"] {
+  border-color: var(--color-error);
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .vblock[data-connect-from="true"] {
+  border-color: var(--color-hierarchy-function-label);
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .vblock-kind {
+  font-family: var(--hand);
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--color-muted-fg);
+}
+
+:root[data-theme="light"] .vblock-main {
+  font-family: var(--hand);
+}
+
+:root[data-theme="light"] .vblock-var {
+  font-family: var(--hand);
+  color: var(--color-data-identity);
+}
+
+:root[data-theme="light"] .vblock-type {
+  font-family: var(--hand);
+  font-size: 13px;
+  color: var(--color-data-value);
+}
+
+/* Ports: hollow rings, no neon outline or glow. */
+:root[data-theme="light"] .vport {
+  width: 12px;
+  height: 12px;
+  background: var(--color-canvas);
+  border: 2px solid var(--color-port-in);
+  box-shadow: none;
+  z-index: auto;
+}
+
+:root[data-theme="light"] .vport-left {
+  left: -8px;
+  top: 50%;
+  margin-top: -6px;
+}
+
+:root[data-theme="light"] .vport-right {
+  right: -8px;
+  top: 50%;
+  margin-top: -6px;
+  border-color: var(--color-port-out);
+}
+
+:root[data-theme="light"] .vport:hover {
+  transform: scale(1.25);
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .vblock[data-connect-from="true"] .vport-right {
+  background: var(--color-port-out);
+  box-shadow: none;
+}
+
+/* Containers: the original sketch outlines. */
+:root[data-theme="light"] .pkg,
+:root[data-theme="light"] .structc,
+:root[data-theme="light"] .funcc {
+  border: none;
+  border-radius: 16px 48px 18px 44px / 44px 18px 48px 16px;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .pkg::before,
+:root[data-theme="light"] .structc::before,
+:root[data-theme="light"] .funcc::before {
+  background: none;
+  border-radius: inherit;
+  border: 1.5px solid currentColor;
+}
+
+:root[data-theme="light"] .pkg::before {
+  color: var(--color-hierarchy-package);
+}
+
+:root[data-theme="light"] .structc::before {
+  color: var(--color-hierarchy-struct);
+}
+
+:root[data-theme="light"] .funcc::before {
+  color: var(--color-hierarchy-function);
+}
+
+:root[data-theme="light"] .funcc[data-selected="true"]::before {
+  color: var(--color-hierarchy-function-label);
+}
+
+:root[data-theme="light"] .funcc::after,
+:root[data-theme="light"] .pkg::after,
+:root[data-theme="light"] .structc::after {
+  display: none;
+}
+
+/* Titles: back on the canvas, not on a glass chip. */
+:root[data-theme="light"] .pkg-head,
+:root[data-theme="light"] .structc-head,
+:root[data-theme="light"] .funcc-head {
+  border-radius: 0;
+  background: var(--color-canvas);
+  box-shadow: none;
+  padding: 2px 16px;
+}
+
+:root[data-theme="light"] .structc-head {
+  padding: 2px 12px;
+}
+
+:root[data-theme="light"] .funcc-head {
+  padding: 2px 10px;
+}
+
+:root[data-theme="light"] .pkg-name,
+:root[data-theme="light"] .pkg-meta {
+  font-family: var(--hand);
+}
+
+:root[data-theme="light"] .structc-name {
+  font-family: var(--hand);
+  color: var(--color-hierarchy-struct-label);
+}
+
+:root[data-theme="light"] .funcc-name {
+  font-family: var(--hand);
+}
+
+:root[data-theme="light"] .funcc-name .fn-call {
+  font-family: var(--hand);
+}
+
+:root[data-theme="light"] .funcc-empty {
+  border: 1.5px dashed var(--color-line);
+  border-radius: 12px 26px 14px 24px / 24px 14px 26px 12px;
+  background: transparent;
+  box-shadow: none;
+  font-family: var(--hand);
+}
+
+/* Connection lines: the original flow colour, no bloom. */
+:root[data-theme="light"] .edge,
+:root[data-theme="light"] .edge-selected,
+:root[data-theme="light"] .edge-preview {
+  stroke: var(--color-flow);
+  stroke-width: 1.5;
+  filter: none;
+}
+
+:root[data-theme="light"] .edge-selected {
+  stroke: var(--color-flow-selected);
+}
+
+:root[data-theme="light"] .edge-preview {
+  stroke: var(--color-flow-preview);
+  stroke-dasharray: 6 5;
+}
+
+:root[data-theme="light"] .marker-flow {
+  fill: var(--color-flow);
+  filter: none;
+}
+
+:root[data-theme="light"] .edge-flow,
+:root[data-theme="light"] .edge-flow-trail {
+  filter: none;
+}
+
+/* Chrome: the original faint hairline and highlight. */
+:root[data-theme="light"] .appbar,
+:root[data-theme="light"] .pane {
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-highlight);
+}
+
+:root[data-theme="light"] .btn {
+  border: 1px solid var(--glass-border);
+  background: var(--surface-elevated);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+  color: var(--text-primary);
+}
+
+:root[data-theme="light"] .btn:hover {
+  background: var(--surface-selected);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+
+:root[data-theme="light"] .btn-primary {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+
+:root[data-theme="light"] .btn-primary:hover {
+  background: color-mix(in srgb, var(--color-primary) 24%, transparent);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+
+:root[data-theme="light"] .btn-panel {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+}
+
+:root[data-theme="light"] .btn-panel:hover {
+  background: color-mix(in srgb, var(--danger) 24%, transparent);
+}
+
+:root[data-theme="light"] .field input,
+:root[data-theme="light"] .field select,
+:root[data-theme="light"] .glass-input {
+  border: 1px solid var(--border-strong);
+  background: var(--surface-inset);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.24);
+}
+
+:root[data-theme="light"] .field input:hover,
+:root[data-theme="light"] .field select:hover {
+  border-color: var(--glass-border);
+}
+
+:root[data-theme="light"] .field input:focus,
+:root[data-theme="light"] .field select:focus {
+  border-color: var(--accent-border);
+  background: color-mix(in srgb, var(--surface-inset) 70%, var(--accent-soft));
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.24);
+}
+
+:root[data-theme="light"] .status-dot {
+  border: 1px solid var(--border);
+  background: var(--surface-inset);
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .status-dot i {
+  box-shadow: none;
 }

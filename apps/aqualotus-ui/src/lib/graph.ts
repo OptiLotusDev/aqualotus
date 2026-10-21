@@ -269,6 +269,13 @@ export interface EdgeEnds {
  * bottom edge. Blocks carry exactly two ports (left in, right out) and
  * chains run left → right; presentation only, semantics still come from
  * `next` pointers alone.
+ *
+ * `a` and `b` must be the block's **border box** (the painted `.vblock`
+ * box): `x1` is the right edge and the port sits at the vertical
+ * centre, so a content-box rect (padding excluded) misses the port by
+ * the block's horizontal padding on x and half the vertical padding on
+ * y. The sizes map is therefore populated from `offsetWidth` /
+ * `offsetHeight`, never from a ResizeObserver `contentRect`.
  */
 export function edgeEnds(a: BlockRect, b: BlockRect): EdgeEnds {
   return {
