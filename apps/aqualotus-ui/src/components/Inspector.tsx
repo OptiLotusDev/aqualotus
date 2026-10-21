@@ -448,6 +448,7 @@ function FunctionRenameForm(props: {
     >
       <input
         aria-label="Function name"
+        className="glass-input"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder="function name"
