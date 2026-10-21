@@ -37,6 +37,31 @@ export const BLOCKS: readonly BlockDefinition[] = [
     action: "create-function",
   },
   {
+    kind: "if",
+    label: "If / Else",
+    category: "Program",
+    description:
+      "Branch on a boolean condition. Two outputs lead to the true and false branches, which converge into one at the end.",
+    aliases: ["if", "condition", "branch"],
+    draft: {
+      kind: "if",
+      condition: "true",
+      then: [
+        {
+          kind: "print",
+          var: null,
+          ty: null,
+          access: null,
+          init: null,
+          expr: null,
+          template: '""',
+          to: null,
+        },
+      ],
+      else: null,
+    },
+  },
+  {
     kind: "return",
     label: "Return",
     category: "Program",

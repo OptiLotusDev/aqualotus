@@ -45,17 +45,24 @@ describe("filterBlocks", () => {
   it("lists exactly the api.md surface — nothing invented", () => {
     const kinds = BLOCKS.map((b) => b.kind).sort();
     expect(kinds).toEqual(
-      ["assign", "call", "declare", "function", "print", "return"].sort(),
+      ["assign", "call", "declare", "function", "if", "print", "return"].sort(),
     );
   });
 });
 
 describe("findAvailableBlock", () => {
   it("resolves every api.md block and nothing else", () => {
-    for (const kind of ["declare", "assign", "print", "return", "call", "function"]) {
+    for (const kind of [
+      "declare",
+      "assign",
+      "print",
+      "return",
+      "call",
+      "function",
+      "if",
+    ]) {
       expect(findAvailableBlock(kind)?.kind).toBe(kind);
     }
-    expect(findAvailableBlock("if")).toBe(null);
     expect(findAvailableBlock("nope")).toBe(null);
   });
 });
