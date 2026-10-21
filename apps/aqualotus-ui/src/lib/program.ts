@@ -93,11 +93,15 @@ export function summaryToDraft(cmd: CommandSummary): CommandDraft {
     case "if":
       // Branch bodies are stored as raw command ids; a draft carries
       // specs. The bridge does not expose a body-id → spec projection,
-      // so an `if` cannot be faithfully rebuilt here. Failing loudly
-      // beats restoring a block with silently empty branches.
-      throw new Error(
-        `Cannot rebuild a draft for 'if' (#${cmd.id}): branch bodies are not recoverable from a summary.`,
-      );
+      // so an `if` cannot be faithfully rebuilt here. Show the condition
+      // read-only and keep branches empty; Apply is disabled to avoid
+      // corrupting the block.
+      return {
+        kind: "if",
+        condition: cmd.condition !== undefined ? String(cmd.condition) : "",
+        then: [],
+        else: null,
+      };
     default:
       return unreachableKind(cmd.kind);
   }

@@ -1548,6 +1548,20 @@ p {
   cursor: crosshair;
 }
 
+.vport-then {
+  right: -8px;
+  top: 25%;
+  margin-top: -6.5px;
+  cursor: crosshair;
+}
+
+.vport-else {
+  right: -8px;
+  top: 75%;
+  margin-top: -6.5px;
+  cursor: crosshair;
+}
+
 .vport:hover {
   transform: scale(1.35);
   box-shadow:

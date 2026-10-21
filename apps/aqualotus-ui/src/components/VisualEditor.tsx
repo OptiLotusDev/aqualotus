@@ -991,8 +991,10 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
         flashHint("Selected its function — drag again to connect.");
         return;
       }
-      // Two ports only: the single right out-port starts a connection.
-      gestureRef.current = { kind: "connect", fid, sourceId: id, side: "right" };
+      const side = (port.dataset.side ?? "right") as BlockSide;
+      // Two ports only: the right out-port (or then/else for if) starts
+      // a connection.
+      gestureRef.current = { kind: "connect", fid, sourceId: id, side };
       movedRef.current = false;
       try {
         (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
@@ -1595,7 +1597,12 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                       );
                       const size = sizeOf(preview.fid, preview.sourceId);
                       const ox = origin.x + size.w;
-                      const oy = origin.y + size.h / 2;
+                      const oy =
+                        preview.side === "then"
+                          ? origin.y + size.h * 0.25
+                          : preview.side === "else"
+                            ? origin.y + size.h * 0.75
+                            : origin.y + size.h / 2;
                       return (
                         <path
                           d={edgePath(ox, oy, preview.x, preview.y, true)}
@@ -1691,7 +1698,12 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                         );
                         const size = sizeOf(preview.fid, preview.sourceId);
                         const ox = origin.x + size.w;
-                        const oy = origin.y + size.h / 2;
+                        const oy =
+                        preview.side === "then"
+                          ? origin.y + size.h * 0.25
+                          : preview.side === "else"
+                            ? origin.y + size.h * 0.75
+                            : origin.y + size.h / 2;
                         return (
                           <path
                             d={edgePath(ox, oy, preview.x, preview.y, true)}
