@@ -562,7 +562,7 @@ export default function Inspector(props: InspectorProps): ReactElement {
           <button
             type="submit"
             className="btn btn-primary"
-            disabled={busy || editBlocked}
+            disabled={busy || editBlocked || edit.kind === "if"}
             title={
               editBlocked
                 ? "Fix the value error first (see above)"

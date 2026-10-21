@@ -208,10 +208,10 @@ describe("summaryToDraft", () => {
   });
 
   // An `if` summary carries raw command ids for its branches, which the
-  // bridge cannot project back to specs. Failing loudly is deliberate:
-  // restoring a block with silently empty branches would corrupt it.
-  it("refuses to rebuild an if draft rather than dropping its branches", () => {
-    expect(() =>
+  // bridge cannot project back to specs. Rebuild with empty branches so
+  // the inspector can open; Apply is disabled to avoid corruption.
+  it("rebuilds an if draft with empty branches (not recoverable)", () => {
+    expect(
       summaryToDraft({
         id: 8,
         kind: "if",
@@ -220,7 +220,12 @@ describe("summaryToDraft", () => {
         then_body: [4, 5],
         else_body: [6],
       }),
-    ).toThrow(/Cannot rebuild a draft for 'if'/);
+    ).toEqual({
+      kind: "if",
+      condition: "3",
+      then: [],
+      else: null,
+    });
   });
 
   it("quotes string/char initializers for display", () => {

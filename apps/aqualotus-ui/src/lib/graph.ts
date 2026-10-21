@@ -252,7 +252,7 @@ export interface BlockRect {
   readonly h: number;
 }
 
-export type BlockSide = "top" | "bottom" | "left" | "right";
+export type BlockSide = "top" | "bottom" | "left" | "right" | "then" | "else";
 
 export interface EdgeEnds {
   readonly x1: number;

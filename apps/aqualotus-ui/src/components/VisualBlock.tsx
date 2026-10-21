@@ -77,14 +77,37 @@ function VisualBlock(props: VisualBlockProps): ReactElement {
           Error reported here
         </span>
       ) : null}
-      <span
-        className="vport vport-right"
-        data-port="out"
-        data-side="right"
-        data-block-id={command.id}
-        data-fid={fid}
-        aria-hidden="true"
-      />
+      {command.kind === "if" ? (
+        <>
+          <span
+            className="vport vport-right vport-then"
+            data-port="out"
+            data-side="then"
+            data-block-id={command.id}
+            data-fid={fid}
+            aria-hidden="true"
+            title="then branch"
+          />
+          <span
+            className="vport vport-right vport-else"
+            data-port="out"
+            data-side="else"
+            data-block-id={command.id}
+            data-fid={fid}
+            aria-hidden="true"
+            title="else branch"
+          />
+        </>
+      ) : (
+        <span
+          className="vport vport-right"
+          data-port="out"
+          data-side="right"
+          data-block-id={command.id}
+          data-fid={fid}
+          aria-hidden="true"
+        />
+      )}
     </div>
   );
 }
