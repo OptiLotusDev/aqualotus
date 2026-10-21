@@ -31,12 +31,15 @@ const COMPACT_FRAME_MS = 33;
 /** Trail fade per frame: the ink keeps a short memory of its path. */
 const FADE_ALPHA = 0.06;
 
-/** Steady-state ink alpha, and the alpha of the opening burst. */
-const BASE_ALPHA = 0.48;
-const VIVID_ALPHA = 0.8;
+/** Steady-state ink alpha, and the alpha of the opening burst.
+ * Kept deliberately low: the fluid ink is atmosphere, not scenery.
+ * The blocks and containers on top must stay the loudest thing on
+ * screen, so the ink is pulled back to a faint drift. */
+const BASE_ALPHA = 0.32;
+const VIVID_ALPHA = 0.55;
 
 /** Strength of the central darkening that keeps text readable. */
-const VIGNETTE_ALPHA = 0.42;
+const VIGNETTE_ALPHA = 0.48;
 
 const COMPACT_QUERY = "(max-width: 767px)";
 
@@ -128,25 +131,56 @@ export default function FluidBackdrop(): ReactElement {
       // water rather than stacking into flat paint.
       ctx.globalCompositeOperation = "lighter";
       const burst = burstEnvelope(elapsed);
-      ctx.globalAlpha = BASE_ALPHA + burst * (VIVID_ALPHA - BASE_ALPHA);
+      const baseAlpha = BASE_ALPHA + burst * (VIVID_ALPHA - BASE_ALPHA);
       for (const blob of blobs) {
+        // Very subtle breathing pulse per flower.
+        ctx.globalAlpha = baseAlpha * (0.88 + 0.12 * Math.sin(elapsed * 0.9 + blob.phase));
         const color = palette[blob.colorIndex % palette.length];
         const radius = blob.radius * height * (1 + burst * 0.45);
         ctx.save();
         ctx.translate(blob.x * width, blob.y * height);
         ctx.rotate(blob.angle);
-        // A long, linear falloff keeps the ink soft: a short plateau
-        // would draw a visible rim around every blob.
-        const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
-        gradient.addColorStop(0, color);
-        gradient.addColorStop(0.15, color);
-        gradient.addColorStop(1, "transparent");
-        ctx.fillStyle = gradient;
+        // Lotus flower: a ring of soft petals around a glowing centre.
+        // Each petal is a stretched ellipse radiating outward; the whole
+        // flower rotates with blob.angle and drifts with the simulation.
+        const petals = 8;
+        for (let i = 0; i < petals; i += 1) {
+          ctx.save();
+          ctx.rotate((i / petals) * Math.PI * 2);
+          const petalGrad = ctx.createRadialGradient(
+            radius * 0.42,
+            0,
+            0,
+            radius * 0.42,
+            0,
+            radius * 0.62,
+          );
+          petalGrad.addColorStop(0, color);
+          petalGrad.addColorStop(1, "transparent");
+          ctx.fillStyle = petalGrad;
+          ctx.beginPath();
+          ctx.ellipse(
+            radius * 0.42,
+            0,
+            radius * 0.62,
+            radius * 0.22,
+            0,
+            0,
+            Math.PI * 2,
+          );
+          ctx.fill();
+          ctx.restore();
+        }
+        // Glowing centre.
+        const centreGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, radius * 0.28);
+        centreGrad.addColorStop(0, color);
+        centreGrad.addColorStop(1, "transparent");
+        ctx.fillStyle = centreGrad;
         ctx.beginPath();
-        ctx.ellipse(0, 0, radius, radius / blob.stretch, 0, 0, Math.PI * 2);
+        ctx.arc(0, 0, radius * 0.28, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
-      }
+        }
 
       // Central darkening: the middle of the screen carries the
       // editor and its text, so the ink is pulled back from it.

@@ -691,8 +691,14 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
           const target = entry.target as HTMLElement;
           const key = target.dataset.sizeKey;
           if (key === undefined || key === "") continue;
-          const w = entry.contentRect.width;
-          const h = entry.contentRect.height;
+          // Border box, not `contentRect`: the port-anchored edge
+          // geometry and the container auto-sizing both treat these as
+          // the painted `.vblock` box, whose right edge and vertical
+          // centre carry the ports. A content rect (padding excluded)
+          // placed every arrow short by the block's horizontal padding
+          // and off-centre vertically by half its vertical padding.
+          const w = entry.borderBoxSize?.[0]?.inlineSize ?? target.offsetWidth;
+          const h = entry.borderBoxSize?.[0]?.blockSize ?? target.offsetHeight;
           if (w <= 0 || h <= 0) continue;
           const cur = next.get(key);
           if (cur?.w !== w || cur?.h !== h) {

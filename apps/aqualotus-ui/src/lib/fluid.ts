@@ -30,7 +30,7 @@ export const FLUID_BLOB_COUNT = 9;
 export const FLUID_BURST_SECONDS = 1.4;
 
 /** Drift speed in normalized screen units per second (slow, continuous). */
-const DRIFT = 0.02;
+const DRIFT = 0.028;
 
 /** Pointer influence radius, in normalized screen units. */
 const POINTER_REACH = 0.5;
@@ -115,7 +115,7 @@ export function createFluidBlobs(
       radius: 0.12 + rand() * 0.1,
       stretch: 1.05 + rand() * 0.5,
       angle: rand() * Math.PI,
-      spin: (rand() - 0.5) * 0.25,
+      spin: (rand() - 0.5) * 0.35,
       colorIndex: i % FLUID_FALLBACK_COLORS.length,
       phase: rand() * Math.PI * 2,
     });
@@ -123,10 +123,12 @@ export function createFluidBlobs(
   return blobs;
 }
 
-/** Mirror a coordinate back into the visible range. */
+/** Wrap a coordinate around the visible range so blobs never pile up
+ *  against — or get stuck in — the screen edges/corners. Motion stays
+ *  continuous instead of bouncing back and forth. */
 function reflect(v: number): number {
-  if (v < 0) return -v;
-  if (v > 1) return 2 - v;
+  if (v < 0) return 1 + (v % 1);
+  if (v > 1) return v % 1;
   return v;
 }
 
@@ -141,7 +143,11 @@ export function stepFluidBlobs(
   dt: number,
   pointer: FluidPointer,
 ): readonly FluidBlob[] {
-  return blobs.map((blob) => {
+  // Pairwise soft repulsion so flowers never magnetise toward each other:
+  // each one keeps its own space and drifts independently.
+  const REPULSE_REACH = 0.22;
+  const REPULSE_STRENGTH = 0.06;
+  return blobs.map((blob, i) => {
     const ax =
       Math.sin(blob.y * 3.3 + time * 0.21 + blob.phase) * 0.6 +
       Math.cos(blob.x * 2.7 - time * 0.16) * 0.4;
@@ -150,6 +156,21 @@ export function stepFluidBlobs(
       Math.sin(blob.y * 3.6 + time * 0.12) * 0.5;
     let vx = ax * DRIFT;
     let vy = ay * DRIFT;
+
+    for (let j = 0; j < blobs.length; j += 1) {
+      if (j === i) continue;
+      const other = blobs[j];
+      if (other === undefined) continue;
+      const dx = blob.x - other.x;
+      const dy = blob.y - other.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < REPULSE_REACH && dist > 1e-4) {
+        const falloff = (1 - dist / REPULSE_REACH) ** 2;
+        const push = falloff * REPULSE_STRENGTH;
+        vx += (dx / dist) * push;
+        vy += (dy / dist) * push;
+      }
+    }
 
     if (pointer.active) {
       const dx = pointer.x - blob.x;
