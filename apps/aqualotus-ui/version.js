@@ -22,3 +22,21 @@ export function optilotusVersionFromCargo() {
   }
   return match[1];
 }
+
+/**
+ * Single source of truth for the AquaLotus application version shown in
+ * the UI: read at build time from the app's `package.json`, so a
+ * version bump in the app package reaches the app bar with no UI edit.
+ * This is the AquaLotus app version, independent of the Optilotus
+ * engine version read from `crates/optilotus/Cargo.toml`.
+ */
+export function aqualotusVersionFromPackage() {
+  const pkg = JSON.parse(
+    readFileSync(resolve(here, "package.json"), "utf8"),
+  );
+  const version = pkg?.version;
+  if (typeof version !== "string" || version === "") {
+    throw new Error("Cannot parse version from package.json");
+  }
+  return version;
+}

@@ -692,7 +692,9 @@ export default function AppShell(props: AppShellProps): ReactElement {
           </button>
         )}
         <div style={{ minWidth: 0 }}>
-          <div className="appbar-title">Aqualotus</div>
+          <div className="appbar-title">
+            Aqualotus <span className="appbar-version">v{__AQUALOTUS_VERSION__}</span>
+          </div>
           <div className="appbar-sub">
             <RevealText
               text={
