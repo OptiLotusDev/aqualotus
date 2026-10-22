@@ -12,6 +12,22 @@ import type { CommandDraft } from "../lib/program";
 // ------------------------------------------------------------------
 const ctl = vi.hoisted(() => ({
   failDeleteOnce: false,
+  /**
+   * The failure the mocked `runProgram` reports, if any.
+   *
+   * The mock lets a test choose the id the engine blames, so the UI's
+   * mapping rules can be checked against a *known* internal node id.
+   * This is a **mocked** bridge: it proves the UI's own logic, not that
+   * the engine supplies such a mapping (see the real-engine tests in
+   * `useProgram.engine.test.tsx`).
+   */
+  runError: null as null | {
+    kind: string;
+    command: number | null;
+    message: string;
+    detail?: string;
+    var?: string;
+  },
 }));
 
 type Row = {
@@ -333,7 +349,12 @@ vi.mock("../lib/optilotus", () => ({
     );
     return ok({ deleted: cmd });
   }),
-  optilotus_runProgram: vi.fn(() => ({ status: "ok", steps: 1, prints: 0, printed: [] })),
+  optilotus_runProgram: vi.fn(() => {
+    if (ctl.runError !== null) {
+      return { status: "error", ...ctl.runError };
+    }
+    return { status: "ok", steps: 1, prints: 0, printed: [] };
+  }),
 }));
 
 import { useProgram } from "./useProgram";
@@ -348,6 +369,7 @@ function resetDb(): void {
   db.nextFunctionId = 1;
   db.nextCommandId = 1;
   ctl.failDeleteOnce = false;
+  ctl.runError = null;
 }
 
 let seq = 0;
@@ -860,5 +882,136 @@ describe("useProgram rename function", () => {
       "worker",
     );
     expect(api().canUndo).toBe(canUndo);
+  });
+});
+
+/**
+ * Run failures — **mocked bridge**.
+ *
+ * The mock lets the test choose the id the engine blames, so the UI's
+ * mapping rules can be checked against a known internal node id. This
+ * proves the UI's own logic; the real-engine counterpart
+ * (`useProgram.engine.test.tsx`) proves what the engine actually
+ * reports.
+ */
+describe("useProgram run failures (mocked bridge)", () => {
+  beforeEach(() => {
+    resetDb();
+    seq = 0;
+  });
+
+  function setup(): ReturnType<
+    typeof renderHook<ReturnType<typeof useProgram>, unknown>
+  > {
+    return renderHook(() => useProgram(true, issueSeq));
+  }
+
+  /** One declared block, so the projection holds a visible block id. */
+  function addDeclare(
+    getApi: () => ReturnType<typeof useProgram>,
+  ): number {
+    act(() => {
+      getApi().addCommand(0, declareDraft("a"));
+    });
+    const id = getApi().snapshot.commands.find((c) => c.var === "a")?.id;
+    expect(id).toBeTypeOf("number");
+    return id ?? -1;
+  }
+
+  it("resolves a failure whose node is the block's own node", () => {
+    const view = setup();
+    const api = (): ReturnType<typeof useProgram> => view.result.current;
+    const blockId = addDeclare(api);
+    ctl.runError = {
+      kind: "UnknownVariable",
+      command: blockId,
+      message: `unknown variable "ghost" at ${blockId}`,
+      var: "ghost",
+    };
+
+    act(() => {
+      api().run();
+    });
+
+    // The failure keeps its family, its message and its fields.
+    expect(api().snapshot.error?.kind).toBe("UnknownVariable");
+    expect(api().snapshot.error?.message).toContain('unknown variable "ghost"');
+    expect(api().snapshot.error?.var).toBe("ghost");
+    // The blamed node is the block's own node, so the block is the
+    // target.
+    expect(api().snapshot.errorBlockId).toBe(blockId);
+    expect(api().snapshot.errorFunctionId).toBe(0);
+  });
+
+  it("leaves a failure on an internal node unresolved", () => {
+    const view = setup();
+    const api = (): ReturnType<typeof useProgram> => view.result.current;
+    const blockId = addDeclare(api);
+    // The engine blamed a hidden node of the block's group.
+    ctl.runError = {
+      kind: "TypeMismatch",
+      command: blockId + 1000,
+      message: "type mismatch",
+      detail: "int32 vs string",
+    };
+
+    act(() => {
+      api().run();
+    });
+
+    expect(api().snapshot.error?.kind).toBe("TypeMismatch");
+    expect(api().snapshot.error?.detail).toBe("int32 vs string");
+    // No block owns that node: the UI names none.
+    expect(api().snapshot.errorBlockId).toBeNull();
+    expect(api().snapshot.errorFunctionId).toBeNull();
+  });
+
+  it("clears the failure and its target when the failure is dismissed", () => {
+    const view = setup();
+    const api = (): ReturnType<typeof useProgram> => view.result.current;
+    const blockId = addDeclare(api);
+    ctl.runError = {
+      kind: "UnknownVariable",
+      command: blockId,
+      message: "unknown variable",
+    };
+
+    act(() => {
+      api().run();
+    });
+    expect(api().snapshot.errorBlockId).toBe(blockId);
+
+    act(() => {
+      api().dismissError();
+    });
+    expect(api().snapshot.error).toBeNull();
+    expect(api().snapshot.errorBlockId).toBeNull();
+    expect(api().snapshot.errorFunctionId).toBeNull();
+    expect(api().snapshot.actionError).toBe("");
+  });
+
+  it("does not keep the target of an earlier run", () => {
+    const view = setup();
+    const api = (): ReturnType<typeof useProgram> => view.result.current;
+    const blockId = addDeclare(api);
+    ctl.runError = {
+      kind: "UnknownVariable",
+      command: blockId,
+      message: "unknown variable",
+    };
+    act(() => {
+      api().run();
+    });
+    expect(api().snapshot.errorBlockId).toBe(blockId);
+
+    // The next run succeeds: neither the failure nor its target may
+    // survive it.
+    ctl.runError = null;
+    act(() => {
+      api().run();
+    });
+    expect(api().snapshot.error).toBeNull();
+    expect(api().snapshot.errorBlockId).toBeNull();
+    expect(api().snapshot.errorFunctionId).toBeNull();
   });
 });

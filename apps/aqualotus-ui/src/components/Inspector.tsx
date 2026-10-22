@@ -15,6 +15,14 @@ import {
 
 interface InspectorProps {
   readonly func: (FunctionInfo & { status: "ok" }) | null;
+  /**
+   * The user-visible entry point of the shown function.
+   *
+   * The engine's own entry can name a hidden node (an `if`'s condition
+   * compute); the UI resolves it to the block the chain starts at, so
+   * the panel never shows a block id that does not exist.
+   */
+  readonly entry: number | null;
   readonly selected: CommandSummary | null;
   readonly busy: boolean;
   /** Recovery hint: attempted undeclared variable name, if any. */
@@ -478,6 +486,7 @@ function FunctionRenameForm(props: {
 export default function Inspector(props: InspectorProps): ReactElement {
   const {
     func,
+    entry,
     selected,
     busy,
     recoveryVar,
@@ -641,15 +650,15 @@ export default function Inspector(props: InspectorProps): ReactElement {
           <div>
             <dt>Entry point</dt>
             <dd>
-              {func.entry === null || func.entry === undefined
+              {entry === null
                 ? "Cleared — run is a no-op"
                 : func.isMain
-                  ? `Yes — starts at #${func.entry}`
-                  : `Starts at #${func.entry}`}
+                  ? `Yes — starts at #${entry}`
+                  : `Starts at #${entry}`}
             </dd>
           </div>
         </dl>
-        {func.entry !== null && func.entry !== undefined ? (
+        {entry !== null ? (
           <button
             type="button"
             className="btn btn-ghost btn-sm btn-danger"

@@ -41,19 +41,40 @@ import {
   normalizeDeclareInit,
   renameRefs,
   summaryToDraft,
+  type UiCommand,
 } from "../lib/program";
 import type { CommandDraft } from "../lib/program";
-import type { LinkPlan } from "../lib/graph";
+import {
+  chainTailOf,
+  resolveEntry,
+  type LinkPlan,
+} from "../lib/graph";
+import {
+  internalCommandOf,
+  resolveErrorTarget,
+  type UiRunError,
+} from "../lib/errors";
 
 /** Immutable program projection owned by `useProgram` (P10). */
 export interface ProgramSnapshot {
   readonly functions: readonly FunctionSummary[];
   readonly selectedId: FunctionId | null;
   readonly selected: (FunctionInfo & { status: "ok" }) | null;
-  readonly commands: readonly CommandSummary[];
+  /**
+   * The user-visible entry point of the selected function.
+   *
+   * The engine's own `entry` can point at a **hidden** node: when an
+   * `if` heads the chain, the engine points the entry at the `if`'s
+   * condition compute. The UI resolves it to the block the chain
+   * really starts at (`lib/graph.ts::resolveEntry`), so every consumer
+   * (the connection notice, the link planners, the flow animation)
+   * works on a block id.
+   */
+  readonly entry: number | null;
+  readonly commands: readonly UiCommand[];
   /** All functions' commands, keyed by FunctionId (for the workspace canvas). */
   readonly commandsByFunction: Readonly<
-    Record<number, readonly CommandSummary[]>
+    Record<number, readonly UiCommand[]>
   >;
   readonly selectedCommandId: CommandId | null;
   readonly run: RunResult | null;
@@ -62,7 +83,31 @@ export interface ProgramSnapshot {
   readonly durationMs: number | null;
   readonly busy: boolean;
   readonly actionError: string;
-  readonly commandErrorId: CommandId | null;
+  /**
+   * The failure the UI is currently showing, **exactly as the bridge
+   * reported it**.
+   *
+   * The envelope is kept verbatim: the error family (`kind`), the
+   * engine's message, the internal IR node id (`command`) and the
+   * kind-specific extras (`detail`, `value`, `expected`, `found`,
+   * `limit`, `var`, `function`). `null` when there is no failure.
+   *
+   * `command` is an **internal node id**, not a block id — see
+   * `lib/errors.ts`.
+   */
+  readonly error: UiRunError | null;
+  /**
+   * The visible block the current failure points at.
+   *
+   * `null` when the failure cannot be attributed to a block the canvas
+   * knows: the engine blamed a hidden node (a `print`'s hidden print
+   * node, a `cast`'s hidden compute node, an `if`'s hidden condition
+   * compute) or a node of another package. The UI never guesses a
+   * block for an unresolved failure.
+   */
+  readonly errorBlockId: CommandId | null;
+  /** The function that owns {@link ProgramSnapshot.errorBlockId}. */
+  readonly errorFunctionId: FunctionId | null;
   /**
    * Non-destructive recovery hint: when an assign fails because its
    * variable is undeclared, the attempted name is kept here so the UI
@@ -75,6 +120,7 @@ const EMPTY: ProgramSnapshot = {
   functions: [],
   selectedId: null,
   selected: null,
+  entry: null,
   commands: [],
   commandsByFunction: {},
   selectedCommandId: null,
@@ -83,7 +129,9 @@ const EMPTY: ProgramSnapshot = {
   durationMs: null,
   busy: false,
   actionError: "",
-  commandErrorId: null,
+  error: null,
+  errorBlockId: null,
+  errorFunctionId: null,
   recoveryVar: null,
 };
 
@@ -98,30 +146,98 @@ interface CommandSlot {
 
 function failThrown(snapshot: ProgramSnapshot, e: unknown): ProgramSnapshot {
   return {
-    ...snapshot,
+    ...clearFailure(snapshot),
     busy: false,
     running: false,
     actionError: e instanceof Error ? e.message : String(e),
-    commandErrorId: null,
-    recoveryVar: null,
+  };
+}
+
+/**
+ * Forget the current failure.
+ *
+ * The message, the verbatim envelope and the resolved visible target go
+ * together: a stale target can never outlive the failure it belonged
+ * to. Every new user action starts from here, so a previous run's
+ * block is never highlighted while a new one runs.
+ */
+function clearFailure(snapshot: ProgramSnapshot): ProgramSnapshot {
+  return {
+    ...snapshot,
+    actionError: "",
+    error: null,
+    errorBlockId: null,
+    errorFunctionId: null,
+  };
+}
+
+/**
+ * Record a failure: the human message, the envelope exactly as the
+ * bridge sent it, and the visible block it resolves to.
+ *
+ * The resolution is a **verified** lookup (see `lib/errors.ts`): the
+ * engine's id is only a block id when that very node is the one a
+ * visible block owns. A failure on a hidden node resolves to nothing,
+ * and the UI then shows the failure without pointing at a block.
+ */
+function withFailure(
+  snapshot: ProgramSnapshot,
+  error: UiRunError,
+  message: string,
+): ProgramSnapshot {
+  const target = resolveErrorTarget(
+    snapshot.commandsByFunction,
+    internalCommandOf(error),
+  );
+  return {
+    ...snapshot,
+    actionError: message,
+    error,
+    errorBlockId: target?.blockId ?? null,
+    errorFunctionId: target?.functionId ?? null,
+  };
+}
+
+/**
+ * Re-derive the visible target of the current failure against the
+ * graph as it is now.
+ *
+ * A block that was deleted (or replaced by a fresh one) no longer owns
+ * the id the engine blamed, so the target disappears with it instead of
+ * pointing at a block that is no longer there.
+ */
+function withResolvedTarget(
+  snapshot: ProgramSnapshot,
+  commandsByFunction: ProgramSnapshot["commandsByFunction"],
+): ProgramSnapshot {
+  const target = resolveErrorTarget(
+    commandsByFunction,
+    internalCommandOf(snapshot.error),
+  );
+  return {
+    ...snapshot,
+    errorBlockId: target?.blockId ?? null,
+    errorFunctionId: target?.functionId ?? null,
   };
 }
 
 function failCommand(snapshot: ProgramSnapshot, raw: unknown): ProgramSnapshot {
   if (typeof raw !== "object" || raw === null || !("status" in raw)) {
-    return { ...snapshot, busy: false, actionError: String(raw) };
+    // Not a typed envelope: the message replaces the previous failure
+    // completely, so no stale envelope or target survives it.
+    return {
+      ...clearFailure(snapshot),
+      busy: false,
+      actionError: String(raw),
+    };
   }
   const result = raw as { status: string } & Record<string, unknown>;
   if (!isOptilotusError(result)) {
     return { ...snapshot, busy: false };
   }
-  const command =
-    typeof result.command === "number" ? (result.command as number) : null;
   return {
-    ...snapshot,
+    ...withFailure(snapshot, result, errorMessage(result)),
     busy: false,
-    actionError: errorMessage(result),
-    commandErrorId: command,
     recoveryVar: snapshot.recoveryVar,
   };
 }
@@ -147,23 +263,205 @@ function assertNeverDraft(draft: never): never {
   );
 }
 
-/** Read exact links + entry straight from the bridge. */
-function readLinks(fid: FunctionId): {
+/**
+ * Read the function's links and entry straight from the bridge.
+ *
+ * The links are the **logical** user-level ones: the engine's own
+ * `next` edges plus the connections the engine accepted but cannot
+ * report (the edge into an `if`). The undo/redo history captures this
+ * map, so a rewire into an `if` can be undone like any other.
+ *
+ * The entry is the **user-visible** one: the engine's entry can point
+ * at a hidden node (an `if`'s condition compute), which no block could
+ * be named after.
+ */
+function readLinks(
+  fid: FunctionId,
+  planned: PlannedLinks,
+): {
   links: Map<number, number | null>;
   entry: number | null;
 } | null {
   const listed = optilotus_listCommands(fid);
   if (isOptilotusError(listed)) return null;
   const info = optilotus_getFunction(fid);
-  const entry =
+  const rawEntry =
     !isOptilotusError(info) && info.entry !== undefined ? info.entry : null;
   const links = new Map<number, number | null>();
   for (const c of listed.commands) links.set(c.id, c.next ?? null);
-  return { links, entry };
+  const known = new Set(listed.commands.map((c) => c.id));
+  for (const [from, to] of planned) {
+    if ((links.get(from) ?? null) !== null) continue;
+    if (!known.has(to)) continue;
+    links.set(from, to);
+  }
+  return { links, entry: resolveEntry(listed.commands, rawEntry) };
+}
+
+/**
+ * The UI-planned connections of one function: `from` → `to`, where
+ * `to` is always an `if`.
+ *
+ * The engine cannot report the edge into an `if` (its hidden condition
+ * compute sits between the two blocks — see `lib/graph.ts`), so the UI
+ * remembers the connections it planned and the engine accepted. The
+ * overlay is a cache of the UI's own writes: it is filled when a link
+ * plan targets an `if`, and it is dropped again when the engine
+ * reports the edge itself, when the plan rewires the block, or when
+ * one of the two blocks disappears.
+ */
+type PlannedLinks = ReadonlyMap<number, number>;
+
+/** The overlay of one function (empty when it has no planned links). */
+function plannedLinksOf(
+  planned: ReadonlyMap<number, PlannedLinks>,
+  fid: FunctionId,
+): PlannedLinks {
+  return planned.get(fid) ?? new Map<number, number>();
+}
+
+/**
+ * Merge the engine's command summaries with the connections the UI
+ * planned and the engine accepted but cannot report.
+ *
+ * A planned link only fills a gap the engine left open: when the
+ * engine reports the successor itself, the engine's value wins and the
+ * command is not marked as planned. A planned link whose target is
+ * gone is dropped, so a deleted block never keeps a stale connection.
+ */
+function withPlannedLinks(
+  cmds: readonly CommandSummary[],
+  planned: PlannedLinks,
+): UiCommand[] {
+  if (planned.size === 0) return [...cmds];
+  const known = new Set(cmds.map((c) => c.id));
+  return cmds.map((c) => {
+    const link = planned.get(c.id);
+    if (link === undefined) return c;
+    if (c.next !== null && c.next !== undefined) return c;
+    if (!known.has(link)) return c;
+    return { ...c, next: link, planned: true };
+  });
+}
+
+/**
+ * Record the connections of a link plan the engine cannot report.
+ *
+ * Only the edge *into* an `if` needs remembering: every other
+ * successor is the engine's own `next`. A rewired block loses its old
+ * planned link, so a plan that moves a block away from an `if` never
+ * leaves a stale connection behind.
+ */
+function recordPlannedLinks(
+  planned: Map<number, Map<number, number>>,
+  fid: FunctionId,
+  plan: LinkPlan,
+  cmds: readonly CommandSummary[],
+  remap: HistoryIdMap,
+): void {
+  const links = new Map(planned.get(fid) ?? []);
+  const kindOf = new Map(cmds.map((c) => [c.id, c.kind]));
+  for (const edit of plan.edits) {
+    const id = remap.resolve(edit.id);
+    const next = edit.next === null ? null : remap.resolve(edit.next);
+    if (next !== null && kindOf.get(next) === "if") {
+      links.set(id, next);
+    } else {
+      links.delete(id);
+    }
+  }
+  if (links.size === 0) {
+    planned.delete(fid);
+  } else {
+    planned.set(fid, links);
+  }
+}
+
+/** Remember one planned connection (the engine cannot report it). */
+function setPlannedLink(
+  planned: Map<number, Map<number, number>>,
+  fid: FunctionId,
+  from: number,
+  to: number,
+): void {
+  const links = planned.get(fid) ?? new Map<number, number>();
+  links.set(from, to);
+  planned.set(fid, links);
+}
+
+/**
+ * Drop the planned links of the blocks a plan rewrites.
+ *
+ * Used when the engine's state cannot be read: an unknown state must
+ * not leave a connection behind that the engine may not have.
+ */
+function forgetPlannedLinks(
+  planned: Map<number, Map<number, number>>,
+  fid: FunctionId,
+  plan: LinkPlan,
+  remap: HistoryIdMap,
+): void {
+  const links = planned.get(fid);
+  if (links === undefined) return;
+  for (const edit of plan.edits) {
+    links.delete(remap.resolve(edit.id));
+  }
+  if (links.size === 0) planned.delete(fid);
+}
+
+/** Drop the planned connection one block had (it left the chain). */
+function forgetPlannedLink(
+  planned: Map<number, Map<number, number>>,
+  fid: FunctionId,
+  id: number,
+): void {
+  const links = planned.get(fid);
+  if (links === undefined) return;
+  links.delete(id);
+  if (links.size === 0) planned.delete(fid);
+}
+
+/** The logical successor of one command (the engine's edge, else planned). */
+function logicalNextOf(
+  cmds: readonly CommandSummary[],
+  planned: PlannedLinks,
+  id: number,
+): number | null {
+  const cmd = cmds.find((c) => c.id === id);
+  if (cmd === undefined) return null;
+  if (cmd.next !== null && cmd.next !== undefined) return cmd.next;
+  return planned.get(id) ?? null;
+}
+
+/**
+ * A restorable draft for one command summary.
+ *
+ * `CommandSummary.condition` is the **raw `ValueId`** of the `if`'s
+ * hidden condition compute — not the user's expression. A draft built
+ * from the summary alone would therefore recreate the `if` with a
+ * literal number as its condition, and the restored program would fail
+ * at run time ("if condition must be bool, got int32"). The engine's own
+ * `if_condition` recovers the expression the user wrote, so the undo
+ * paths ask for it (the Inspector does the same).
+ *
+ * A condition the engine cannot report stays empty: the engine rejects
+ * an empty condition, so the undo fails honestly instead of restoring a
+ * block that would break the program.
+ */
+function restorableDraft(
+  fid: FunctionId,
+  cmd: CommandSummary,
+): CommandDraft {
+  const draft = summaryToDraft(cmd);
+  if (draft.kind !== "if") return draft;
+  const condition = optilotus_if_condition(fid, cmd.id);
+  if (isOptilotusError(condition)) return { ...draft, condition: "" };
+  return { ...draft, condition: condition.expr };
 }
 
 /** Capture a command's restorable slot from a command list + entry. */
 function slotOf(
+  fid: FunctionId,
   commands: readonly CommandSummary[],
   entry: number | null,
   id: CommandId,
@@ -172,7 +470,7 @@ function slotOf(
   if (cmd === undefined) return null;
   return {
     kind: cmd.kind,
-    draft: summaryToDraft(cmd),
+    draft: restorableDraft(fid, cmd),
     prevId: commands.find((c) => c.next === id)?.id ?? null,
     nextId: cmd.next ?? null,
     wasEntry: entry === id,
@@ -286,6 +584,13 @@ export function useProgram(
   }, []);
   const selectedIdRef = useRef<FunctionId | null>(null);
 
+  /**
+   * The connections the UI planned and the engine accepted but cannot
+   * report, per function (`from` → the `if` it leads to). See
+   * {@link PlannedLinks}.
+   */
+  const plannedRef = useRef<Map<number, Map<number, number>>>(new Map());
+
   useEffect(() => {
     selectedIdRef.current = snapshot.selectedId;
   }, [snapshot.selectedId]);
@@ -308,13 +613,16 @@ export function useProgram(
             ? selectedId
             : (functions[0]?.id ?? null);
         let selected: ProgramSnapshot["selected"] = null;
-        let commands: CommandSummary[] = [];
-        const commandsByFunction: Record<number, readonly CommandSummary[]> =
-          {};
+        let commands: readonly UiCommand[] = [];
+        let entry: number | null = null;
+        const commandsByFunction: Record<number, readonly UiCommand[]> = {};
         for (const fn of functions) {
           const cmds = optilotus_listCommands(fn.id);
           if (!isOptilotusError(cmds)) {
-            commandsByFunction[fn.id] = [...cmds.commands];
+            commandsByFunction[fn.id] = withPlannedLinks(
+              cmds.commands,
+              plannedLinksOf(plannedRef.current, fn.id),
+            );
           } else {
             commandsByFunction[fn.id] = [];
           }
@@ -324,27 +632,37 @@ export function useProgram(
           if (!isOptilotusError(info)) {
             selected = info;
             commands = [...(commandsByFunction[nextSelected] ?? [])];
+            // The engine's entry can point at a hidden node (an `if`'s
+            // condition compute): the UI resolves it to the block the
+            // chain really starts at.
+            entry = resolveEntry(commands, info.entry ?? null);
           }
         }
-        setSnapshot((prev) => ({
-          ...prev,
-          functions,
-          selectedId: nextSelected,
-          selected,
-          commands,
-          commandsByFunction,
-          selectedCommandId:
-            prev.selectedCommandId !== null &&
-            commands.some((c) => c.id === prev.selectedCommandId)
-              ? prev.selectedCommandId
-              : null,
-          busy: false,
-          // Output always describes the current program: any refresh
-          // invalidates the previous run result (its command ids may be
-          // gone after the next mutation).
-          run: null,
-          durationMs: null,
-        }));
+        setSnapshot((prev) =>
+          withResolvedTarget(
+            {
+              ...prev,
+              functions,
+              selectedId: nextSelected,
+              selected,
+              entry,
+              commands,
+              commandsByFunction,
+              selectedCommandId:
+                prev.selectedCommandId !== null &&
+                commands.some((c) => c.id === prev.selectedCommandId)
+                  ? prev.selectedCommandId
+                  : null,
+              busy: false,
+              // Output always describes the current program: any
+              // refresh invalidates the previous run result (its
+              // command ids may be gone after the next mutation).
+              run: null,
+              durationMs: null,
+            },
+            commandsByFunction,
+          ),
+        );
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e);
         setSnapshot((prev) => ({
@@ -540,6 +858,18 @@ export function useProgram(
    * with the condition the engine already holds keeps the expression
    * exactly as the user wrote it.
    *
+   * **Why it stays (audit F-1).** The repair is not a workaround the
+   * UI could drop: `if_set_condition` is the *only* bridge operation
+   * that can put the hidden compute back in front of its `if` — the
+   * compute has no user-level id, so `set_next` cannot address it.
+   * Removing the repair would make every rewire into an `if` fail at
+   * run time. Its cost is that the repair also hides the connection
+   * from the engine's summary (the compute sits between the two
+   * blocks), which the UI compensates for by remembering the
+   * connections it planned (see {@link PlannedLinks}). The engine
+   * change that would remove the need for both is `Package::user_next`
+   * skipping hidden nodes — or `Package::set_next` being `if`-aware.
+   *
    * Returns false when the bridge rejected the repair (the error is
    * surfaced by the caller).
    */
@@ -568,7 +898,9 @@ export function useProgram(
    *
    * A plan that links a block to an `if` also repairs that `if`'s
    * condition compute (see `repairIfCondition`), so the block really
-   * runs the branch instead of failing on a dangling condition.
+   * runs the branch instead of failing on a dangling condition. The
+   * repair hides the connection from the engine's summary, so the plan
+   * is remembered as a *planned link* (see {@link PlannedLinks}).
    */
   const runLinkPlan = useCallback(
     (fid: FunctionId, plan: LinkPlan): boolean => {
@@ -603,14 +935,30 @@ export function useProgram(
         }
         if (entry !== null) linked.add(entry);
       }
-      if (linked.size === 0) return true;
       const listed = optilotus_listCommands(fid);
-      if (isOptilotusError(listed)) return true;
+      if (isOptilotusError(listed)) {
+        // The engine's state is unknown: drop the planned links of the
+        // rewritten blocks rather than keep a stale connection.
+        forgetPlannedLinks(plannedRef.current, fid, plan, remap);
+        return true;
+      }
       for (const cmd of listed.commands) {
         if (cmd.kind !== "if") continue;
         if (!linked.has(cmd.id)) continue;
         if (!repairIfCondition(fid, cmd.id)) return false;
       }
+      // The repair hides the edge into an `if` from the engine's
+      // summary: remember it, so the canvas and the connection notice
+      // show the connection the runtime really has. A plan that
+      // rewires a block drops its old planned link, so a rewired
+      // block never keeps a connection the engine no longer has.
+      recordPlannedLinks(
+        plannedRef.current,
+        fid,
+        plan,
+        listed.commands,
+        remap,
+      );
       return true;
     },
     [repairIfCondition],
@@ -696,10 +1044,8 @@ export function useProgram(
         const trimmed = name.trim();
         if (trimmed === "") return;
         setSnapshot((prev) => ({
-          ...prev,
+          ...clearFailure(prev),
           busy: true,
-          actionError: "",
-          commandErrorId: null,
           recoveryVar: null,
         }));
         const created = optilotus_createFunction(trimmed);
@@ -746,10 +1092,8 @@ export function useProgram(
     (id: FunctionId): void => {
       try {
         setSnapshot((prev) => ({
-          ...prev,
+          ...clearFailure(prev),
           busy: true,
-          actionError: "",
-          commandErrorId: null,
           recoveryVar: null,
         }));
         const info = optilotus_getFunction(id);
@@ -760,14 +1104,19 @@ export function useProgram(
         const cmds = optilotus_listCommands(id);
         const items: { draft: CommandDraft }[] = isOptilotusError(cmds)
           ? []
-          : cmds.commands.map((c) => ({ draft: summaryToDraft(c) }));
-        const linksBefore = readLinks(id);
+          : cmds.commands.map((c) => ({ draft: restorableDraft(id, c) }));
+        const linksBefore = readLinks(
+          id,
+          plannedLinksOf(plannedRef.current, id),
+        );
         const name = info.name;
         const deleted = optilotus_deleteFunction(id);
         if (isOptilotusError(deleted)) {
           setSnapshot((prev) => failCommand(prev, deleted));
           return;
         }
+        // The deleted function's planned connections are gone with it.
+        plannedRef.current.delete(id);
         const box = { id };
         setSnapshot((prev) => ({ ...prev, selectedCommandId: null }));
         load(snapshot.selectedId === id ? null : snapshot.selectedId);
@@ -866,10 +1215,8 @@ export function useProgram(
         if (info.name === trimmed) return;
         const oldName = info.name;
         setSnapshot((prev) => ({
-          ...prev,
+          ...clearFailure(prev),
           busy: true,
-          actionError: "",
-          commandErrorId: null,
           recoveryVar: null,
         }));
         const renamed = optilotus_renameFunction(id, trimmed);
@@ -914,12 +1261,29 @@ export function useProgram(
     (fid: FunctionId, draft: CommandDraft): void => {
       try {
         setSnapshot((prev) => ({
-          ...prev,
+          ...clearFailure(prev),
           busy: true,
-          actionError: "",
-          commandErrorId: null,
           recoveryVar: null,
         }));
+        // The chain tail before the new block. An `if` is appended
+        // behind the engine's hidden condition compute, so the block
+        // before it stays its visible predecessor — a connection the
+        // engine cannot report, and the UI therefore remembers.
+        const before = optilotus_listCommands(fid);
+        const beforeInfo = optilotus_getFunction(fid);
+        const beforeEntry =
+          !isOptilotusError(beforeInfo) && beforeInfo.entry !== undefined
+            ? beforeInfo.entry
+            : null;
+        const tail = isOptilotusError(before)
+          ? null
+          : chainTailOf(
+              withPlannedLinks(
+                before.commands,
+                plannedLinksOf(plannedRef.current, fid),
+              ),
+              resolveEntry(before.commands, beforeEntry),
+            );
         const createdId = createDetached(fid, draft);
         if (createdId === null) {
           // Validation failed: nothing was created, the error (plus a
@@ -928,6 +1292,9 @@ export function useProgram(
           // deleted — it never left the caller's editor.
           load(fid);
           return;
+        }
+        if (draft.kind === "if" && tail !== null) {
+          setPlannedLink(plannedRef.current, fid, tail, createdId);
         }
         const box = { id: createdId };
         load(fid);
@@ -974,10 +1341,8 @@ export function useProgram(
         const trimmed = name.trim();
         if (trimmed === "") return;
         setSnapshot((prev) => ({
-          ...prev,
+          ...clearFailure(prev),
           busy: true,
-          actionError: "",
-          commandErrorId: null,
           recoveryVar: null,
         }));
         const created = optilotus_declare(
@@ -1030,10 +1395,8 @@ export function useProgram(
     (fid: FunctionId, oldId: CommandId, draft: CommandDraft): void => {
       try {
         setSnapshot((prev) => ({
-          ...prev,
+          ...clearFailure(prev),
           busy: true,
-          actionError: "",
-          commandErrorId: null,
           recoveryVar: null,
         }));
         // An `if` Apply must never go through delete + recreate: the
@@ -1091,11 +1454,13 @@ export function useProgram(
         }
         const ordered = snapshot.commands;
         const info = optilotus_getFunction(fid);
+        // The user-visible entry: the engine's own entry can name a
+        // hidden node (an `if`'s condition compute).
         const entryNow =
           !isOptilotusError(info) && info.entry !== undefined
-            ? info.entry
+            ? resolveEntry(ordered, info.entry)
             : null;
-        const slot = slotOf(ordered, entryNow, oldId);
+        const slot = slotOf(fid, ordered, entryNow, oldId);
         if (slot === null) {
           setSnapshot((prev) => ({
             ...prev,
@@ -1204,7 +1569,10 @@ export function useProgram(
               }
             }
           }
-          const before = readLinks(fid);
+          const before = readLinks(
+            fid,
+            plannedLinksOf(plannedRef.current, fid),
+          );
           let candidate: number | null = null;
           if (isSameNameDeclare) {
             if (!bridgeDelete(fid, oldId)) {
@@ -1275,11 +1643,19 @@ export function useProgram(
               return;
             }
             const infoNow = optilotus_getFunction(fid);
+            // The logical links: the engine's own edges plus the
+            // connections it accepted but cannot report (the edge into
+            // an `if`), so the slot restores the connection the
+            // program really has.
+            const logical = withPlannedLinks(
+              listed.commands,
+              plannedLinksOf(plannedRef.current, fid),
+            );
             const entryNow =
               !isOptilotusError(infoNow) && infoNow.entry !== undefined
-                ? infoNow.entry
+                ? resolveEntry(logical, infoNow.entry)
                 : null;
-            const depSlot = slotOf(listed.commands, entryNow, dep.id);
+            const depSlot = slotOf(fid, logical, entryNow, dep.id);
             if (depSlot === null) {
               load(fid);
               return;
@@ -1319,7 +1695,10 @@ export function useProgram(
               return;
             }
           }
-          const after = readLinks(fid);
+          const after = readLinks(
+            fid,
+            plannedLinksOf(plannedRef.current, fid),
+          );
           const boxD = { id: candidate };
           const boxA = newAssignIds.map((id) => ({ id }));
           // Old drafts carry the previous name (for rename) and pair with
@@ -1534,24 +1913,38 @@ export function useProgram(
     (fid: FunctionId, cmd: CommandId): void => {
       try {
         setSnapshot((prev) => ({
-          ...prev,
+          ...clearFailure(prev),
           busy: true,
-          actionError: "",
-          commandErrorId: null,
           recoveryVar: null,
         }));
-        const ordered = snapshot.commands;
+        // The target function's own commands: `snapshot.commands` holds
+        // the *selected* function's list, which is a different function
+        // whenever the caller deletes a block outside the selection.
+        const ordered =
+          snapshot.commandsByFunction[fid] ?? snapshot.commands;
         const info = optilotus_getFunction(fid);
         const entryNow =
           !isOptilotusError(info) && info.entry !== undefined
-            ? info.entry
+            ? resolveEntry(ordered, info.entry)
             : null;
-        const slot = slotOf(ordered, entryNow, cmd);
-        if (slot === null) return;
+        const slot = slotOf(fid, ordered, entryNow, cmd);
+        if (slot === null) {
+          // The block is already gone: report it and leave the UI usable
+          // (a stuck `busy` flag would disable the run button and the
+          // whole canvas).
+          setSnapshot((prev) => ({
+            ...prev,
+            busy: false,
+            actionError: `Cannot delete: command #${cmd} no longer exists.`,
+          }));
+          return;
+        }
         if (!bridgeDelete(fid, cmd)) {
           load(fid);
           return;
         }
+        // The deleted block's planned connection is gone with it.
+        forgetPlannedLink(plannedRef.current, fid, cmd);
         const box = { id: cmd };
         load(fid);
         pushHistory({
@@ -1588,18 +1981,19 @@ export function useProgram(
         setSnapshot((prev) => failThrown(prev, e));
       }
     },
-    [load, snapshot.commands, bridgeDelete, insertSlot, pushHistory],
+    [load, snapshot.commands, snapshot.commandsByFunction, bridgeDelete, insertSlot, pushHistory],
   );
 
   const applyLinks = useCallback(
     (fid: FunctionId, plan: LinkPlan): void => {
       try {
-        const before = readLinks(fid);
+        const before = readLinks(
+          fid,
+          plannedLinksOf(plannedRef.current, fid),
+        );
         setSnapshot((prev) => ({
-          ...prev,
+          ...clearFailure(prev),
           busy: true,
-          actionError: "",
-          commandErrorId: null,
           recoveryVar: null,
         }));
         if (!runLinkPlan(fid, plan)) {
@@ -1609,7 +2003,10 @@ export function useProgram(
           load(fid);
           return;
         }
-        const after = readLinks(fid);
+        const after = readLinks(
+          fid,
+          plannedLinksOf(plannedRef.current, fid),
+        );
         load(fid);
         if (before === null || after === null) return;
         const beforeLinks = before.links;
@@ -1653,12 +2050,13 @@ export function useProgram(
       targetId: CommandId,
     ): boolean => {
       try {
-        const before = readLinks(fid);
+        const before = readLinks(
+          fid,
+          plannedLinksOf(plannedRef.current, fid),
+        );
         setSnapshot((prev) => ({
-          ...prev,
+          ...clearFailure(prev),
           busy: true,
-          actionError: "",
-          commandErrorId: null,
           recoveryVar: null,
         }));
         const result = optilotus_if_append(fid, ifId, branch, targetId);
@@ -1667,7 +2065,14 @@ export function useProgram(
           load(fid);
           return false;
         }
-        const after = readLinks(fid);
+        // The appended block leaves the main chain (the engine runs it
+        // from the `if` now): a planned connection it had is gone with
+        // it.
+        forgetPlannedLink(plannedRef.current, fid, targetId);
+        const after = readLinks(
+          fid,
+          plannedLinksOf(plannedRef.current, fid),
+        );
         load(fid);
         if (before !== null && after !== null) {
           const beforeLinks = before.links;
@@ -1729,10 +2134,8 @@ export function useProgram(
         const prevEntry = info.entry ?? null;
         if (prevEntry === null) return;
         setSnapshot((prev) => ({
-          ...prev,
+          ...clearFailure(prev),
           busy: true,
-          actionError: "",
-          commandErrorId: null,
           recoveryVar: null,
         }));
         const cleared = optilotus_setEntry(fid, null);
@@ -1793,10 +2196,8 @@ export function useProgram(
   const clearPackage = useCallback((): void => {
     try {
       setSnapshot((prev) => ({
-        ...prev,
+        ...clearFailure(prev),
         busy: true,
-        actionError: "",
-        commandErrorId: null,
         recoveryVar: null,
       }));
       const backups: FunctionBackup[] = [];
@@ -1809,14 +2210,19 @@ export function useProgram(
         }
         const cmds = optilotus_listCommands(fn.id);
         const ordered = isOptilotusError(cmds) ? [] : [...cmds.commands];
+        const planned = plannedLinksOf(plannedRef.current, fn.id);
         backups.push({
           name: info.name,
           isMain: info.isMain,
-          items: ordered.map((c) => ({ draft: summaryToDraft(c) })),
+          items: ordered.map((c) => ({ draft: restorableDraft(fn.id, c) })),
+          // The logical links: the engine's own edges plus the
+          // connections it accepted but cannot report (the edge into an
+          // `if`). The entry is the block the chain starts at — the
+          // engine's raw entry can name a hidden node.
           links: ordered.map(
-            (c) => [c.id, c.next ?? null] as const,
+            (c) => [c.id, logicalNextOf(ordered, planned, c.id)] as const,
           ),
-          entry: info.entry ?? null,
+          entry: resolveEntry(ordered, info.entry ?? null),
         });
       }
       const selectedName = snapshot.selected?.name ?? null;
@@ -1887,6 +2293,8 @@ export function useProgram(
 
       optilotus_clearPackage();
       remapRef.current.clear();
+      // The planned connections belonged to the wiped program.
+      plannedRef.current.clear();
       setSnapshot((prev) => ({ ...prev, selectedCommandId: null }));
       load(null);
       pushHistory({
@@ -1903,6 +2311,7 @@ export function useProgram(
           // The allocator restarts, so every remembered id mapping is
           // stale (reused ids would otherwise resolve to wrong blocks).
           remapRef.current.clear();
+          plannedRef.current.clear();
           setSnapshot((prev) => ({ ...prev, selectedCommandId: null }));
           load(null);
           return true;
@@ -1915,7 +2324,11 @@ export function useProgram(
 
   const run = useCallback((): void => {
     try {
-      setSnapshot((prev) => ({ ...prev, running: true }));
+      // A new execution starts without a failure: the previous error
+      // (and the block it pointed at) must not survive into the new
+      // run, or the canvas would keep highlighting a block that the
+      // new run never touched.
+      setSnapshot((prev) => ({ ...clearFailure(prev), running: true }));
       const started =
         typeof performance !== "undefined" ? performance.now() : 0;
       const result = optilotus_runProgram();
@@ -1923,23 +2336,28 @@ export function useProgram(
         typeof performance !== "undefined"
           ? Math.max(0, performance.now() - started)
           : 0;
-      setSnapshot((prev) => ({
-        ...prev,
-        running: false,
-        run: result,
-        durationMs,
-        // A fresh execution supersedes the previous error display: runs
-        // are explicit user actions, so success clears and failure
-        // replaces the action error (Issue 3: explicit clearing event).
-        actionError:
-          result.status === "error" ? errorMessage(result) : "",
-        commandErrorId:
-          result.status === "error" &&
-          typeof result.command === "number"
-            ? result.command
-            : null,
-        recoveryVar: null,
-      }));
+      setSnapshot((prev) => {
+        if (result.status === "error") {
+          // The failure keeps its type, its message and every
+          // structured field the engine sent; the visible block is
+          // resolved from the engine's id, and stays unresolved when
+          // the engine blamed a hidden node.
+          return {
+            ...withFailure(prev, result, errorMessage(result)),
+            running: false,
+            run: result,
+            durationMs,
+            recoveryVar: null,
+          };
+        }
+        return {
+          ...clearFailure(prev),
+          running: false,
+          run: result,
+          durationMs,
+          recoveryVar: null,
+        };
+      });
     } catch (e: unknown) {
       setSnapshot((prev) => failThrown(prev, e));
     }
@@ -1951,9 +2369,7 @@ export function useProgram(
 
   const dismissError = useCallback((): void => {
     setSnapshot((prev) => ({
-      ...prev,
-      actionError: "",
-      commandErrorId: null,
+      ...clearFailure(prev),
       recoveryVar: null,
     }));
   }, []);

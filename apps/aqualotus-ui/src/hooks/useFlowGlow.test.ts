@@ -27,6 +27,7 @@ function snapshot(): ProgramSnapshot {
     functions: [{ id: 0, name: "main", isMain: true }],
     selectedId: 0,
     selected: null,
+    entry: 1,
     commands: [
       { id: 1, kind: "declare", next: 2, var: "n", ty: "int32", expr: "41" },
       { id: 2, kind: "assign", next: 3, var: "n", expr: "{n} + 1" },
@@ -45,7 +46,9 @@ function snapshot(): ProgramSnapshot {
     durationMs: null,
     busy: false,
     actionError: "",
-    commandErrorId: null,
+    error: null,
+    errorBlockId: null,
+    errorFunctionId: null,
     recoveryVar: null,
   };
 }
@@ -107,7 +110,7 @@ describe("useFlowGlow", () => {
     expect(result.current.flow?.edges.length).toBe(2);
   });
 
-  it("stops the travel at the command the engine blamed", () => {
+  it("stops the travel at the block the failure points at", () => {
     const { result, rerender } = renderHook(
       ({ program }: { program: ProgramSnapshot }) => useFlowGlow(program),
       { initialProps: { program: snapshot() } },
@@ -115,9 +118,9 @@ describe("useFlowGlow", () => {
     act(() => {
       result.current.startFlow();
     });
-    // The engine failed at command 2: the connection that fed it ran,
+    // The failure resolved to block 2: the connection that fed it ran,
     // the one after it did not.
-    rerender({ program: { ...snapshot(), commandErrorId: 2 } });
+    rerender({ program: { ...snapshot(), errorBlockId: 2 } });
     expect(result.current.flow?.edges).toEqual([
       { fid: 0, from: 1, to: 2 },
     ]);
@@ -133,8 +136,80 @@ describe("useFlowGlow", () => {
     });
     // The head never reached its successor: no connection carried
     // anything, so none of them may travel.
-    rerender({ program: { ...snapshot(), commandErrorId: 1 } });
+    rerender({ program: { ...snapshot(), errorBlockId: 1 } });
     expect(result.current.flow?.edges).toEqual([]);
+  });
+
+  it("does not stop at an unresolved failure", () => {
+    const { result, rerender } = renderHook(
+      ({ program }: { program: ProgramSnapshot }) => useFlowGlow(program),
+      { initialProps: { program: snapshot() } },
+    );
+    act(() => {
+      result.current.startFlow();
+    });
+    // The projection resolved the failure to no visible block. The
+    // engine's id happens to collide with a block id, but the hook must
+    // trust the resolution and not re-derive a stop position from the
+    // internal id — the sweep must not stop at an invented position.
+    rerender({
+      program: {
+        ...snapshot(),
+        error: {
+          status: "error",
+          kind: "TypeMismatch",
+          command: 2,
+          message: "type mismatch at 2",
+        },
+        errorBlockId: null,
+      },
+    });
+    expect(result.current.flow?.edges).toEqual([
+      { fid: 0, from: 1, to: 2 },
+      { fid: 0, from: 2, to: 3 },
+    ]);
+  });
+
+  it("never stops at the internal node id the engine reported", () => {
+    const { result, rerender } = renderHook(
+      ({ program }: { program: ProgramSnapshot }) => useFlowGlow(program),
+      { initialProps: { program: snapshot() } },
+    );
+    act(() => {
+      result.current.startFlow();
+    });
+    // The engine blamed a hidden node (a print's hidden print node, an
+    // `if`'s hidden condition compute): it is not a graph node, so the
+    // animation must not truncate at some other block.
+    rerender({
+      program: {
+        ...snapshot(),
+        error: {
+          status: "error",
+          kind: "TypeMismatch",
+          command: 42,
+          message: "type mismatch at 42",
+        },
+        errorBlockId: null,
+      },
+    });
+    expect(result.current.flow?.edges).toHaveLength(2);
+  });
+
+  it("clears a stale target when the failure is dismissed", () => {
+    const { result, rerender } = renderHook(
+      ({ program }: { program: ProgramSnapshot }) => useFlowGlow(program),
+      { initialProps: { program: snapshot() } },
+    );
+    act(() => {
+      result.current.startFlow();
+    });
+    rerender({ program: { ...snapshot(), errorBlockId: 2 } });
+    expect(result.current.flow?.edges).toHaveLength(1);
+    // The failure was dismissed: the target is gone, so the animation
+    // is no longer held at a block that is not failing anymore.
+    rerender({ program: { ...snapshot(), errorBlockId: null } });
+    expect(result.current.flow?.edges).toHaveLength(2);
   });
 
   it("cleans its timer when it unmounts", () => {

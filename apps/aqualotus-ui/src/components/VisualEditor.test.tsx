@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import VisualEditor from "./VisualEditor";
 import type { CommandSummary } from "../lib/optilotus";
+import type { UiCommand } from "../lib/program";
 import { EXIT_MS } from "../hooks/useExitItems";
 import type { FlowState } from "../lib/flow";
 
@@ -408,5 +409,73 @@ describe("VisualEditor", () => {
       expect(block.querySelectorAll(".vport-left").length).toBe(1);
       expect(block.querySelectorAll(".vport-right").length).toBe(1);
     }
+  });
+});
+
+/**
+ * The `if` gap: the engine cannot report the edge into an `if` (its
+ * hidden condition compute sits between the blocks), so the UI marks
+ * that connection as *planned* and draws it apart from the confirmed
+ * ones.
+ */
+describe("VisualEditor `if` connections", () => {
+  it("draws the planned connection into an `if` apart from the confirmed ones", () => {
+    const commands: readonly UiCommand[] = [
+      { id: 1, kind: "print", next: 2, planned: true, template: '"A"' },
+      { id: 2, kind: "if", next: null, condition: 3 },
+    ];
+    const { container } = render(
+      <VisualEditor
+        {...baseProps()}
+        commandsByFunction={{ 0: commands, 1: HELPER_COMMANDS }}
+      />,
+    );
+    const edges = container.querySelectorAll('#links path.edge[data-fid="0"]');
+    expect(edges.length).toBe(1);
+    expect(edges[0]?.getAttribute("data-from")).toBe("1");
+    expect(edges[0]?.getAttribute("data-to")).toBe("2");
+    // Planned connections are dashed: a viewer can tell them apart
+    // from the connections the engine confirms itself.
+    expect(edges[0]?.classList.contains("edge-planned")).toBe(true);
+  });
+
+  it("anchors the branch wire at the branch's first visible block", () => {
+    // The engine's branch list starts at the branch's first raw node,
+    // which is a hidden node here: the wire must start at the visible
+    // block instead.
+    const commands: readonly UiCommand[] = [
+      { id: 1, kind: "if", next: null, condition: 2, then_body: [2, 3, 4] },
+      { id: 4, kind: "print", next: null, template: '"in branch"' },
+    ];
+    const { container } = render(
+      <VisualEditor
+        {...baseProps()}
+        commandsByFunction={{ 0: commands, 1: HELPER_COMMANDS }}
+      />,
+    );
+    const edges = container.querySelectorAll('#links path.edge[data-fid="0"]');
+    expect(edges.length).toBe(1);
+    expect(edges[0]?.getAttribute("data-from")).toBe("1");
+    expect(edges[0]?.getAttribute("data-to")).toBe("4");
+  });
+
+  it("draws no edge twice when a branch member is also chained", () => {
+    const commands: readonly UiCommand[] = [
+      { id: 1, kind: "if", next: null, condition: 2, then_body: [2, 3] },
+      { id: 4, kind: "print", next: null, template: '"in branch"' },
+    ];
+    const { container } = render(
+      <VisualEditor
+        {...baseProps()}
+        commandsByFunction={{ 0: commands, 1: HELPER_COMMANDS }}
+      />,
+    );
+    const edges = [
+      ...container.querySelectorAll('#links path.edge[data-fid="0"]'),
+    ].map(
+      (edge) =>
+        `${edge.getAttribute("data-from")}>${edge.getAttribute("data-to")}`,
+    );
+    expect(new Set(edges).size).toBe(edges.length);
   });
 });

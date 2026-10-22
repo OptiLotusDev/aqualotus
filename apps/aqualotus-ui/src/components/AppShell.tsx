@@ -12,7 +12,12 @@ import type { ProgramSnapshot } from "../hooks/useProgram";
 import type { CommandDraft } from "../lib/program";
 import { declareEditAffected, freshName } from "../lib/program";
 import type { LinkPlan } from "../lib/graph";
-import { planChainAll, planDropLink, type BlockSide } from "../lib/graph";
+import {
+  branchMemberIds,
+  planChainAll,
+  planDropLink,
+  type BlockSide,
+} from "../lib/graph";
 import { findAvailableBlock } from "../lib/blocks";
 import { LAYOUT_ROW_Y, LAYOUT_START_X } from "../lib/layout";
 import type { CommandId, FunctionId, RunResult } from "../lib/optilotus";
@@ -396,8 +401,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
       return props.onAppendIfBranch(target, sourceId, branch, targetId);
     }
     const cmds = program.commandsByFunction[target] ?? [];
-    const entry =
-      target === fid ? (program.selected?.entry ?? null) : null;
+    const entry = target === fid ? program.entry : null;
     const planned = planDropLink(cmds, entry, sourceId, targetId, where);
     if (planned === null) return false;
     props.onApplyLinks(target, planned);
@@ -411,7 +415,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
   function connectInOrder(): void {
     if (fid === null) return;
     const cmds = program.commandsByFunction[fid] ?? [];
-    const entry = program.selected?.entry ?? null;
+    const entry = program.entry;
     // The full summaries are passed (not just id/next): the planner
     // skips the commands that belong to an `if` branch, because the
     // engine runs those from the `if` itself.
@@ -430,23 +434,14 @@ export default function AppShell(props: AppShellProps): ReactElement {
 
   /** Select a block and bring it into view (run-error handoff). */
   function showBlock(id: CommandId): void {
-    // Run failures name a command id; locate its owning function so the
-    // canvas focuses the right container (execution is `main`-rooted
-    // but callee frames report their own command ids).
-    let owner: FunctionId | null = fid;
-    if (
-      owner === null ||
-      !(program.commandsByFunction[owner] ?? []).some((c) => c.id === id)
-    ) {
-      owner = null;
-      for (const fn of program.functions) {
-        if ((program.commandsByFunction[fn.id] ?? []).some((c) => c.id === id)) {
-          owner = fn.id;
-          break;
-        }
-      }
-    }
-    if (owner !== null && owner !== fid) {
+    // The runner hands over a **resolved** target, but the graph may
+    // have changed between the failure and the click (the block was
+    // deleted, or the program was reset). Only a block the canvas
+    // really knows can be shown — a stale id must not become a
+    // selection that leads nowhere.
+    const owner = ownerOf(id);
+    if (owner === null) return;
+    if (owner !== fid) {
       props.onSelectFunction(owner);
     }
     props.onSelectCommand(id);
@@ -455,12 +450,8 @@ export default function AppShell(props: AppShellProps): ReactElement {
       return;
     }
     setInspOpen(true);
-    const ownerId = owner;
     requestAnimationFrame(() => {
-      const el =
-        ownerId !== null
-          ? document.getElementById(`vblock-${ownerId}-${id}`)
-          : null;
+      const el = document.getElementById(`vblock-${owner}-${id}`);
       const fallback =
         el ?? document.getElementById(`vblock-${id}`);
       if (fallback instanceof HTMLElement && typeof fallback.scrollIntoView === "function") {
@@ -540,40 +531,51 @@ export default function AppShell(props: AppShellProps): ReactElement {
     />
   );
 
-  // Owning function of the reported error command, if it is still live.
-  const errorFunctionId: FunctionId | null =
-    program.commandErrorId === null
-      ? null
-      : (program.functions.find((fn) =>
-          (program.commandsByFunction[fn.id] ?? []).some(
-            (c) => c.id === program.commandErrorId,
-          ),
-        )?.id ?? fid);
+  /**
+   * The function that owns a block id — or `null` when no block has it.
+   *
+   * A failure inside a called helper is reported with a node id of the
+   * helper, so the owner is looked up across **all** functions, not
+   * just the selected one.
+   */
+  function ownerOf(blockId: CommandId | null): FunctionId | null {
+    if (blockId === null) return null;
+    for (const fn of program.functions) {
+      if ((program.commandsByFunction[fn.id] ?? []).some((c) => c.id === blockId)) {
+        return fn.id;
+      }
+    }
+    return null;
+  }
 
   /**
-   * The block a run failure points at — but only when the canvas really
-   * knows that id.
+   * The block the current failure points at, and the function that
+   * owns it.
    *
-   * The engine reports the *raw* command id of the failing node. For a
-   * print, an assign or a cast that raw id belongs to a hidden node of
-   * the command's group, not to the user-visible block, so the canvas
-   * has no block with that id. Offering "show block #N" for such an id
-   * would be a button that leads nowhere; the error text itself is
-   * still shown either way.
+   * The projection resolved the engine's internal node id against the
+   * visible graph, so `errorBlockId` is never a hidden node. It is
+   * checked against the graph **again** here: a target whose block was
+   * deleted since the failure must not keep a navigation button or a
+   * highlight. A failure that resolves to nothing highlights no block
+   * at all rather than an arbitrary one.
    */
-  const errorBlockId: CommandId | null =
-    program.commandErrorId !== null &&
-    program.functions.some((fn) =>
-      (program.commandsByFunction[fn.id] ?? []).some(
-        (c) => c.id === program.commandErrorId,
-      ),
-    )
-      ? program.commandErrorId
-      : null;
+  const errorTargetExists =
+    program.errorBlockId !== null &&
+    program.errorFunctionId !== null &&
+    (program.commandsByFunction[program.errorFunctionId] ?? []).some(
+      (c) => c.id === program.errorBlockId,
+    );
+  const errorBlockId: CommandId | null = errorTargetExists
+    ? program.errorBlockId
+    : null;
+  const errorFunctionId: FunctionId | null = errorTargetExists
+    ? program.errorFunctionId
+    : null;
 
   const inspector = (
     <Inspector
       func={program.selected}
+      entry={program.entry}
       selected={selectedCommand}
       busy={program.busy}
       recoveryVar={program.recoveryVar}
@@ -603,10 +605,24 @@ export default function AppShell(props: AppShellProps): ReactElement {
   // disconnected rows only the connected chain prints, and with no entry
   // point the run is a flat no-op. Offer one-click wiring in list order
   // instead of leaving users to discover port-dragging.
-  const entry = program.selected?.entry ?? null;
+  //
+  // The walk follows the **logical** chain: the engine's own `next`
+  // edges plus the connections the UI planned and the engine accepted
+  // but cannot report (the edge into an `if`, whose hidden condition
+  // compute hides it — see `lib/graph.ts`). Without those, a connected
+  // `if` was counted as an orphan.
+  const entry = program.entry;
+  // Blocks the engine runs *from* an `if` (its branch members) are not
+  // orphans: the `if` executes them, so the chain walk — which follows
+  // the user-level `next` pointers — must not count them as
+  // disconnected. The branch lists are part of every command summary,
+  // so the UI already knows them (the link planner skips them too).
+  const branchMembers = branchMemberIds(program.commands);
   const orphanCount = (() => {
     if (fid === null || program.commands.length === 0) return 0;
-    if (entry === null) return program.commands.length;
+    if (entry === null) {
+      return program.commands.filter((c) => !branchMembers.has(c.id)).length;
+    }
     const nextOf = new Map(
       program.commands.map((c) => [c.id, c.next ?? null]),
     );
@@ -618,7 +634,9 @@ export default function AppShell(props: AppShellProps): ReactElement {
       guard += 1;
       cur = nextOf.get(cur) ?? null;
     }
-    return program.commands.filter((c) => !seen.has(c.id)).length;
+    return program.commands.filter(
+      (c) => !seen.has(c.id) && !branchMembers.has(c.id),
+    ).length;
   })();
   const entryNotice =
     fid !== null &&
@@ -844,7 +862,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
                 layoutStore={layout.allPositions}
                 selectedFunctionId={program.selectedId}
                 selectedCommandId={program.selectedCommandId}
-                errorId={program.commandErrorId}
+                errorId={errorBlockId}
                 errorFunctionId={errorFunctionId}
                 busy={program.busy}
                 onSelectFunction={props.onSelectFunction}

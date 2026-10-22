@@ -5,6 +5,26 @@ import { optilotus_type, type OptilotusType } from "./optilotus";
 export type CommandKind = CommandSummary["kind"];
 
 /**
+ * A command as the UI's **graph model** sees it.
+ *
+ * `next` is the logical successor: the engine's own `next` whenever the
+ * engine reports one, otherwise the successor the UI planned and the
+ * engine accepted but cannot report — the edge into an `if`, whose
+ * hidden condition compute sits between the two blocks (see
+ * `lib/graph.ts` for the full story).
+ *
+ * `planned` marks exactly those commands: a planned successor is never
+ * presented as an engine-confirmed one. Everything downstream (the
+ * canvas edges, the connection notice, the flow animation, the link
+ * planners) works on the logical successor, so the canvas and the UI's
+ * graph model always agree.
+ */
+export interface UiCommand extends CommandSummary {
+  /** The successor came from the UI's plan, not from the engine. */
+  readonly planned?: boolean;
+}
+
+/**
  * Fields for creating / replacing a command (one shape per kind).
  *
  * Every kind the bridge can report must appear here: `summaryToDraft`
