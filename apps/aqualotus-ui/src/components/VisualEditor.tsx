@@ -14,7 +14,12 @@ import type {
   FunctionId,
   FunctionSummary,
 } from "../lib/optilotus";
-import { edgeEnds, edgePath, type BlockSide } from "../lib/graph";
+import {
+  edgeEnds,
+  edgePath,
+  edgesOf,
+  type BlockSide,
+} from "../lib/graph";
 import type { FlowState } from "../lib/flow";
 import type { LayoutMap, Pos } from "../lib/layout";
 import {
@@ -58,7 +63,16 @@ interface VisualEditorProps {
   readonly layoutStore: Readonly<Record<number, LayoutMap>>;
   readonly selectedFunctionId: FunctionId | null;
   readonly selectedCommandId: CommandId | null;
+  /**
+   * The **visible** block the current failure points at, or `null` when
+   * the failure cannot be attributed to a block the canvas knows.
+   *
+   * The engine's own id names an internal node; the projection resolves
+   * it to a visible block before it reaches the canvas, so no block is
+   * ever highlighted for a failure that has no visible owner.
+   */
   readonly errorId: CommandId | null;
+  /** The function that owns {@link VisualEditorProps.errorId}. */
   readonly errorFunctionId: FunctionId | null;
   readonly busy: boolean;
   readonly onSelectFunction: (id: FunctionId) => void;
@@ -558,6 +572,7 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     to: number;
     fid: number;
     d: string;
+    planned: boolean;
   }[] =
     useMemo(() => {
       const out: {
@@ -566,76 +581,56 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
         to: number;
         fid: number;
         d: string;
+        planned: boolean;
       }[] = [];
       for (const fn of functions) {
         const cmds = commandsByFunction[fn.id] ?? [];
         const byId = new Map<number, number>();
         cmds.forEach((c, i) => byId.set(c.id, i));
-        for (const cmd of cmds) {
-          if (cmd.next === null || cmd.next === undefined) continue;
-          const targetIndex = byId.get(cmd.next);
-          if (targetIndex === undefined) continue;
-          const target = cmds[targetIndex];
-          if (target === undefined) continue;
-          const sourceIndex = byId.get(cmd.id) ?? 0;
-          const a = blockWorld(fn.id, cmd, sourceIndex);
-          const b = blockWorld(fn.id, target, targetIndex);
-          const sa = sizes.get(`${fn.id}:${cmd.id}`) ?? FALLBACK_SIZE;
-          const sb = sizes.get(`${fn.id}:${target.id}`) ?? FALLBACK_SIZE;
+        // One planner for the whole canvas: the chain edges (the
+        // engine's own `next` pointers plus the connections the engine
+        // accepted but cannot report) and the branch wires (the `if`'s
+        // port to the head of a branch). The planner only ever names
+        // visible blocks, so a wire never starts or ends at a hidden
+        // raw node (the `if`'s condition compute, a print's tail).
+        for (const edge of edgesOf(cmds)) {
+          const fromIndex = byId.get(edge.from);
+          const toIndex = byId.get(edge.to);
+          if (fromIndex === undefined || toIndex === undefined) continue;
+          const from = cmds[fromIndex];
+          const to = cmds[toIndex];
+          if (from === undefined || to === undefined) continue;
+          const a = blockWorld(fn.id, from, fromIndex);
+          const b = blockWorld(fn.id, to, toIndex);
+          const sa = sizes.get(`${fn.id}:${from.id}`) ?? FALLBACK_SIZE;
+          const sb = sizes.get(`${fn.id}:${to.id}`) ?? FALLBACK_SIZE;
+          if (edge.branch !== null) {
+            // Branch wire: the `if`'s then/else port to the head of the
+            // branch. The head is the branch's first *visible* member.
+            const ox = a.x + sa.w;
+            const oy = a.y + sa.h * (edge.branch === "then" ? 0.25 : 0.75);
+            out.push({
+              key: `${fn.id}:branch:${edge.branch}:${edge.from}:head`,
+              from: edge.from,
+              to: edge.to,
+              fid: fn.id,
+              d: edgePath(ox, oy, b.x, b.y + sb.h / 2, true),
+              planned: false,
+            });
+            continue;
+          }
           const ends = edgeEnds(
             { x: a.x, y: a.y, w: sa.w, h: sa.h },
             { x: b.x, y: b.y, w: sb.w, h: sb.h },
           );
           out.push({
-            key: `${fn.id}:${cmd.id}`,
-            from: cmd.id,
-            to: target.id,
+            key: `${fn.id}:${edge.from}`,
+            from: edge.from,
+            to: edge.to,
             fid: fn.id,
             d: edgePath(ends.x1, ends.y1, ends.x2, ends.y2, ends.horizontal),
+            planned: edge.planned,
           });
-        }
-
-        // Branch edges: only the if block's then/else port → branch head
-        // wire. Branch chains themselves (body[i] → body[i+1]) are real
-        // `next` pointers, so the generic next-edges loop above already
-        // draws them — the engine chains forward tail.next = appended.
-        for (const cmd of cmds) {
-          if (cmd.kind !== "if") continue;
-          const cmdIndex = byId.get(cmd.id) ?? 0;
-          const origin = blockWorld(fn.id, cmd, cmdIndex);
-          const size = sizes.get(`${fn.id}:${cmd.id}`) ?? FALLBACK_SIZE;
-          const ox = origin.x + size.w;
-
-          const addBranch = (
-            side: "then" | "else",
-            body: readonly number[] | null | undefined,
-          ): void => {
-            if (!body || body.length === 0) return;
-            const oy =
-              side === "then"
-                ? origin.y + size.h * 0.25
-                : origin.y + size.h * 0.75;
-            // if block port → first body command
-            const firstId = body[0];
-            const firstIndex = byId.get(firstId);
-            if (firstIndex !== undefined) {
-              const first = cmds[firstIndex];
-              if (first) {
-                const b = blockWorld(fn.id, first, firstIndex);
-                const sb = sizes.get(`${fn.id}:${first.id}`) ?? FALLBACK_SIZE;
-                out.push({
-                  key: `${fn.id}:branch:${side}:${cmd.id}:head`,
-                  from: cmd.id,
-                  to: firstId,
-                  fid: fn.id,
-                  d: edgePath(ox, oy, b.x, b.y + sb.h / 2, true),
-                });
-              }
-            }
-          };
-
-          addBranch("then", cmd.then_body ?? null);
-          addBranch("else", cmd.else_body ?? null);
         }
       }
       return out;
@@ -1751,16 +1746,28 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                     edge.from === selectedCommandId &&
                     edge.fid === selectedFunctionId;
                   const isDrawing = drawing.has(edge.key);
+                  // A planned connection is one the engine accepted but
+                  // cannot report (the edge into an `if`): it is drawn
+                  // dashed, so a viewer can tell it apart from the
+                  // connections the engine confirms itself.
+                  const edgeClass = [
+                    "edge",
+                    isSelected ? "edge-selected" : "",
+                    edge.planned ? "edge-planned" : "",
+                    isDrawing ? "edge-draw" : "",
+                  ]
+                    .filter((part) => part !== "")
+                    .join(" ");
                   return (
                     <Fragment key={edge.key}>
                       <path
                         d={edge.d}
                         data-fid={edge.fid}
+                        data-from={edge.from}
+                        data-to={edge.to}
                         pathLength={1}
                         markerEnd={isDrawing ? undefined : "url(#arrow-flow)"}
-                        className={`${isSelected ? "edge edge-selected" : "edge"}${
-                          isDrawing ? " edge-draw" : ""
-                        }`}
+                        className={edgeClass}
                         ref={(el) => {
                           if (el !== null) {
                             edgeEls.current.set(edge.key, el);

@@ -66,6 +66,7 @@ function snapshot(): ProgramSnapshot {
       entry: 1,
       commandCount: 2,
     },
+    entry: 1,
     commands: [
       { id: 1, kind: "declare", next: 2, var: "n", ty: "int32", expr: "41" },
       { id: 2, kind: "print", next: null, template: '"{n}"' },
@@ -82,7 +83,9 @@ function snapshot(): ProgramSnapshot {
     durationMs: null,
     busy: false,
     actionError: "",
-    commandErrorId: null,
+    error: null,
+    errorBlockId: null,
+    errorFunctionId: null,
     recoveryVar: null,
   };
 }
@@ -120,7 +123,7 @@ function shellProps(): React.ComponentProps<typeof AppShell> {
 }
 
 describe("AppShell error block attribution", () => {
-  it("offers the failing block when the engine reported a known block id", () => {
+  it("offers the failing block when the failure resolved to a visible block", () => {
     const props = {
       ...shellProps(),
       program: {
@@ -132,17 +135,46 @@ describe("AppShell error block attribution", () => {
           message: "type mismatch at 2",
         },
         actionError: "TypeMismatch: type mismatch at 2",
-        commandErrorId: 2,
+        error: {
+          status: "error" as const,
+          kind: "TypeMismatch",
+          command: 2,
+          message: "type mismatch at 2",
+        },
+        errorBlockId: 2,
+        errorFunctionId: 0,
       },
     };
     render(<AppShell {...props} />);
     expect(screen.getByRole("button", { name: /Show block #2/ })).toBeTruthy();
   });
 
-  it("offers no block when the engine reported a raw id the canvas does not know", () => {
-    // The engine reports the raw node that failed; for a print or an
-    // assign that id belongs to a hidden node of the command's group,
-    // so no block with that id exists.
+  it("navigates to the exact block the failure points at", () => {
+    const props = {
+      ...shellProps(),
+      program: {
+        ...snapshot(),
+        run: {
+          status: "error" as const,
+          kind: "TypeMismatch",
+          command: 2,
+          message: "type mismatch at 2",
+        },
+        actionError: "TypeMismatch: type mismatch at 2",
+        errorBlockId: 2,
+        errorFunctionId: 0,
+      },
+    };
+    render(<AppShell {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show block #2/ }));
+    expect(props.onSelectCommand).toHaveBeenCalledWith(2);
+  });
+
+  it("offers no block when the failure could not be resolved", () => {
+    // The engine reported the raw node that failed; for a print or a
+    // cast that node belongs to a hidden node of the command's group,
+    // so no visible block owns that id. The error text stays visible —
+    // only the navigation action disappears.
     const props = {
       ...shellProps(),
       program: {
@@ -154,14 +186,86 @@ describe("AppShell error block attribution", () => {
           message: "type mismatch at 7",
         },
         actionError: "TypeMismatch: type mismatch at 7",
-        commandErrorId: 7,
+        error: {
+          status: "error" as const,
+          kind: "TypeMismatch",
+          command: 7,
+          message: "type mismatch at 7",
+        },
+        errorBlockId: null,
+        errorFunctionId: null,
       },
     };
     const { container } = render(<AppShell {...props} />);
     expect(container.textContent).toContain("TypeMismatch");
-    expect(
-      container.querySelector('button[aria-label^="Show block"]'),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /Show block/ })).toBeNull();
+  });
+
+  it("offers no block for a target the graph no longer holds", () => {
+    // The block was deleted after the failure: the target is stale, so
+    // the navigation action must not survive it.
+    const props = {
+      ...shellProps(),
+      program: {
+        ...snapshot(),
+        run: {
+          status: "error" as const,
+          kind: "TypeMismatch",
+          command: 99,
+          message: "type mismatch at 99",
+        },
+        actionError: "TypeMismatch: type mismatch at 99",
+        errorBlockId: 99,
+        errorFunctionId: 0,
+      },
+    };
+    const { container } = render(<AppShell {...props} />);
+    expect(container.textContent).toContain("TypeMismatch");
+    expect(screen.queryByRole("button", { name: /Show block/ })).toBeNull();
+  });
+
+  it("highlights no block for an unresolved failure", () => {
+    const props = {
+      ...shellProps(),
+      program: {
+        ...snapshot(),
+        run: {
+          status: "error" as const,
+          kind: "TypeMismatch",
+          command: 7,
+          message: "type mismatch at 7",
+        },
+        actionError: "TypeMismatch: type mismatch at 7",
+        errorBlockId: null,
+        errorFunctionId: null,
+      },
+    };
+    const { container } = render(<AppShell {...props} />);
+    // No block carries the failure marker: the UI must not blame an
+    // arbitrary block for a failure it cannot attribute.
+    expect(container.querySelectorAll('[data-error="true"]').length).toBe(0);
+  });
+
+  it("highlights the resolved block for an attributed failure", () => {
+    const props = {
+      ...shellProps(),
+      program: {
+        ...snapshot(),
+        run: {
+          status: "error" as const,
+          kind: "TypeMismatch",
+          command: 2,
+          message: "type mismatch at 2",
+        },
+        actionError: "TypeMismatch: type mismatch at 2",
+        errorBlockId: 2,
+        errorFunctionId: 0,
+      },
+    };
+    const { container } = render(<AppShell {...props} />);
+    const failed = container.querySelectorAll('[data-error="true"]');
+    expect(failed.length).toBe(1);
+    expect(failed[0]?.getAttribute("data-block-id")).toBe("2");
   });
 });
 
@@ -195,6 +299,102 @@ describe("AppShell run action", () => {
     expect(props.onRun).toHaveBeenCalledTimes(3);
     // Still one indicator per connection: no duplicate animation loops.
     expect(container.querySelectorAll("circle.flow-dot").length).toBe(1);
+  });
+});
+
+describe("AppShell connection notice", () => {
+  /** The notice lives in the runner panel; open it before asserting. */
+  function openRunner(container: HTMLElement): void {
+    const expand = container.querySelector(
+      'button[aria-label="Expand runner"]',
+    ) as HTMLButtonElement;
+    expect(expand).not.toBeNull();
+    fireEvent.click(expand);
+  }
+
+  it("does not count an `if` branch member as a disconnected block", () => {
+    // The engine runs a branch member *from* the `if`, so it is not an
+    // orphan: counting it would claim "the rest never print" about a
+    // block that does print.
+    const commands: ProgramSnapshot["commands"] = [
+      { id: 1, kind: "if", next: null, condition: 2, then_body: [3] },
+      { id: 3, kind: "print", next: null, template: '"in branch"' },
+    ];
+    const base = snapshot();
+    const props = {
+      ...shellProps(),
+      program: {
+        ...base,
+        commands,
+        commandsByFunction: { 0: commands },
+      },
+    };
+    const { container } = render(<AppShell {...props} />);
+    openRunner(container);
+    expect(container.textContent ?? "").not.toContain("aren't connected");
+  });
+
+  it("still reports a block that really is disconnected", () => {
+    const commands: ProgramSnapshot["commands"] = [
+      { id: 1, kind: "print", next: null, template: '"A"' },
+      { id: 3, kind: "print", next: null, template: '"B"' },
+    ];
+    const base = snapshot();
+    const props = {
+      ...shellProps(),
+      program: {
+        ...base,
+        commands,
+        commandsByFunction: { 0: commands },
+      },
+    };
+    const { container } = render(<AppShell {...props} />);
+    openRunner(container);
+    expect(container.textContent ?? "").toContain("aren't connected");
+  });
+
+  it("does not count an `if` that is connected to the chain", () => {
+    // The engine cannot report the edge into an `if` (its hidden
+    // condition compute sits between the blocks), so the UI knows the
+    // connection as a *planned* one. The notice must not claim that
+    // the `if` never runs.
+    const commands: ProgramSnapshot["commands"] = [
+      { id: 1, kind: "print", next: 2, planned: true, template: '"A"' },
+      { id: 2, kind: "if", next: null, condition: 3 },
+    ];
+    const base = snapshot();
+    const props = {
+      ...shellProps(),
+      program: {
+        ...base,
+        commands,
+        commandsByFunction: { 0: commands },
+        entry: 1,
+      },
+    };
+    const { container } = render(<AppShell {...props} />);
+    openRunner(container);
+    expect(container.textContent ?? "").not.toContain("aren't connected");
+  });
+
+  it("still reports an `if` that is not connected at all", () => {
+    const commands: ProgramSnapshot["commands"] = [
+      { id: 1, kind: "print", next: null, template: '"A"' },
+      { id: 2, kind: "if", next: null, condition: 3 },
+    ];
+    const base = snapshot();
+    const props = {
+      ...shellProps(),
+      program: {
+        ...base,
+        commands,
+        commandsByFunction: { 0: commands },
+        entry: 1,
+      },
+    };
+    const { container } = render(<AppShell {...props} />);
+    openRunner(container);
+    expect(container.textContent ?? "").toContain("aren't connected");
   });
 });
 

@@ -241,6 +241,72 @@ describe("Runner", () => {
       screen.getByText("Run completed — no printed output."),
     ).toBeDefined();
   });
+
+  it("shows the error type, message and structured fields", () => {
+    render(
+      <Runner
+        {...runnerProps()}
+        run={{
+          status: "error",
+          kind: "UnknownVariable",
+          command: 3,
+          message: 'unknown variable "ghost" at 3',
+          var: "ghost",
+        }}
+        errorId={null}
+      />,
+    );
+    const panel = screen.getByTestId("runner-error");
+    // The engine's family and message are shown unchanged.
+    expect(panel.textContent ?? "").toContain("UnknownVariable");
+    expect(panel.textContent ?? "").toContain('unknown variable "ghost" at 3');
+    // The kind-specific field survives too.
+    expect(screen.getByTestId("runner-error-field-variable").textContent).toBe(
+      "Variable: ghost",
+    );
+  });
+
+  it("offers no navigation action for an unresolved failure", () => {
+    render(
+      <Runner
+        {...runnerProps()}
+        run={{
+          status: "error",
+          kind: "TypeMismatch",
+          command: 4,
+          message: "type mismatch at 4",
+        }}
+        errorId={null}
+      />,
+    );
+    // The failure is still visible…
+    expect(screen.getByTestId("runner-error")).toBeDefined();
+    expect(screen.getByTestId("runner-error").textContent ?? "").toContain(
+      "TypeMismatch",
+    );
+    // …but no block is offered: the engine's id names a hidden node.
+    expect(screen.queryByRole("button", { name: /Show block/ })).toBeNull();
+  });
+
+  it("navigates to the exact resolved block", async () => {
+    const user = userEvent.setup();
+    const onShowBlock = vi.fn();
+    render(
+      <Runner
+        {...runnerProps()}
+        run={{
+          status: "error",
+          kind: "UnknownVariable",
+          command: 3,
+          message: 'unknown variable "ghost" at 3',
+        }}
+        errorId={3}
+        onShowBlock={onShowBlock}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Show block #3" }));
+    expect(onShowBlock).toHaveBeenCalledWith(3);
+  });
 });
 
 describe("BlockLibrary", () => {
@@ -252,6 +318,12 @@ describe("BlockLibrary", () => {
     const user = userEvent.setup();
     const props = libraryProps();
     render(<BlockLibrary {...props} />);
+    // The unfiltered library really does offer the conditional block, so
+    // the filtered assertion below is a real one (the library labels it
+    // "If / Else").
+    expect(
+      screen.getByRole("button", { name: /Add If \/ Else block/ }),
+    ).toBeDefined();
     await user.type(
       screen.getByPlaceholderText("Search blocks…"),
       "declare variable",
@@ -260,8 +332,11 @@ describe("BlockLibrary", () => {
       screen.getByRole("button", { name: /Add Declare Variable block/ }),
     );
     expect(props.onAdd).toHaveBeenCalledWith("declare");
-    // Nothing beyond the engine surface exists in the list.
-    expect(screen.queryByRole("button", { name: /Add If block/ })).toBeNull();
+    // Nothing beyond the engine surface exists in the list: the search
+    // for "declare variable" must not offer the If block.
+    expect(
+      screen.queryByRole("button", { name: /Add If \/ Else block/ }),
+    ).toBeNull();
     await user.clear(screen.getByPlaceholderText("Search blocks…"));
     await user.type(screen.getByPlaceholderText("Search blocks…"), "zzz-nope");
     expect(screen.getByText("No blocks match")).toBeDefined();
@@ -351,6 +426,7 @@ describe("Inspector", () => {
   function inspectorProps(): React.ComponentProps<typeof Inspector> {
     return {
       func,
+      entry: func.entry,
       selected: null,
       busy: false,
       onReplace: vi.fn(),
@@ -371,7 +447,7 @@ describe("Inspector", () => {
 
   it("shows a live entry head with a clear action", async () => {
     const user = userEvent.setup();
-    const props = { ...inspectorProps(), func: { ...func, entry: 3 } };
+    const props = { ...inspectorProps(), func: { ...func, entry: 3 }, entry: 3 };
     render(<Inspector {...props} />);
     expect(screen.getByText("Yes — starts at #3")).toBeDefined();
     await user.click(
@@ -709,6 +785,7 @@ describe("Inspector rename function", () => {
   function baseProps(): React.ComponentProps<typeof Inspector> {
     return {
       func,
+      entry: func.entry,
       selected: null,
       busy: false,
       onReplace: vi.fn(),

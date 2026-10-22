@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProgramSnapshot } from "./useProgram";
 import { optilotus_getFunction } from "../lib/optilotus";
+import { resolveEntry } from "../lib/graph";
 import {
   chainEdges,
   flowDuration,
@@ -53,7 +54,16 @@ export function useFlowGlow(program: ProgramSnapshot): {
       return;
     }
     const cmds = snapshot.commandsByFunction[main.id] ?? [];
-    const edges = chainEdges(cmds, entryOf(main.id), main.id);
+    // The engine's entry can point at a hidden node (an `if`'s condition
+    // compute): resolve it to the block the chain starts at. The chain
+    // itself is the logical one (the engine's `next` edges plus the
+    // connections the engine accepted but cannot report), so the glow
+    // travels into an `if` exactly like the runtime runs it.
+    const edges = chainEdges(
+      cmds,
+      resolveEntry(cmds, entryOf(main.id)),
+      main.id,
+    );
     if (edges.length === 0) {
       setFlow(null);
       return;
@@ -73,11 +83,17 @@ export function useFlowGlow(program: ProgramSnapshot): {
     return () => window.clearTimeout(timer);
   }, [flow]);
 
-  // A failed run stops at the command the engine blamed: the
+  // A failed run stops at the block the failure points at: the
   // connections up to it ran, the ones after it did not.
+  //
+  // The target is the **resolved visible block** (`errorBlockId`), not
+  // the id the engine reported: the engine names the internal node
+  // that failed, which is often a hidden node the animation must never
+  // stop at. A failure that resolves to no block leaves the sweep
+  // alone — stopping it at an invented position would be a lie.
   const visible =
-    flow === null || program.commandErrorId === null
+    flow === null || program.errorBlockId === null
       ? flow
-      : truncateFlow(flow, program.commandErrorId);
+      : truncateFlow(flow, program.errorBlockId);
   return { flow: visible, startFlow };
 }

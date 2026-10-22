@@ -1229,6 +1229,14 @@ p {
   filter: drop-shadow(0 0 5px rgba(79, 124, 255, 0.65));
 }
 
+/* A connection the engine accepted but cannot report (the edge into an
+ * `if`, whose hidden condition compute hides it). It is dashed, so a
+ * viewer can tell it apart from the connections the engine confirms. */
+.edge-planned {
+  stroke-dasharray: 5 5;
+  opacity: 0.85;
+}
+
 /* ---------- Connection stretch ---------- */
 
 /* A newly created connection draws itself in: the path is normalized

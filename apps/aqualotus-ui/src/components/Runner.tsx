@@ -1,11 +1,20 @@
 import type { ReactElement } from "react";
 import type { CommandId, RunResult } from "../lib/optilotus";
+import { errorFields } from "../lib/errors";
 import { errorMessage } from "../lib/program";
 
 interface RunnerProps {
   readonly run: RunResult | null;
   readonly running: boolean;
   readonly durationMs: number | null;
+  /**
+   * The **visible** block the failure points at, or `null` when the
+   * failure cannot be attributed to a block the canvas knows.
+   *
+   * The runner offers the navigation action only for a resolved
+   * target: the engine's own id names an internal node, and a button
+   * that leads to no block would be a lie.
+   */
   readonly errorId: CommandId | null;
   readonly busy?: boolean;
   readonly canRun?: boolean;
@@ -124,7 +133,19 @@ export default function Runner(props: RunnerProps): ReactElement {
         {run !== null && run.status === "error" && !running ? (
           <div className="notice notice-error" role="alert" data-testid="runner-error">
             <div className="notice-title"><span aria-hidden="true">✗ </span>Run failed</div>
-            <div>{errorMessage(run)}</div>
+            {/* The engine's error family and message, unchanged. */}
+            <div data-testid="runner-error-message">{errorMessage(run)}</div>
+            {/* The kind-specific fields the engine sent (the expected
+                arity, the missing variable, the step budget, …) stay
+                visible instead of being flattened into the message. */}
+            {errorFields(run).map((field) => (
+              <div
+                key={field.label}
+                data-testid={`runner-error-field-${field.label.toLowerCase()}`}
+              >
+                {field.label}: {field.value}
+              </div>
+            ))}
             {typeof errorId === "number" ? (
               <button
                 type="button"

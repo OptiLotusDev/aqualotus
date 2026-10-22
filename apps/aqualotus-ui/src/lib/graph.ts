@@ -6,6 +6,22 @@
  * head changes). Re-linking the whole list would drag unrelated
  * detached blocks into the chain, so planners return exact edits.
  * Edges themselves are derived from semantic `next` pointers elsewhere.
+ *
+ * ## The `if` gap (engine-owned limitation, UI-owned compensation)
+ *
+ * The engine keeps an `if`'s condition in a **hidden compute command**
+ * that has to run immediately before the `if`. That compute is not a
+ * user command, so the engine's user-level `next` edge cannot express
+ * "block X is followed by an `if`": `Package::user_next` reports
+ * `None` whenever the raw successor is not a user command. The engine
+ * therefore cannot report the edge into an `if` — a documented engine
+ * limitation (see `docs/feature-parity-audit.md`, F-1).
+ *
+ * The UI compensates by remembering the connections it planned: a
+ * connection the engine accepted (the bridge confirmed it) but cannot
+ * report is marked `planned` on the block that starts it, so the canvas
+ * and the "not connected" notice never claim an unconfirmed engine
+ * edge.
  */
 
 export interface LinkEdit {
@@ -227,20 +243,13 @@ export function planDropLink(
   if (!sourceDetached) {
     return planLinkAfter(cmds, entry, sourceId, targetId);
   }
-  // Fan-in attach (multiple inputs, one output): when the drop target's
-  // input is already occupied, the detached source simply grows a second
-  // incoming wire — the target keeps its predecessor and its successor,
-  // so an in-port drop never yanks a block out of its chain. An
-  // unoccupied in-port keeps the prepend behavior (build chains forward).
-  if (preds.has(targetId)) {
-    if ((links.get(sourceId) ?? null) === targetId) return null;
-    const edits = [{ id: sourceId, next: targetId } as LinkEdit];
-    const entryUpdate: EntryUpdate =
-      entry === null
-        ? { type: "set", entry: headOf(predsAfter(cmds, edits), sourceId) }
-        : { type: "keep" };
-    return { edits, entry: entryUpdate };
-  }
+  // The runtime executes **one linear chain** per function: a command
+  // with two predecessors is never reached (the executor walks
+  // `next` from the entry). A second incoming wire would therefore be a
+  // lie on the canvas — the dropped block would be drawn as connected
+  // and never run. An in-port drop always *inserts* the detached source
+  // before the target instead: the target keeps its successor, its old
+  // predecessor keeps the chain, and every block stays reachable.
   return planLinkBefore(cmds, entry, targetId, sourceId);
 }
 
@@ -356,54 +365,192 @@ export function planChainAll(
   };
 }
 
-export interface Edge {
-  readonly fid: number;
-  readonly from: number;
-  readonly to: number;
+/**
+ * The shape the graph model needs from a command summary. Structural on
+ * purpose: the engine's `CommandSummary` and the UI's projection both
+ * satisfy it.
+ */
+export interface GraphCommand {
+  readonly id: number;
+  readonly next: number | null;
+  readonly kind?: string;
+  readonly then_body?: readonly number[];
+  readonly else_body?: readonly number[];
+  /**
+   * The successor came from the UI's plan, not from the engine: it is
+   * the edge into an `if`, whose hidden condition compute the engine
+   * cannot report (see the module header).
+   */
+  readonly planned?: boolean;
 }
 
-export function edgesOf(cmds: readonly { id: number; next: number | null; then_body?: number[]; else_body?: number[] }[]): Edge[] {
-  const out: Edge[] = [];
-  const seen = new Set<number>();
-  const byId = new Map<number, { next: number | null; then_body?: number[]; else_body?: number[] }>();
+/**
+ * Every raw id the engine lists in an `if`'s branch bodies.
+ *
+ * A branch list carries *every raw node* of a member (a print owns a
+ * hidden tail node), so this set mixes visible blocks with hidden
+ * nodes. Callers that need blocks filter it through
+ * {@link visibleBranchMembers}.
+ */
+export function branchMemberIds(
+  cmds: readonly GraphCommand[],
+): Set<number> {
+  const out = new Set<number>();
+  for (const c of cmds) {
+    for (const id of c.then_body ?? []) out.add(id);
+    for (const id of c.else_body ?? []) out.add(id);
+  }
+  return out;
+}
+
+/**
+ * The visible blocks of one `if` branch, in execution order.
+ *
+ * The engine's branch list starts at the branch's first **raw** node,
+ * which is not always a block the canvas can draw (a cast's group
+ * starts at its hidden compute node). Only the ids the engine also
+ * reports as commands are blocks, and the first of those is the
+ * branch's head — the block the `if`'s branch wire must start at.
+ */
+export function visibleBranchMembers(
+  cmds: readonly GraphCommand[],
+  body: readonly number[] | null | undefined,
+): number[] {
+  if (body === null || body === undefined || body.length === 0) return [];
+  const known = new Set(cmds.map((c) => c.id));
+  return body.filter((id) => known.has(id));
+}
+
+/** One visible connection of the canvas graph. */
+export interface LogicalEdge {
+  /** The block the connection starts at. */
+  readonly from: number;
+  /** The block the connection leads to. */
+  readonly to: number;
+  /**
+   * A branch wire: the `if`'s port to the head of one of its branches.
+   * `null` for a chain edge.
+   */
+  readonly branch: "then" | "else" | null;
+  /**
+   * The engine's summary cannot report this connection (it is the edge
+   * into an `if`, whose hidden condition compute hides it). The UI
+   * planned it and the bridge accepted it.
+   */
+  readonly planned: boolean;
+}
+
+/**
+ * The visible connections of one function.
+ *
+ * Three kinds, kept apart on purpose:
+ * - **chain edges** — the engine's own `next` pointers (confirmed by
+ *   the engine).
+ * - **planned edges** — the edge into an `if`, which the engine cannot
+ *   report (see {@link GraphCommand.planned}).
+ * - **branch edges** — the `if`'s port to the head of one of its
+ *   branches; the engine confirms them through the branch lists.
+ *
+ * Only *visible* blocks are connected: an edge never starts or ends at
+ * a hidden raw node (the `if`'s condition compute, a print's hidden
+ * tail), and no connection is drawn twice.
+ */
+export function edgesOf(cmds: readonly GraphCommand[]): LogicalEdge[] {
+  const byId = new Map<number, GraphCommand>();
   for (const c of cmds) byId.set(c.id, c);
+  const out: LogicalEdge[] = [];
+  const seen = new Set<string>();
+  const push = (
+    from: number,
+    to: number,
+    branch: "then" | "else" | null,
+    isPlanned: boolean,
+  ): void => {
+    if (!byId.has(from) || !byId.has(to)) return;
+    const key = `${from}>${to}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ from, to, branch, planned: isPlanned });
+  };
 
+  // Chain edges: the engine's own `next` pointers, plus the ones the
+  // UI planned and the engine accepted but cannot report (the edge
+  // into an `if` — the projection marks those with `planned`). The
+  // engine's edges always win: an edge is never drawn twice.
   for (const cmd of cmds) {
-    if (cmd.next !== null && !seen.has(cmd.id)) {
-      seen.add(cmd.id);
-      if (cmd.next !== undefined && byId.has(cmd.next)) {
-        out.push({ fid: 0, from: cmd.id, to: cmd.next });
-      }
-    }
+    const next = cmd.next ?? null;
+    if (next === null) continue;
+    push(cmd.id, next, null, cmd.planned === true);
+  }
 
-    if (cmd.then_body !== undefined && cmd.then_body.length > 0) {
-      for (let i = 0; i < cmd.then_body.length; i++) {
-        const cid = cmd.then_body[i];
-        if (seen.has(cid)) continue;
-        seen.add(cid);
-        if (i < cmd.then_body.length - 1) {
-          const nextId = cmd.then_body[i + 1];
-          if (byId.has(nextId)) {
-            out.push({ fid: 0, from: cid, to: nextId });
-          }
-        }
-      }
-    }
-
-    if (cmd.else_body !== undefined && cmd.else_body.length > 0) {
-      for (let i = 0; i < cmd.else_body.length; i++) {
-        const cid = cmd.else_body[i];
-        if (seen.has(cid)) continue;
-        seen.add(cid);
-        if (i < cmd.else_body.length - 1) {
-          const nextId = cmd.else_body[i + 1];
-          if (byId.has(nextId)) {
-            out.push({ fid: 0, from: cid, to: nextId });
-          }
-        }
-      }
-    }
+  // Branch edges: the `if`'s port to the head of a branch. The engine
+  // confirms the membership through the branch lists; the head is the
+  // first *visible* member, never a hidden raw node.
+  for (const cmd of cmds) {
+    if (cmd.kind !== "if") continue;
+    const then = visibleBranchMembers(cmds, cmd.then_body)[0];
+    if (then !== undefined) push(cmd.id, then, "then", false);
+    const otherwise = visibleBranchMembers(cmds, cmd.else_body)[0];
+    if (otherwise !== undefined) push(cmd.id, otherwise, "else", false);
   }
 
   return out;
+}
+
+/**
+ * The user-visible entry point of a function.
+ *
+ * The engine's entry can point at a **hidden** node: when an `if`
+ * heads the chain, the engine points the entry at the `if`'s condition
+ * compute (`Package::if_set_condition`), and that id is not a block.
+ * The chain still starts at the `if` itself — the compute is spliced
+ * right before it — and `Package::list_commands` reports the reachable
+ * chain before the orphans, so the first command it reports is the
+ * chain's first block.
+ *
+ * `null` means "the UI cannot name the entry": either there is none, or
+ * the hidden entry belongs to an `if` that no longer exists (the engine
+ * keeps pointing at the orphaned compute). The UI then says "no entry
+ * point" instead of claiming a connection the runtime does not have.
+ */
+export function resolveEntry(
+  cmds: readonly GraphCommand[],
+  entry: number | null,
+): number | null {
+  if (entry === null) return null;
+  for (const c of cmds) {
+    if (c.id === entry) return entry;
+  }
+  // A hidden entry is the condition compute of the `if` that heads the
+  // chain: its successor is that `if`, so the chain's first block is
+  // the first command the engine reports.
+  const first = cmds[0];
+  if (first === undefined || first.kind !== "if") return null;
+  return first.id;
+}
+
+/**
+ * The last block of the chain that starts at `entry`.
+ *
+ * Walks the user-level `next` edges, so the hidden compute of an `if`
+ * is skipped (the `if` is the block that follows it). Returns `null`
+ * when there is no chain (no entry, or the entry is not a block).
+ */
+export function chainTailOf(
+  cmds: readonly GraphCommand[],
+  entry: number | null,
+): number | null {
+  if (entry === null) return null;
+  const nextOf = new Map<number, number | null>();
+  for (const c of cmds) nextOf.set(c.id, c.next ?? null);
+  let current: number | null = entry;
+  const seen = new Set<number>();
+  while (current !== null && !seen.has(current)) {
+    if (!nextOf.has(current)) return null;
+    seen.add(current);
+    const next: number | null = nextOf.get(current) ?? null;
+    if (next === null) return current;
+    current = next;
+  }
+  return current;
 }
