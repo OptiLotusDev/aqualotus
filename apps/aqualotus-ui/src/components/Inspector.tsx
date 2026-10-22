@@ -3,6 +3,13 @@ import type { Access, CommandId, CommandSummary } from "../lib/optilotus";
 import type { FunctionInfo } from "../lib/optilotus";
 import { optilotus_type, type OptilotusType } from "../lib/optilotus";
 import {
+  CAST_TARGET_TYPES,
+  CASTING_DISABLED,
+  castConvertedVariableNote,
+  castingIncomplete,
+  declaredTypeOf,
+} from "../lib/casting";
+import {
   summaryToDraft,
   validateDeclareValue,
   type CommandDraft,
@@ -28,6 +35,13 @@ interface InspectorProps {
   /** Recovery hint: attempted undeclared variable name, if any. */
   readonly recoveryVar?: string | null;
   readonly onReplace: (id: CommandId, draft: CommandDraft) => void;
+  /**
+   * The visible commands of the selected function. Used to resolve the
+   * destination variable's declared type while its name is being edited,
+   * so a cast target can be checked against the real declaration the
+   * Engine will enforce.
+   */
+  readonly commands?: readonly CommandSummary[];
   /** The expression an `if`'s condition was built from (null on error). */
   readonly onConditionText?: (ifId: CommandId) => string | null;
   readonly onDeleteBlock: (id: CommandId) => void;
@@ -178,8 +192,10 @@ function declareValueHint(ty: OptilotusType): {
 function KindFields(props: {
   draft: CommandDraft;
   onChange: (next: CommandDraft) => void;
+  /** Declared type of the assignment destination, when known. */
+  readonly destinationType?: OptilotusType;
 }): ReactElement {
-  const { draft, onChange } = props;
+  const { draft, onChange, destinationType } = props;
   switch (draft.kind) {
     case "declare": {
       const valueHint = declareValueHint(draft.ty);
@@ -279,7 +295,21 @@ function KindFields(props: {
         </>
       );
     }
-    case "assign":
+    case "assign": {
+      // Casting is part of this draft, not parent configuration state:
+      // toggling only edits the local draft and never submits or creates
+      // an Engine command by itself.
+      const casting = draft.casting ?? CASTING_DISABLED;
+      // The destination's declaration is never rewritten by casting:
+      // when the chosen target differs from the declared type (or the
+      // destination is not declared), applying replaces this block with
+      // a real Engine cast that creates the converted value in a new
+      // variable. The note explains that; it never blocks the choice.
+      const convertedNote = castConvertedVariableNote(
+        casting,
+        destinationType,
+        draft.name,
+      );
       return (
         <>
           <div className="field">
@@ -312,8 +342,99 @@ function KindFields(props: {
               comparison into a bool variable for true/false.
             </div>
           </div>
+          <div className="field field-check" data-testid="assign-casting">
+            <label className="field-check-label" htmlFor="in-casting">
+              <input
+                id="in-casting"
+                type="checkbox"
+                checked={casting.enabled === true}
+                onChange={(e) => {
+                  const enabled = e.target.checked === true;
+                  onChange({
+                    ...draft,
+                    casting: enabled
+                      ? {
+                          enabled: true,
+                          // Enabling never invents a target: the user must
+                          // choose one.
+                          targetType: casting.targetType,
+                        }
+                      : // Disabling removes the whole configuration, so
+                        // Apply restores a plain assignment.
+                        CASTING_DISABLED,
+                  });
+                }}
+              />
+              <span>Casting</span>
+            </label>
+            <div className="field-hint">
+              Optional conversion before storing. Off by default; ordinary
+              assignments are unchanged.
+            </div>
+          </div>
+          {casting.enabled === true ? (
+            <div className="field">
+              <span>
+                <label htmlFor="in-cast-type">Cast to type</label>
+              </span>
+              <select
+                id="in-cast-type"
+                value={casting.targetType ?? ""}
+                aria-describedby="in-cast-hint"
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  onChange({
+                    ...draft,
+                    casting: {
+                      enabled: true,
+                      // The empty option is the deliberate "not chosen
+                      // yet" state; it maps to null, never a default.
+                      targetType:
+                        raw === "" ? null : (raw as OptilotusType),
+                    },
+                  });
+                }}
+              >
+                <option value="" disabled>
+                  Select a target type…
+                </option>
+                {CAST_TARGET_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                    {destinationType === t ? " (destination type)" : ""}
+                  </option>
+                ))}
+              </select>
+              <div className="field-hint" id="in-cast-hint" data-testid="cast-preview">
+                Source: {draft.expr || "—"} · Destination:{" "}
+                {draft.name || "—"}
+                {destinationType !== undefined ? (
+                  <span data-testid="destination-type"> ({destinationType})</span>
+                ) : (
+                  <span data-testid="destination-unresolved">
+                    {" "}
+                    (type not resolved)
+                  </span>
+                )}
+                . Every legal target can be selected; the Engine converts
+                the value at run time. For a target that differs from the
+                destination's declared type, applying replaces this block
+                with a Cast that creates the converted value in a new
+                variable.
+              </div>
+              {convertedNote !== null ? (
+                <div
+                  className="field-hint"
+                  data-testid="cast-converted-note"
+                >
+                  {convertedNote}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </>
       );
+    }
     case "print":
       return (
         <div className="field">
@@ -351,6 +472,10 @@ function KindFields(props: {
         </div>
       );
     case "cast":
+      // Internal/editor support for programs that already contain an
+      // Engine cast command (a declaration that converts then stores).
+      // Users cannot create a standalone Cast block from the library;
+      // assignment casting is configured in the `assign` case above.
       return (
         <>
           <div className="field">
@@ -377,9 +502,7 @@ function KindFields(props: {
               }
             >
               {TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
+                <option key={t} value={t}>{t}</option>
               ))}
             </select>
           </div>
@@ -490,6 +613,7 @@ export default function Inspector(props: InspectorProps): ReactElement {
     selected,
     busy,
     recoveryVar,
+    commands,
     onReplace,
     onConditionText,
     onDeleteBlock,
@@ -526,11 +650,29 @@ export default function Inspector(props: InspectorProps): ReactElement {
   }
 
   if (selected !== null && edit !== null) {
-    // An unquotable string/char value blocks Apply with the field-level
-    // message instead of failing at the engine.
+    // Casting is incomplete when enabled but no target type has been
+    // chosen. The empty option never counts as a selection. No other
+    // casting state blocks Apply: any legal target builds — a target
+    // differing from the destination's type creates the converted value
+    // in a new variable instead of writing the destination.
+    const casting = edit.kind === "assign" ? edit.casting : undefined;
+    const castIncomplete =
+      edit.kind === "assign" && castingIncomplete(casting);
+    // Resolve the destination from the live command list (the name may
+    // be edited in this draft); fall back to the selected summary's type.
+    const destinationType =
+      edit.kind === "assign"
+        ? (declaredTypeOf(commands ?? [], edit.name) ??
+          // No command list (or no declaration yet): only trust the
+          // selected summary while the name still matches it.
+          ((selected.var ?? "").trim() === edit.name.trim()
+            ? selected.ty
+            : undefined))
+        : undefined;
     const editBlocked =
-      edit.kind === "declare" &&
-      validateDeclareValue(edit.ty, edit.init) !== null;
+      castIncomplete ||
+      (edit.kind === "declare" &&
+        validateDeclareValue(edit.ty, edit.init) !== null);
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div className="pane-title">Inspector</div>
@@ -553,6 +695,14 @@ export default function Inspector(props: InspectorProps): ReactElement {
             >
               Declare &ldquo;{recoveryVar}&rdquo; (int32)
             </button>
+          </div>
+        ) : null}
+        {castIncomplete ? (
+          <div className="notice notice-error" role="alert">
+            <div className="notice-title">Incomplete casting</div>
+            <div data-testid="cast-incomplete">
+              Select a target type to complete casting.
+            </div>
           </div>
         ) : null}
         <div className="insp-path" title="Package / Struct / Function">
@@ -583,14 +733,18 @@ export default function Inspector(props: InspectorProps): ReactElement {
             onReplace(selected.id, edit);
           }}
         >
-          <KindFields draft={edit} onChange={setEdit} />
+          <KindFields
+            draft={edit}
+            onChange={setEdit}
+            destinationType={destinationType}
+          />
           <button
             type="submit"
             className="btn btn-primary"
             disabled={busy || editBlocked}
             title={
               editBlocked
-                ? "Fix the value error first (see above)"
+                ? "Fix the highlighted error first (see above)"
                 : undefined
             }
           >

@@ -582,13 +582,14 @@ export default function AppShell(props: AppShellProps): ReactElement {
       onDeclareVariable={
         fid !== null ? (name) => props.onDeclareVariable(fid, name) : undefined
       }
-        onReplace={(id, draft) =>
-          fid !== null ? replaceWithPosition(fid, id, draft) : undefined
-        }
-        onConditionText={(ifId) =>
-          fid !== null ? props.onConditionText(fid, ifId) : null
-        }
-        onDeleteBlock={(id) => deleteBlock(id)}
+      onReplace={(id, draft) =>
+        fid !== null ? replaceWithPosition(fid, id, draft) : undefined
+      }
+      commands={program.commands}
+      onConditionText={(ifId) =>
+        fid !== null ? props.onConditionText(fid, ifId) : null
+      }
+      onDeleteBlock={(id) => deleteBlock(id)}
       onDeleteFunction={() => {
         if (fid !== null) props.onDeleteFunction(fid);
       }}

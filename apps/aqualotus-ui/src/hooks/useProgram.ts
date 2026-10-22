@@ -5,6 +5,7 @@ import type {
   FunctionId,
   FunctionInfo,
   FunctionSummary,
+  OptilotusError,
   RunResult,
 } from "../lib/optilotus";
 import {
@@ -44,6 +45,15 @@ import {
   type UiCommand,
 } from "../lib/program";
 import type { CommandDraft } from "../lib/program";
+import {
+  castingIncomplete,
+  collapseCasting,
+  declaredTypeOf,
+  nextConvertedNames,
+  nextCastingNames,
+  resolveCastingEntry,
+  type CastingInfo,
+} from "../lib/casting";
 import {
   chainTailOf,
   resolveEntry,
@@ -142,6 +152,8 @@ interface CommandSlot {
   readonly prevId: number | null;
   readonly nextId: number | null;
   readonly wasEntry: boolean;
+  /** The hidden conversion group when the command is a casting assign. */
+  readonly casting?: CastingInfo;
 }
 
 function failThrown(snapshot: ProgramSnapshot, e: unknown): ProgramSnapshot {
@@ -253,6 +265,198 @@ function isUndeclaredError(raw: unknown): boolean {
 }
 
 /**
+ * A typed bridge-shaped error for UI-side validation that prevents an
+ * invalid Engine write (for example Casting enabled with no target).
+ * Engine failures are always passed through verbatim.
+ */
+function castingValidationError(message: string): OptilotusError {
+  return {
+    status: "error",
+    kind: "PackageError",
+    command: null,
+    message,
+  };
+}
+
+/** Best-effort removal of a partially created conversion group. */
+function rollbackCastingGroup(
+  fid: FunctionId,
+  ids: {
+    anchorId: number;
+    // Hidden casts only: never the visible representative.
+    castIds: number[];
+    visibleId?: number;
+  },
+): void {
+  const listed = optilotus_listCommands(fid);
+  if (!isOptilotusError(listed)) {
+    // Detach the group from the chain before deleting it, so a dangling
+    // predecessor never remains.
+    const predecessor = listed.commands.find(
+      (cmd) =>
+        cmd.next === ids.anchorId &&
+        cmd.id !== ids.anchorId &&
+        !ids.castIds.includes(cmd.id) &&
+        cmd.id !== ids.visibleId,
+    );
+    if (predecessor !== undefined) {
+      optilotus_setNext(fid, predecessor.id);
+    }
+    const info = optilotus_getFunction(fid);
+    if (!isOptilotusError(info) && info.entry === ids.anchorId) {
+      optilotus_setEntry(fid, null);
+    }
+  }
+  if (ids.visibleId !== undefined) {
+    optilotus_deleteCommand(fid, ids.visibleId);
+  }
+  // Hidden casts in reverse creation order: each cast group cascades
+  // its hidden compute/cast nodes, and a later delete must never walk
+  // into already-removed raw nodes.
+  for (const castId of [...ids.castIds].reverse()) {
+    optilotus_deleteCommand(fid, castId);
+  }
+  // After the casts are gone the anchor can still hold a raw pointer
+  // into the deleted cast groups. Clearing its user-level successor
+  // first detaches that pointer so deleting the anchor cannot leave a
+  // dangling edge (same order verified against the real Engine).
+  optilotus_setNext(fid, ids.anchorId);
+  optilotus_deleteCommand(fid, ids.anchorId);
+}
+
+interface CreatedCastingGroup {
+  /** Engine id of the visible block (the assign, or the native cast). */
+  readonly visibleId: number;
+  readonly anchorId: number;
+  /** The user's target conversion cast; `=== visibleId` for native groups. */
+  readonly castId: number;
+}
+
+/**
+ * Create the conversion group through the public bridge.
+ *
+ * **Target equals the destination's declared type** — a hidden
+ * single-leg group:
+ *
+ *     declare anchor
+ *     cast temp = <source>    (target: the user's choice)
+ *     assign dest = {temp}
+ *
+ * The Engine's `Set` operation only stores a value whose type equals
+ * the destination variable's declared type, and the value the cast
+ * produces already has it. The destination is untouched.
+ *
+ * **Target differs (or the destination is undeclared)** — a converted
+ * value cannot live in the destination variable, so the group is the
+ * Engine's *native* cast, which both converts and creates its variable:
+ *
+ *     declare anchor        (name carries the derived out name)
+ *     cast <outName> to <target> = <source>   (the visible Cast block)
+ *
+ * The derived name comes from the assignment's destination and the
+ * target tag (`x` cast to `float64` → `x_f64`), suffixed when taken;
+ * the destination's declare block and its variable are never rewritten
+ * and the converted value is read through the new variable.</think><tool_call>edit<arg_key>newString</arg_key><arg_value> /**
+  * Both legs are real `ops::cast_value` conversions: an out-of-range
+ * value fails in the Engine at run time with its own error.
+ *
+ * Validation happens before any write when possible. A write that the
+ * Engine still rejects (for example an empty expression) rolls the
+ * whole group back and returns the Engine's own typed error.
+ */
+function createCastingGroup(
+  fid: FunctionId,
+  draft: Extract<CommandDraft, { kind: "assign" }>,
+): { ok: true; group: CreatedCastingGroup } | { ok: false; error: OptilotusError } {
+  const setting = draft.casting;
+  if (setting?.enabled !== true) {
+    return {
+      ok: false,
+      error: castingValidationError(
+        "Casting is not enabled for this assignment.",
+      ),
+    };
+  }
+  if (castingIncomplete(setting) || setting.targetType === null) {
+    return {
+      ok: false,
+      error: castingValidationError(
+        "Select a target type to complete casting.",
+      ),
+    };
+  }
+  const target = setting.targetType;
+  const destName = draft.name.trim();
+  if (destName === "") {
+    return {
+      ok: false,
+      error: castingValidationError(
+        "Enter the destination variable name first.",
+      ),
+    };
+  }
+  const listed = optilotus_listCommands(fid);
+  if (isOptilotusError(listed)) return { ok: false, error: listed };
+  const taken = listed.commands.flatMap((cmd) =>
+    cmd.var === undefined ? [] : [cmd.var],
+  );
+
+  const destinationType = declaredTypeOf(listed.commands, destName);
+  if (destinationType !== undefined && destinationType === target) {
+    // Single leg: the conversion result already has the destination's
+    // type, so the visible assign stores it directly. The destination
+    // declaration is respected, nothing is derived.
+    const { anchorName, tempName } = nextCastingNames(taken);
+
+    const anchor = optilotus_declare(fid, anchorName, optilotus_type.int32);
+    if (isOptilotusError(anchor)) return { ok: false, error: anchor };
+
+    const cast = optilotus_cast(fid, tempName, target, draft.expr);
+    if (isOptilotusError(cast)) {
+      rollbackCastingGroup(fid, { anchorId: anchor.id, castIds: [] });
+      return { ok: false, error: cast };
+    }
+
+    const assign = optilotus_assign(fid, draft.name, `{${tempName}}`);
+    if (isOptilotusError(assign)) {
+      rollbackCastingGroup(fid, {
+        anchorId: anchor.id,
+        castIds: [cast.id],
+      });
+      return { ok: false, error: assign };
+    }
+
+    return {
+      ok: true,
+      group: {
+        visibleId: assign.id,
+        anchorId: anchor.id,
+        castId: cast.id,
+      },
+    };
+  }
+
+  // Native cast shape: the block becomes the Engine's own cast, which
+  // converts AND creates the converted variable. The destination needs
+  // no validation at all — it is never written by the group.
+  const { anchorName, outName } = nextConvertedNames(taken, destName, target);
+
+  const anchor = optilotus_declare(fid, anchorName, optilotus_type.int32);
+  if (isOptilotusError(anchor)) return { ok: false, error: anchor };
+
+  const cast = optilotus_cast(fid, outName, target, draft.expr);
+  if (isOptilotusError(cast)) {
+    rollbackCastingGroup(fid, { anchorId: anchor.id, castIds: [] });
+    return { ok: false, error: cast };
+  }
+
+  return {
+    ok: true,
+    group: { visibleId: cast.id, anchorId: anchor.id, castId: cast.id },
+  };
+}
+
+/**
  * Exhaustiveness guard for `CommandDraft`. A new draft kind must be
  * wired to a bridge call in `runBuilder`; reaching here means one was
  * added without that wiring, so fail loudly instead of creating nothing.
@@ -284,18 +488,27 @@ function readLinks(
 } | null {
   const listed = optilotus_listCommands(fid);
   if (isOptilotusError(listed)) return null;
+  const collapsed = collapseCasting(listed.commands);
+  const commands = withPlannedLinks(collapsed.commands, planned);
   const info = optilotus_getFunction(fid);
   const rawEntry =
     !isOptilotusError(info) && info.entry !== undefined ? info.entry : null;
   const links = new Map<number, number | null>();
-  for (const c of listed.commands) links.set(c.id, c.next ?? null);
-  const known = new Set(listed.commands.map((c) => c.id));
+  for (const c of commands) links.set(c.id, c.next ?? null);
+  const known = new Set(commands.map((c) => c.id));
   for (const [from, to] of planned) {
     if ((links.get(from) ?? null) !== null) continue;
     if (!known.has(to)) continue;
     links.set(from, to);
   }
-  return { links, entry: resolveEntry(listed.commands, rawEntry) };
+  return {
+    links,
+    entry: resolveCastingEntry(
+      (entry) => resolveEntry(commands, entry),
+      collapsed.redirects,
+      rawEntry,
+    ),
+  };
 }
 
 /**
@@ -474,6 +687,13 @@ function slotOf(
     prevId: commands.find((c) => c.next === id)?.id ?? null,
     nextId: cmd.next ?? null,
     wasEntry: entry === id,
+    ...(cmd.kind === "assign" &&
+    (cmd as CommandSummary & { casting?: CastingInfo }).casting !== undefined
+      ? {
+          casting: (cmd as CommandSummary & { casting?: CastingInfo })
+            .casting,
+        }
+      : {}),
   };
 }
 
@@ -620,7 +840,7 @@ export function useProgram(
           const cmds = optilotus_listCommands(fn.id);
           if (!isOptilotusError(cmds)) {
             commandsByFunction[fn.id] = withPlannedLinks(
-              cmds.commands,
+              collapseCasting(cmds.commands).commands,
               plannedLinksOf(plannedRef.current, fn.id),
             );
           } else {
@@ -629,13 +849,21 @@ export function useProgram(
         }
         if (nextSelected !== null) {
           const info = optilotus_getFunction(nextSelected);
-          if (!isOptilotusError(info)) {
-            selected = info;
+          const listed = optilotus_listCommands(nextSelected);
+          if (!isOptilotusError(info) && !isOptilotusError(listed)) {
+            const collapsed = collapseCasting(listed.commands);
             commands = [...(commandsByFunction[nextSelected] ?? [])];
             // The engine's entry can point at a hidden node (an `if`'s
-            // condition compute): the UI resolves it to the block the
-            // chain really starts at.
-            entry = resolveEntry(commands, info.entry ?? null);
+            // condition compute, or a conversion group's anchor):
+            // resolve it to the block the chain really starts at.
+            entry = resolveCastingEntry(
+              (raw) => resolveEntry(commands, raw),
+              collapsed.redirects,
+              info.entry ?? null,
+            );
+            // `command_count` counts hidden Engine commands; the
+            // inspector shows the user-visible blocks.
+            selected = { ...info, commandCount: commands.length };
           }
         }
         setSnapshot((prev) =>
@@ -783,6 +1011,61 @@ export function useProgram(
         !isOptilotusError(info) && info.entry !== undefined
           ? (info.entry ?? null)
           : null;
+      if (draft.kind === "assign" && draft.casting?.enabled === true) {
+        const created = createCastingGroup(fid, draft);
+        if (!created.ok) {
+          setSnapshot((prev) =>
+            failCommand(
+              {
+                ...prev,
+                recoveryVar: isUndeclaredError(created.error)
+                  ? draft.name
+                  : prev.recoveryVar,
+              },
+              created.error,
+            ),
+          );
+          return null;
+        }
+        const { visibleId, anchorId } = created.group;
+        const after = optilotus_listCommands(fid);
+        if (!isOptilotusError(after)) {
+          // Detach the conversion group from the runtime tail. The
+          // anchor is the user-level head, so clearing its predecessor
+          // removes the whole group from the chain in one edit.
+          const pred = after.commands.find((c) => c.next === anchorId);
+          if (pred !== undefined) {
+            const cleared = optilotus_setNext(fid, pred.id);
+            if (isOptilotusError(cleared)) {
+              rollbackCastingGroup(fid, {
+                anchorId,
+                castIds:
+                  created.group.castId !== created.group.visibleId
+                    ? [created.group.castId]
+                    : [],
+                visibleId,
+              });
+              setSnapshot((prev) => failCommand(prev, cleared));
+              return null;
+            }
+          }
+        }
+        if (entryBefore === null) {
+          const now = optilotus_getFunction(fid);
+          const entryNow =
+            !isOptilotusError(now) && now.entry !== undefined
+              ? (now.entry ?? null)
+              : null;
+          if (entryNow !== null) {
+            const restored = optilotus_setEntry(fid, null);
+            if (isOptilotusError(restored)) {
+              setSnapshot((prev) => failCommand(prev, restored));
+              return null;
+            }
+          }
+        }
+        return visibleId;
+      }
       const created = runBuilder(fid, draft);
       if (isOptilotusError(created)) {
         setSnapshot((prev) =>
@@ -905,11 +1188,22 @@ export function useProgram(
   const runLinkPlan = useCallback(
     (fid: FunctionId, plan: LinkPlan): boolean => {
       const remap = remapRef.current;
+      // Translation to hidden conversion heads. An edit that *targets* a
+      // visible casting assign must point at its anchor; outgoing edits
+      // keep using the visible assign (the anchor -> cast -> assign
+      // group executes as a unit). Read before applying the plan so a
+      // freshly created group is already known.
+      const before = optilotus_listCommands(fid);
+      const castings = isOptilotusError(before)
+        ? new Map<number, CastingInfo>()
+        : collapseCasting(before.commands).castings;
+      const targetId = (id: number): number =>
+        castings.get(id)?.anchorId ?? id;
       const linked = new Set<number>();
       for (const edit of plan.edits) {
         const id = remap.resolve(edit.id);
         const next =
-          edit.next === null ? null : remap.resolve(edit.next);
+          edit.next === null ? null : targetId(remap.resolve(edit.next));
         const link =
           next === null
             ? optilotus_setNext(fid, id)
@@ -924,7 +1218,7 @@ export function useProgram(
         const entry =
           plan.entry.entry === null
             ? null
-            : remap.resolve(plan.entry.entry);
+            : targetId(remap.resolve(plan.entry.entry));
         const updated =
           entry === null
             ? optilotus_setEntry(fid, null)
@@ -1038,6 +1332,75 @@ export function useProgram(
     [createDetached, runLinkPlan],
   );
 
+  /**
+   * Delete one visible command, including a hidden conversion group.
+   *
+   * The chain is rewired around the block first (predecessor and/or
+   * entry), so deleting the internal group cannot leave a dangling raw
+   * edge. Then the visible assign, its cast and its anchor are removed
+   * in that order — the same order undo replays in reverse. After the
+   * cast is gone, the anchor's user-level successor is cleared before
+   * the anchor itself is deleted, detaching the stale pointer into the
+   * removed cast group.
+   */
+  const deleteVisibleCommand = useCallback(
+    (fid: FunctionId, id: CommandId): boolean => {
+      const listed = optilotus_listCommands(fid);
+      const casting = isOptilotusError(listed)
+        ? undefined
+        : collapseCasting(listed.commands).castings.get(id);
+      if (casting === undefined) return bridgeDelete(fid, id);
+      const links = readLinks(
+        fid,
+        plannedLinksOf(plannedRef.current, fid),
+      );
+      if (links !== null) {
+        const next = links.links.get(id) ?? null;
+        let prev: number | null = null;
+        for (const [from, to] of links.links) {
+          if (to === id) {
+            prev = from;
+            break;
+          }
+        }
+        if (prev !== null) {
+          if (
+            !runLinkPlan(fid, {
+              edits: [{ id: prev, next }],
+              entry: { type: "keep" },
+            })
+          ) {
+            return false;
+          }
+        } else if (links.entry === id) {
+          if (
+            !runLinkPlan(fid, {
+              edits: [],
+              entry: { type: "set", entry: next },
+            })
+          ) {
+            return false;
+          }
+        }
+      }
+      if (!bridgeDelete(fid, id)) return false;
+      // For the hidden single-leg shape the target cast still sits
+      // behind the assign (its group cascades on delete). For the
+      // native-cast shape the visible block IS the cast row, so this
+      // second delete must not repeat it.
+      if (casting.castId !== id && !bridgeDelete(fid, casting.castId)) {
+        return false;
+      }
+      const cleared = optilotus_setNext(fid, casting.anchorId);
+      if (isOptilotusError(cleared)) {
+        setSnapshot((prev) => failCommand(prev, cleared));
+        return false;
+      }
+      return bridgeDelete(fid, casting.anchorId);
+    },
+    [runLinkPlan, bridgeDelete],
+  );
+
   const createFunction = useCallback(
     (name: string): void => {
       try {
@@ -1102,9 +1465,15 @@ export function useProgram(
           return;
         }
         const cmds = optilotus_listCommands(id);
+        // Back up the **visible** commands: a casting assignment's
+        // hidden anchor/cast must not be recreated as standalone blocks.
+        // Its projected summary carries the casting choice, so undo
+        // rebuilds a fresh valid conversion group through `createDetached`.
         const items: { draft: CommandDraft }[] = isOptilotusError(cmds)
           ? []
-          : cmds.commands.map((c) => ({ draft: restorableDraft(id, c) }));
+          : collapseCasting(cmds.commands).commands.map((c) => ({
+              draft: restorableDraft(id, c),
+            }));
         const linksBefore = readLinks(
           id,
           plannedLinksOf(plannedRef.current, id),
@@ -1303,7 +1672,10 @@ export function useProgram(
           label: `Add ${draft.kind}`,
           undo: () => {
             setSnapshot((prev) => ({ ...prev, busy: true }));
-            const ok = bridgeDelete(fid, remapRef.current.resolve(box.id));
+            const ok = deleteVisibleCommand(
+              fid,
+              remapRef.current.resolve(box.id),
+            );
             load(fid);
             return ok;
           },
@@ -1325,7 +1697,7 @@ export function useProgram(
         setSnapshot((prev) => failThrown(prev, e));
       }
     },
-    [load, createDetached, bridgeDelete, pushHistory],
+    [load, createDetached, deleteVisibleCommand, pushHistory],
   );
 
   /**
@@ -1362,7 +1734,10 @@ export function useProgram(
           label: `Declare ${trimmed}`,
           undo: () => {
             setSnapshot((prev) => ({ ...prev, busy: true }));
-            const ok = bridgeDelete(fid, remapRef.current.resolve(box.id));
+            const ok = deleteVisibleCommand(
+              fid,
+              remapRef.current.resolve(box.id),
+            );
             load(fid);
             return ok;
           },
@@ -1388,7 +1763,7 @@ export function useProgram(
         setSnapshot((prev) => failThrown(prev, e));
       }
     },
-    [load, bridgeDelete, pushHistory],
+    [load, deleteVisibleCommand, pushHistory],
   );
 
   const replaceCommand = useCallback(
@@ -1453,13 +1828,12 @@ export function useProgram(
           return;
         }
         const ordered = snapshot.commands;
-        const info = optilotus_getFunction(fid);
         // The user-visible entry: the engine's own entry can name a
-        // hidden node (an `if`'s condition compute).
+        // hidden node (an `if`'s condition compute or a conversion
+        // group's anchor). `readLinks` applies the projection redirects.
         const entryNow =
-          !isOptilotusError(info) && info.entry !== undefined
-            ? resolveEntry(ordered, info.entry)
-            : null;
+          readLinks(fid, plannedLinksOf(plannedRef.current, fid))?.entry ??
+          null;
         const slot = slotOf(fid, ordered, entryNow, oldId);
         if (slot === null) {
           setSnapshot((prev) => ({
@@ -1529,6 +1903,13 @@ export function useProgram(
                     expr: renamed
                       ? renameRefs(rebuilt.expr, oldName, nextName)
                       : rebuilt.expr,
+                    // The user's chosen conversion target survives the
+                    // declaration edit untouched — the destination's
+                    // declaration is never rewritten by casting. If the
+                    // new declared type now differs from the target, the
+                    // rebuilt group's hidden store leg converts into the
+                    // destination's type again (see the module doc in
+                    // `lib/casting.ts`).
                   },
                 });
                 continue;
@@ -1575,7 +1956,7 @@ export function useProgram(
           );
           let candidate: number | null = null;
           if (isSameNameDeclare) {
-            if (!bridgeDelete(fid, oldId)) {
+            if (!deleteVisibleCommand(fid, oldId)) {
               load(fid);
               return;
             }
@@ -1589,8 +1970,8 @@ export function useProgram(
               load(fid);
               return;
             }
-            if (!bridgeDelete(fid, oldId)) {
-              bridgeDelete(fid, built);
+            if (!deleteVisibleCommand(fid, oldId)) {
+              deleteVisibleCommand(fid, built);
               load(fid);
               return;
             }
@@ -1643,24 +2024,29 @@ export function useProgram(
               return;
             }
             const infoNow = optilotus_getFunction(fid);
-            // The logical links: the engine's own edges plus the
-            // connections it accepted but cannot report (the edge into
-            // an `if`), so the slot restores the connection the
-            // program really has.
+            // The slot must be read from the **visible** projection:
+            // a conversion group's raw predecessor is its hidden cast,
+            // which is deleted together with the assign. Splicing from
+            // that id would leave the rebuilt group detached.
+            const collapsedNow = collapseCasting(listed.commands);
             const logical = withPlannedLinks(
-              listed.commands,
+              collapsedNow.commands,
               plannedLinksOf(plannedRef.current, fid),
             );
             const entryNow =
               !isOptilotusError(infoNow) && infoNow.entry !== undefined
-                ? resolveEntry(logical, infoNow.entry)
+                ? resolveCastingEntry(
+                    (entry) => resolveEntry(logical, entry),
+                    collapsedNow.redirects,
+                    infoNow.entry ?? null,
+                  )
                 : null;
             const depSlot = slotOf(fid, logical, entryNow, dep.id);
             if (depSlot === null) {
               load(fid);
               return;
             }
-            if (!bridgeDelete(fid, dep.id)) {
+            if (!deleteVisibleCommand(fid, dep.id)) {
               load(fid);
               return;
             }
@@ -1713,7 +2099,7 @@ export function useProgram(
             undo: () => {
               setSnapshot((prev) => ({ ...prev, busy: true }));
               for (const b of [boxD, ...boxA]) {
-                if (!bridgeDelete(fid, remap.resolve(b.id))) {
+                if (!deleteVisibleCommand(fid, remap.resolve(b.id))) {
                   load(fid);
                   return false;
                 }
@@ -1753,7 +2139,7 @@ export function useProgram(
             redo: () => {
               setSnapshot((prev) => ({ ...prev, busy: true }));
               for (const b of [boxD, ...boxA]) {
-                if (!bridgeDelete(fid, remap.resolve(b.id))) {
+                if (!deleteVisibleCommand(fid, remap.resolve(b.id))) {
                   load(fid);
                   return false;
                 }
@@ -1797,17 +2183,46 @@ export function useProgram(
         // BEFORE deleting the original, so a validation failure (e.g.
         // assign to an undeclared variable) leaves the user's block
         // exactly where it was instead of silently deleting it.
-        const candidate = createDetached(fid, draft);
-        if (candidate === null) {
+        //
+        // One engine-mandated exception — `cast` drafts: a cast also
+        // *introduces* its variable (the Engine's `declared_type` scans
+        // `declare` and `cast` rows alike), and `Package::cast` rejects
+        // a duplicate name while the original row is alive. Creating
+        // first would fail with `DuplicateVariable` for every same-name
+        // edit (including retargeting a cast block), so this shape
+        // deletes first and restores the original draft into its
+        // captured slot when the build fails (Issue 6 preserved).
+        const deleteFirst = draft.kind === "cast";
+        if (deleteFirst && !deleteVisibleCommand(fid, oldId)) {
           load(fid);
           return;
         }
-        // Candidate is live but detached; now remove the original and
-        // splice the candidate into its slot.
-        if (!bridgeDelete(fid, oldId)) {
+        const candidate = createDetached(fid, draft);
+        if (candidate === null) {
+          if (deleteFirst) {
+            // Build failed after the original was removed: restore it
+            // into its captured slot, so no work is lost.
+            insertSlot(
+              fid,
+              slot.draft,
+              {
+                prevId: slot.prevId,
+                nextId: slot.nextId,
+                makeEntry: slot.wasEntry,
+              },
+              oldId,
+            );
+          }
+          load(fid);
+          return;
+        }
+        // Candidate is live but detached; now remove the original (when
+        // not already removed above) and splice the candidate into its
+        // slot.
+        if (!deleteFirst && !deleteVisibleCommand(fid, oldId)) {
           // Original could not be removed: drop the candidate to avoid
           // duplicating the block, keep the error, restore the view.
-          bridgeDelete(fid, candidate);
+          deleteVisibleCommand(fid, candidate);
           load(fid);
           return;
         }
@@ -1843,7 +2258,7 @@ export function useProgram(
           label: `Edit ${oldKind}`,
           undo: () => {
             setSnapshot((prev) => ({ ...prev, busy: true }));
-            if (!bridgeDelete(fid, remap.resolve(box.id))) {
+            if (!deleteVisibleCommand(fid, remap.resolve(box.id))) {
               load(fid);
               return false;
             }
@@ -1869,7 +2284,7 @@ export function useProgram(
           },
           redo: () => {
             setSnapshot((prev) => ({ ...prev, busy: true }));
-            if (!bridgeDelete(fid, remap.resolve(box.id))) {
+            if (!deleteVisibleCommand(fid, remap.resolve(box.id))) {
               load(fid);
               return false;
             }
@@ -1900,7 +2315,7 @@ export function useProgram(
     [
       load,
       snapshot.commands,
-      bridgeDelete,
+      deleteVisibleCommand,
       insertSlot,
       createDetached,
       runLinkPlan,
@@ -1922,11 +2337,11 @@ export function useProgram(
         // whenever the caller deletes a block outside the selection.
         const ordered =
           snapshot.commandsByFunction[fid] ?? snapshot.commands;
-        const info = optilotus_getFunction(fid);
+        // Projection-aware entry: a conversion group's engine entry is
+        // its hidden anchor, which is redirected to the visible assign.
         const entryNow =
-          !isOptilotusError(info) && info.entry !== undefined
-            ? resolveEntry(ordered, info.entry)
-            : null;
+          readLinks(fid, plannedLinksOf(plannedRef.current, fid))?.entry ??
+          null;
         const slot = slotOf(fid, ordered, entryNow, cmd);
         if (slot === null) {
           // The block is already gone: report it and leave the UI usable
@@ -1939,7 +2354,7 @@ export function useProgram(
           }));
           return;
         }
-        if (!bridgeDelete(fid, cmd)) {
+        if (!deleteVisibleCommand(fid, cmd)) {
           load(fid);
           return;
         }
@@ -1972,7 +2387,10 @@ export function useProgram(
           },
           redo: () => {
             setSnapshot((prev) => ({ ...prev, busy: true }));
-            const ok = bridgeDelete(fid, remapRef.current.resolve(box.id));
+            const ok = deleteVisibleCommand(
+              fid,
+              remapRef.current.resolve(box.id),
+            );
             load(fid);
             return ok;
           },
@@ -1981,7 +2399,14 @@ export function useProgram(
         setSnapshot((prev) => failThrown(prev, e));
       }
     },
-    [load, snapshot.commands, snapshot.commandsByFunction, bridgeDelete, insertSlot, pushHistory],
+    [
+      load,
+      snapshot.commands,
+      snapshot.commandsByFunction,
+      deleteVisibleCommand,
+      insertSlot,
+      pushHistory,
+    ],
   );
 
   const applyLinks = useCallback(
@@ -2059,11 +2484,29 @@ export function useProgram(
           busy: true,
           recoveryVar: null,
         }));
-        const result = optilotus_if_append(fid, ifId, branch, targetId);
-        if (isOptilotusError(result)) {
-          setSnapshot((prev) => failCommand(prev, result));
-          load(fid);
-          return false;
+        // A casting assignment is a hidden group behind one visible
+        // block: `anchor -> cast -> [assign]` (the assign is absent for
+        // the native-cast shape, whose visible block IS the cast row).
+        // The engine appends one user-level command at a time, so the
+        // whole group — in creation order, without repeating the
+        // visible cast — moves into the branch.
+        const listed = optilotus_listCommands(fid);
+        const casting = isOptilotusError(listed)
+          ? undefined
+          : collapseCasting(listed.commands).castings.get(targetId);
+        const appendIds =
+          casting === undefined
+            ? [targetId]
+            : casting.castId === targetId
+              ? [casting.anchorId, targetId]
+              : [casting.anchorId, casting.castId, targetId];
+        for (const appendId of appendIds) {
+          const result = optilotus_if_append(fid, ifId, branch, appendId);
+          if (isOptilotusError(result)) {
+            setSnapshot((prev) => failCommand(prev, result));
+            load(fid);
+            return false;
+          }
         }
         // The appended block leaves the main chain (the engine runs it
         // from the `if` now): a planned connection it had is gone with
@@ -2209,7 +2652,13 @@ export function useProgram(
           return;
         }
         const cmds = optilotus_listCommands(fn.id);
-        const ordered = isOptilotusError(cmds) ? [] : [...cmds.commands];
+        // Collapse hidden conversion groups before backing up: their
+        // projected visible assign carries the casting choice, so undo
+        // recreates a fresh valid group instead of two extra blocks.
+        const collapsed = isOptilotusError(cmds)
+          ? null
+          : collapseCasting(cmds.commands);
+        const ordered = collapsed === null ? [] : [...collapsed.commands];
         const planned = plannedLinksOf(plannedRef.current, fn.id);
         backups.push({
           name: info.name,
@@ -2218,11 +2667,19 @@ export function useProgram(
           // The logical links: the engine's own edges plus the
           // connections it accepted but cannot report (the edge into an
           // `if`). The entry is the block the chain starts at — the
-          // engine's raw entry can name a hidden node.
+          // engine's raw entry can name a hidden node (`if` condition
+          // compute or conversion anchor).
           links: ordered.map(
             (c) => [c.id, logicalNextOf(ordered, planned, c.id)] as const,
           ),
-          entry: resolveEntry(ordered, info.entry ?? null),
+          entry:
+            collapsed === null
+              ? null
+              : resolveCastingEntry(
+                  (entry) => resolveEntry(ordered, entry),
+                  collapsed.redirects,
+                  info.entry ?? null,
+                ),
         });
       }
       const selectedName = snapshot.selected?.name ?? null;
