@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import AppShell from "./AppShell";
 import type { ProgramSnapshot } from "../hooks/useProgram";
 import type { RuntimeStatus } from "../hooks/useRuntime";
@@ -118,6 +118,52 @@ function shellProps(): React.ComponentProps<typeof AppShell> {
     onDismissError: vi.fn(),
   };
 }
+
+describe("AppShell error block attribution", () => {
+  it("offers the failing block when the engine reported a known block id", () => {
+    const props = {
+      ...shellProps(),
+      program: {
+        ...snapshot(),
+        run: {
+          status: "error" as const,
+          kind: "TypeMismatch",
+          command: 2,
+          message: "type mismatch at 2",
+        },
+        actionError: "TypeMismatch: type mismatch at 2",
+        commandErrorId: 2,
+      },
+    };
+    render(<AppShell {...props} />);
+    expect(screen.getByRole("button", { name: /Show block #2/ })).toBeTruthy();
+  });
+
+  it("offers no block when the engine reported a raw id the canvas does not know", () => {
+    // The engine reports the raw node that failed; for a print or an
+    // assign that id belongs to a hidden node of the command's group,
+    // so no block with that id exists.
+    const props = {
+      ...shellProps(),
+      program: {
+        ...snapshot(),
+        run: {
+          status: "error" as const,
+          kind: "TypeMismatch",
+          command: 7,
+          message: "type mismatch at 7",
+        },
+        actionError: "TypeMismatch: type mismatch at 7",
+        commandErrorId: 7,
+      },
+    };
+    const { container } = render(<AppShell {...props} />);
+    expect(container.textContent).toContain("TypeMismatch");
+    expect(
+      container.querySelector('button[aria-label^="Show block"]'),
+    ).toBeNull();
+  });
+});
 
 describe("AppShell run action", () => {
   it("starts the flow travel with the run", async () => {
