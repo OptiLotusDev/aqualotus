@@ -1,10 +1,10 @@
 import { memo, type ReactElement } from "react";
-import type { CommandSummary } from "../lib/optilotus";
-import { commandMainLine, displayDeclareValue } from "../lib/program";
+import { commandMainLine, displayDeclareValue, type UiCommand } from "../lib/program";
+import { castingIndicatorVisible } from "../lib/casting";
 import type { Pos } from "../lib/layout";
 
 interface VisualBlockProps {
-  readonly command: CommandSummary;
+  readonly command: UiCommand;
   readonly fid: number;
   readonly functionName: string;
   readonly index: number;
@@ -43,6 +43,8 @@ function VisualBlock(props: VisualBlockProps): ReactElement {
     interactive,
     exiting = false,
   } = props;
+  const casting = command.casting;
+  const showCasting = castingIndicatorVisible(command);
   return (
     <div
       id={`vblock-${fid}-${command.id}`}
@@ -63,6 +65,32 @@ function VisualBlock(props: VisualBlockProps): ReactElement {
       style={{ left: position.x, top: position.y }}
     >
       <span className="vport vport-left" data-port="in" aria-hidden="true" />
+      {showCasting && casting !== undefined ? (
+        <span
+          className="vblock-casting"
+          data-testid={`casting-enabled-${command.id}`}
+          data-casting-assignment={command.id}
+          data-casting-target={casting.targetType}
+          title={
+            command.kind === "cast"
+              ? `This cast creates ${casting.tempName} of type ${casting.targetType}`
+              : `This assignment converts to ${casting.targetType} before storing`
+          }
+        >
+          <span
+            className="vblock-casting-link"
+            data-testid={`casting-connector-${command.id}`}
+            aria-hidden="true"
+          />
+          <span className="vblock-casting-label">Casting Enabled</span>
+          <span
+            className="vblock-casting-type"
+            data-testid={`casting-target-type-${command.id}`}
+          >
+            type: {casting.targetType}
+          </span>
+        </span>
+      ) : null}
       {command.kind === "declare" ? (
         <>
           <span className="vblock-var">var: {command.var ?? "?"}</span>

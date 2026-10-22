@@ -1,5 +1,6 @@
 import type { Access, CommandSpec, CommandSummary, OptilotusError } from "./optilotus";
 import { optilotus_type, type OptilotusType } from "./optilotus";
+import type { CastingDraft, CastingInfo, CastingSetting } from "./casting";
 
 /** Command kinds the editor supports (mirrors the bridge). */
 export type CommandKind = CommandSummary["kind"];
@@ -22,6 +23,14 @@ export type CommandKind = CommandSummary["kind"];
 export interface UiCommand extends CommandSummary {
   /** The successor came from the UI's plan, not from the engine. */
   readonly planned?: boolean;
+  /**
+   * A hidden Engine conversion group behind this visible assign.
+   *
+   * The visible `expr`/`var`/`ty` describe the user's source expression
+   * and destination; {@link CastingInfo} keeps the hidden ids needed to
+   * link/delete/restore the group through the public bridge.
+   */
+  readonly casting?: CastingInfo;
 }
 
 /**
@@ -46,7 +55,17 @@ export type CommandDraft =
       access?: Access;
       init: string;
     }
-  | { kind: "assign"; name: string; expr: string }
+  | {
+      kind: "assign";
+      name: string;
+      expr: string;
+      /**
+       * Optional conversion before storing. Absent/disabled means an
+       * ordinary assignment. The hidden Engine group is created only
+       * when this is enabled *and* a target type is chosen.
+       */
+      casting?: CastingDraft;
+    }
   | { kind: "print"; template: string }
   | { kind: "input"; ty: OptilotusType }
   | { kind: "cast"; name: string; to: OptilotusType; expr: string }
@@ -92,8 +111,26 @@ export function summaryToDraft(cmd: CommandSummary): CommandDraft {
         access: cmd.access ?? "private",
         init: displayDeclareValue(cmd.ty, cmd.expr),
       };
-    case "assign":
-      return { kind: "assign", name: cmd.var ?? "", expr: cmd.expr ?? "" };
+    case "assign": {
+      // A projected casting assign carries its hidden group. Restore
+      // the user's choice (target type), never the generated temp name
+      // or engine ids: undo/replace must create a fresh valid group.
+      const casting = (cmd as CommandSummary & { casting?: CastingInfo })
+        .casting;
+      return {
+        kind: "assign",
+        name: cmd.var ?? "",
+        expr: cmd.expr ?? "",
+        ...(casting === undefined
+          ? {}
+          : {
+              casting: {
+                enabled: true,
+                targetType: casting.targetType,
+              } satisfies CastingDraft,
+            }),
+      };
+    }
     case "print":
       return { kind: "print", template: cmd.template ?? "" };
     case "input":
@@ -171,7 +208,8 @@ export function commandDraftEqual(
       return (
         next.kind === "assign" &&
         next.name === current.name &&
-        next.expr === current.expr
+        next.expr === current.expr &&
+        castingSettingsEqual(next.casting, current.casting)
       );
     case "print":
       return next.kind === "print" && next.template === current.template;
@@ -196,6 +234,22 @@ export function commandDraftEqual(
     default:
       return unreachableDraft(current);
   }
+}
+
+/**
+ * Casting drafts compare by the user's choice, never by hidden Engine
+ * ids. An absent value and an explicit disabled value mean the same
+ * thing: an ordinary assignment.
+ */
+function castingSettingsEqual(
+  a: CastingDraft | undefined,
+  b: CastingDraft | undefined,
+): boolean {
+  const left: CastingSetting = a ?? { enabled: false, targetType: null };
+  const right: CastingSetting = b ?? { enabled: false, targetType: null };
+  return (
+    left.enabled === right.enabled && left.targetType === right.targetType
+  );
 }
 
 /**
@@ -284,14 +338,29 @@ export function commandSubLine(cmd: CommandSummary): string {
       const shown = displayDeclareValue(cmd.ty, cmd.expr);
       return shown !== "" ? `initial ${shown}` : "no initial value";
     }
-    case "assign":
-      return "assignment";
+    case "assign": {
+      const casting = (cmd as CommandSummary & { casting?: CastingInfo })
+        .casting;
+      // The destination's declaration is respected: when the chosen
+      // target equals it, the hidden group converts and stores.
+      return casting === undefined
+        ? "assignment"
+        : `converts to ${casting.targetType}, then stores`;
+    }
     case "print":
       return "print to output";
     case "input":
       return "read from input";
-    case "cast":
-      return "converts and stores";
+    case "cast": {
+      const casting = (cmd as CommandSummary & { casting?: CastingInfo })
+        .casting;
+      // The native casting shape: this block IS the Engine cast the
+      // apply built; its variable holds the converted value while the
+      // assignment's destination is left untouched.
+      return casting === undefined
+        ? "converts and stores"
+        : `creates ${casting.tempName} (${casting.targetType})`;
+    }
     case "return":
       return "ends the function";
     case "if":
