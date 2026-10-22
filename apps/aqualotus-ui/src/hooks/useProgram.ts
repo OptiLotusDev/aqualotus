@@ -30,6 +30,7 @@ import {
   optilotus_runProgram,
   optilotus_setEntry,
   optilotus_setNext,
+  optilotus_type,
 } from "../lib/optilotus";
 import { HistoryIdMap, type HistoryEntry } from "../lib/history";
 import {
@@ -524,15 +525,55 @@ export function useProgram(
   );
 
   /**
+   * Re-splice an `if`'s hidden condition compute.
+   *
+   * The engine keeps an `if`'s condition in a hidden compute command
+   * that has to run *immediately before* the `if`. That compute is not
+   * a user command, so the bridge's user-level `next` edges cannot see
+   * it: linking a block to an `if` overwrites the edge that reached the
+   * compute and leaves the condition dangling — the run then fails with
+   * `MissingValue` ("missing value N at M").
+   *
+   * `if_set_condition` is the engine's own repair primitive: it rebuilds
+   * the compute and re-points the `if`'s predecessors — and the entry,
+   * when the `if` is the chain head — at the new compute. Calling it
+   * with the condition the engine already holds keeps the expression
+   * exactly as the user wrote it.
+   *
+   * Returns false when the bridge rejected the repair (the error is
+   * surfaced by the caller).
+   */
+  const repairIfCondition = useCallback(
+    (fid: FunctionId, ifId: CommandId): boolean => {
+      const condition = optilotus_if_condition(fid, ifId);
+      // No condition to repair (the command is not an `if`, or the
+      // engine cannot recover the expression): nothing to do.
+      if (isOptilotusError(condition)) return true;
+      const repaired = optilotus_if_set_condition(fid, ifId, condition.expr);
+      if (isOptilotusError(repaired)) {
+        setSnapshot((prev) => failCommand(prev, repaired));
+        return false;
+      }
+      return true;
+    },
+    [],
+  );
+
+  /**
    * Low-level link plan application. Bridge only; caller refreshes.
    * History-free (used by recording actions and by undo/redo thunks).
    * Ids resolve through the central remapper; unknown ids fail honestly
    * (the runtime rejects them and the error surfaces) — callers that
    * tolerate dead ids (e.g. `restoreLinks`) filter them beforehand.
+   *
+   * A plan that links a block to an `if` also repairs that `if`'s
+   * condition compute (see `repairIfCondition`), so the block really
+   * runs the branch instead of failing on a dangling condition.
    */
   const runLinkPlan = useCallback(
     (fid: FunctionId, plan: LinkPlan): boolean => {
       const remap = remapRef.current;
+      const linked = new Set<number>();
       for (const edit of plan.edits) {
         const id = remap.resolve(edit.id);
         const next =
@@ -545,6 +586,7 @@ export function useProgram(
           setSnapshot((prev) => failCommand(prev, link));
           return false;
         }
+        if (next !== null) linked.add(next);
       }
       if (plan.entry.type === "set") {
         const entry =
@@ -559,10 +601,19 @@ export function useProgram(
           setSnapshot((prev) => failCommand(prev, updated));
           return false;
         }
+        if (entry !== null) linked.add(entry);
+      }
+      if (linked.size === 0) return true;
+      const listed = optilotus_listCommands(fid);
+      if (isOptilotusError(listed)) return true;
+      for (const cmd of listed.commands) {
+        if (cmd.kind !== "if") continue;
+        if (!linked.has(cmd.id)) continue;
+        if (!repairIfCondition(fid, cmd.id)) return false;
       }
       return true;
     },
-    [],
+    [repairIfCondition],
   );
 
   /** Exact link-map restore (reorder undo/redo, function restore). */
@@ -929,7 +980,11 @@ export function useProgram(
           commandErrorId: null,
           recoveryVar: null,
         }));
-        const created = optilotus_declare(fid, trimmed, "int32");
+        const created = optilotus_declare(
+          fid,
+          trimmed,
+          optilotus_type.int32,
+        );
         if (isOptilotusError(created)) {
           setSnapshot((prev) => failCommand(prev, created));
           load(fid);
@@ -948,7 +1003,11 @@ export function useProgram(
           },
           redo: () => {
             setSnapshot((prev) => ({ ...prev, busy: true }));
-            const again = optilotus_declare(fid, trimmed, "int32");
+            const again = optilotus_declare(
+              fid,
+              trimmed,
+              optilotus_type.int32,
+            );
             if (isOptilotusError(again)) {
               setSnapshot((prev) => failCommand(prev, again));
               load(fid);
@@ -1066,11 +1125,11 @@ export function useProgram(
         // slot, so no work is lost (Issue 6).
         const isDeclareToDeclare =
           draft.kind === "declare" && slot.draft.kind === "declare";
+        // `isDeclareToDeclare` already implies that both kinds are
+        // `declare`, so the kind checks are not repeated here.
         const isSameNameDeclare =
           isDeclareToDeclare &&
           draft.name.trim() !== "" &&
-          draft.kind === "declare" &&
-          slot.draft.kind === "declare" &&
           draft.name.trim() === slot.draft.name.trim();
         if (isDeclareToDeclare) {
           const oldDraft = slot.draft;

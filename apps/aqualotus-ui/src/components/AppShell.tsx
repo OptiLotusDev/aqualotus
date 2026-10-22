@@ -412,8 +412,16 @@ export default function AppShell(props: AppShellProps): ReactElement {
     if (fid === null) return;
     const cmds = program.commandsByFunction[fid] ?? [];
     const entry = program.selected?.entry ?? null;
+    // The full summaries are passed (not just id/next): the planner
+    // skips the commands that belong to an `if` branch, because the
+    // engine runs those from the `if` itself.
     const planned = planChainAll(
-      cmds.map((c) => ({ id: c.id, next: c.next ?? null })),
+      cmds.map((c) => ({
+        id: c.id,
+        next: c.next ?? null,
+        then_body: c.then_body,
+        else_body: c.else_body,
+      })),
       entry,
     );
     if (planned === null) return;
@@ -542,6 +550,27 @@ export default function AppShell(props: AppShellProps): ReactElement {
           ),
         )?.id ?? fid);
 
+  /**
+   * The block a run failure points at — but only when the canvas really
+   * knows that id.
+   *
+   * The engine reports the *raw* command id of the failing node. For a
+   * print, an assign or a cast that raw id belongs to a hidden node of
+   * the command's group, not to the user-visible block, so the canvas
+   * has no block with that id. Offering "show block #N" for such an id
+   * would be a button that leads nowhere; the error text itself is
+   * still shown either way.
+   */
+  const errorBlockId: CommandId | null =
+    program.commandErrorId !== null &&
+    program.functions.some((fn) =>
+      (program.commandsByFunction[fn.id] ?? []).some(
+        (c) => c.id === program.commandErrorId,
+      ),
+    )
+      ? program.commandErrorId
+      : null;
+
   const inspector = (
     <Inspector
       func={program.selected}
@@ -627,7 +656,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
         run={program.run}
         running={program.running}
         durationMs={program.durationMs}
-        errorId={program.commandErrorId}
+        errorId={errorBlockId}
         busy={program.busy}
         canRun={fid !== null}
         onShowBlock={showBlock}

@@ -309,12 +309,28 @@ export function edgeEnds(a: BlockRect, b: BlockRect): EdgeEnds {
  * id). A missing entry is established at the first id; a live entry is
  * kept while orphans are appended after the tail. Returns `null` only
  * when there is nothing to connect.
+ *
+ * Commands that belong to an `if` branch are **skipped**: the engine
+ * runs a branch member from the `if`, so chaining it into the main
+ * chain as well would execute it twice. The branch lists carry every
+ * raw id of the member's command group, and the member's user-visible
+ * head id is one of them, so the member is recognised by id.
  */
 export function planChainAll(
-  cmds: readonly Linked[],
+  cmds: readonly (Linked & {
+    readonly then_body?: readonly number[];
+    readonly else_body?: readonly number[];
+  })[],
   entry: number | null,
 ): LinkPlan | null {
-  const ids = cmds.map((c) => c.id);
+  const branchMembers = new Set<number>();
+  for (const c of cmds) {
+    for (const id of c.then_body ?? []) branchMembers.add(id);
+    for (const id of c.else_body ?? []) branchMembers.add(id);
+  }
+  const ids = cmds
+    .map((c) => c.id)
+    .filter((id) => !branchMembers.has(id));
   if (ids.length === 0) return null;
   if (ids.length === 1) {
     const only = ids[0] as number;
