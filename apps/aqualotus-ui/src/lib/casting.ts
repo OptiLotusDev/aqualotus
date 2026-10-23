@@ -89,6 +89,16 @@ export interface CastingInfo {
    * cast shape).
    */
   readonly tempName: string;
+  /**
+   * The assignment's destination name the converted variable's name was
+   * derived from. Recovered from the generated name for the native
+   * shape (the visible block is the cast, so the destination name is
+   * not otherwise readable), and simply the assignment's own variable
+   * for the single-leg shape. It lets the UI rebuild the same group
+   * after an undo or an edit, so a restored block never loses its
+   * hidden head.
+   */
+  readonly destinationName: string;
   readonly sourceExpr: string;
   readonly targetType: OptilotusType;
 }
@@ -103,6 +113,8 @@ export interface CastingPair {
    */
   readonly assignId?: number;
   readonly tempName: string;
+  /** See {@link CastingInfo.destinationName}. */
+  readonly destinationName: string;
   readonly sourceExpr: string;
   readonly targetType: OptilotusType;
 }
@@ -221,12 +233,40 @@ export function nextConvertedNames(
 }
 
 /**
+ * The destination name a converted variable's generated name came from
+ * — the exact inverse of {@link convertedVariableName} /
+ * {@link nextConvertedNames}: `x_f64` cast to `float64` came from `x`,
+ * and `x_f64_2` (a disambiguated name) also came from `x`.
+ *
+ * `null` when the name does not carry the target's suffix, so an
+ * arbitrary cast row is never claimed as a UI conversion group.
+ */
+export function destinationNameOf(
+  convertedName: string,
+  targetType: OptilotusType,
+): string | null {
+  const suffix = `_${castTypeSuffix(targetType)}`;
+  let base = convertedName.trim();
+  if (!base.endsWith(suffix)) {
+    // A disambiguated name holds the tag *before* the numeric suffix
+    // (`x_f64_2`); a plain name never reaches this branch.
+    const disambiguator = /_\d+$/.exec(base);
+    if (disambiguator === null) return null;
+    base = base.slice(0, -disambiguator[0].length);
+    if (!base.endsWith(suffix)) return null;
+  }
+  return base.slice(0, -suffix.length);
+}
+
+/**
  * Human explanation of what applying the chosen conversion does when
  * the target differs from the destination's declared type (or the
  * destination is not declared at all): the block becomes a real Engine
- * cast that creates the converted value in a new variable, and the
- * destination is never rewritten. `null` when the target already
- * matches the destination's type (an ordinary hidden conversion group).
+ * cast that creates the converted value in a new variable of the
+ * target type, and the original variable is never rewritten. `null`
+ * when the target already matches the destination's type (an ordinary
+ * hidden conversion group, which stores into the destination) or while
+ * Casting is off / has no target.
  */
 export function castConvertedVariableNote(
   setting: CastingSetting | null | undefined,
@@ -247,9 +287,9 @@ export function castConvertedVariableNote(
     setting.targetType,
   );
   if (destinationType === undefined) {
-    return `The destination is not declared. Applying replaces this assignment with a real Engine cast that creates the converted value in a new variable (about ${preview}; a numeric suffix is added if the name is taken). Read the converted value through that variable.`;
+    return `The destination is not declared. Applying replaces this assignment with a real Engine cast that creates the converted value in a new ${setting.targetType} variable (about ${preview}; a numeric suffix is added if the name is taken). Read the converted value through that variable.`;
   }
-  return `The destination keeps its declared type ${destinationType}. Applying replaces this assignment with a real Engine cast that creates the converted value in a new variable (about ${preview}; a numeric suffix is added if the name is taken). Read the converted value through that variable.`;
+  return `The destination keeps its declared type ${destinationType} and its value. Applying replaces this assignment with a real Engine cast that creates the converted value in a new ${setting.targetType} variable (about ${preview}; a numeric suffix is added if the name is taken). Read the converted value through that variable.`;
 }
 
 /**
@@ -416,6 +456,9 @@ export function collapseCasting<T extends CommandSummary>(
       castId: cast.id,
       assignId: assign.id,
       tempName,
+      // Single leg: the visible block IS the assignment, so its variable
+      // is the destination the group stores into.
+      destinationName: (assign.var ?? "").trim(),
       sourceExpr: cast.expr ?? "",
       targetType: cast.ty,
     };
@@ -437,6 +480,11 @@ export function collapseCasting<T extends CommandSummary>(
     const outName = cast.var?.trim() ?? "";
     if (outName === "" || isInternalCastingName(outName)) continue;
     if (cast.ty === undefined) continue;
+    // The converted variable's name is the derived one, so the
+    // destination it came from is recoverable — and a row whose name
+    // does not carry the target's tag is not a group this UI created.
+    const destinationName = destinationNameOf(outName, cast.ty);
+    if (destinationName === null) continue;
     const anchor = declaresByName.get(`${CAST_ANCHOR_PREFIX}${outName}`);
     if (anchor === undefined) continue;
     if (hidden.has(anchor.id) || usedAnchors.has(anchor.id)) continue;
@@ -444,6 +492,7 @@ export function collapseCasting<T extends CommandSummary>(
       anchorId: anchor.id,
       castId: cast.id,
       tempName: outName,
+      destinationName,
       sourceExpr: cast.expr ?? "",
       targetType: cast.ty,
     };
@@ -477,6 +526,7 @@ export function collapseCasting<T extends CommandSummary>(
           anchorId: pair.anchorId,
           castId: pair.castId,
           tempName: pair.tempName,
+          destinationName: pair.destinationName,
           sourceExpr: pair.sourceExpr,
           targetType: pair.targetType,
         },

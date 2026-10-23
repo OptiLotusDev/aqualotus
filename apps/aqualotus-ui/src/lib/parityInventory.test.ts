@@ -110,9 +110,12 @@ describe("parity inventory — the block library", () => {
     // read it back: a block would create dead code.
     input:
       "the engine's input op binds no variable name, so its value is unreachable",
-    // The engine supports the cast, but the library has no block for it
-    // yet (the inspector can edit one that already exists).
-    cast: "no library block yet — the bridge and the inspector support it",
+    // The engine supports cast execution, but casting is configured
+    // through the Assign Variable Inspector rather than a standalone
+    // library block. The bridge's `optilotus_cast` remains available
+    // for programs that already contain cast commands.
+    cast:
+      "casting is configured inside the Assign Variable Inspector; no standalone library block",
   };
 
   it("offers a block for every creatable command kind", () => {

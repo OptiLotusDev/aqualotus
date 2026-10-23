@@ -34,6 +34,17 @@ export interface UiCommand extends CommandSummary {
 }
 
 /**
+ * The hidden conversion group behind a projected casting block, if any.
+ *
+ * The projector (`lib/casting.ts`) attaches it to the visible block —
+ * an `assign` for the single-leg shape, the created `cast` for the
+ * native shape — so every consumer reads the group the same way.
+ */
+function castingOf(cmd: CommandSummary): CastingInfo | undefined {
+  return (cmd as CommandSummary & { casting?: CastingInfo }).casting;
+}
+
+/**
  * Fields for creating / replacing a command (one shape per kind).
  *
  * Every kind the bridge can report must appear here: `summaryToDraft`
@@ -139,6 +150,27 @@ export function summaryToDraft(cmd: CommandSummary): CommandDraft {
         ty: (cmd.ty ?? optilotus_type.int32) as OptilotusType,
       };
     case "cast":
+      // A projected converted variable (the native-cast shape) is an
+      // assignment-with-casting group: its visible row is the created
+      // cast, but the user's model is "assign <destination> = <source>
+      // with a conversion". Restoring it as that draft lets undo and an
+      // edit rebuild the whole group — anchor included — instead of a
+      // bare cast row whose hidden compute no link can reach.
+      {
+        const group = (cmd as CommandSummary & { casting?: CastingInfo })
+          .casting;
+        if (group !== undefined) {
+          return {
+            kind: "assign",
+            name: group.destinationName,
+            expr: group.sourceExpr,
+            casting: {
+              enabled: true,
+              targetType: group.targetType,
+            } satisfies CastingDraft,
+          };
+        }
+      }
       return {
         kind: "cast",
         name: cmd.var ?? "",
@@ -492,6 +524,11 @@ export function declareEditAffected(
       continue;
     }
     if (!renamed) continue;
+    // Every block whose *text* reads the variable is rewritten. A
+    // projected converted variable (`cast x_f64 = float64({x})`) is one
+    // of them: its source expression is the conversion's input, so a
+    // rename must reach it or the group would read a name that no
+    // longer exists.
     const text =
       c.kind === "assign"
         ? (c.expr ?? "")
@@ -499,7 +536,9 @@ export function declareEditAffected(
           ? (c.template ?? "")
           : c.kind === "return"
             ? (c.expr ?? "")
-            : null;
+            : c.kind === "cast" && castingOf(c) !== undefined
+              ? (c.expr ?? "")
+              : null;
     if (text !== null && renameRefs(text, oldName, newName) !== text) {
       out.push(c.id);
     }

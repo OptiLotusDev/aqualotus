@@ -66,11 +66,47 @@ describe("canvas style contract", () => {
     const port = declarations(".vport");
     expect(port["border-radius"]).toBe("50%");
     expect(port["width"]).toBe(port["height"]);
-    // The circle straddles the edge: half in, half out.
+    // The dark theme ring is 13px, so a ±6.5px offset puts its *centre*
+    // exactly on the block border — every drawn edge anchors there.
+    expect(port["width"]).toBe("13px");
     const left = declarations(".vport-left");
     const right = declarations(".vport-right");
-    expect(left["left"]).toBe("-8px");
-    expect(right["right"]).toBe("-8px");
+    expect(left["left"]).toBe("-6.5px");
+    expect(right["right"]).toBe("-6.5px");
+    expect(left["margin-top"]).toBe("-6.5px");
+  });
+
+  it("centres the vertical pair and the branch ports on the border too", () => {
+    // A branch body member's top in-port and bottom out-port sit on the
+    // card's horizontal centre (the body's vertical flow line).
+    const top = declarations(".vport-top");
+    expect(top["top"]).toBe("-6.5px");
+    expect(top["margin-left"]).toBe("-6.5px");
+    const outBottom = declarations(".vport-out-bottom");
+    expect(outBottom["bottom"]).toBe("-6.5px");
+    expect(outBottom["margin-left"]).toBe("-6.5px");
+    // TRUE at 30% and FALSE at 70% of the card width: the negative
+    // margin brings the ring's *centre* onto the fraction point, so the
+    // fraction mirrors `BRANCH_PORT_FRACTION` in src/lib/graph.ts
+    // exactly.
+    const then = declarations(".vport-then.vport-bottom");
+    expect(then["left"]).toBe("30%");
+    expect(then["margin-left"]).toBe("-6.5px");
+    const elsePort = declarations(".vport-else.vport-bottom");
+    expect(elsePort["left"]).toBe("70%");
+    expect(elsePort["margin-left"]).toBe("-6.5px");
+  });
+
+  it("draws the manual merge join as a draggable pill with its ports", () => {
+    const join = declarations(".vjoin");
+    expect(join["position"]).toBe("absolute");
+    expect(join["border-radius"]).toBe("999px");
+    expect(join["cursor"]).toBe("grab");
+    // No fixed geometry: the pill's size is measured through the same
+    // ResizeObserver pipeline as the blocks, so placing never guesses.
+    expect(join["height"]).toBeUndefined();
+    const dragging = declarations('.vjoin[data-dragging="true"]');
+    expect(dragging["cursor"]).toBe("grabbing");
   });
 
   it("keeps the status light a clean solid dot", () => {
@@ -117,10 +153,61 @@ describe("canvas style contract", () => {
     expect(rawCss).toContain("--chip-plate");
   });
 
+  it("centres the light-theme ports at their own 12px size", () => {
+    // The light hollow ring is 1px smaller, so its centring offsets are
+    // −6px — the same border line as the dark theme's 13px ring at −6.5.
+    const port = declarations(':root[data-theme="light"] .vport');
+    expect(port["width"]).toBe("12px");
+    const left = declarations(':root[data-theme="light"] .vport-left');
+    expect(left["left"]).toBe("-6px");
+    expect(left["margin-top"]).toBe("-6px");
+    const top = declarations(':root[data-theme="light"] .vport-top');
+    expect(top["top"]).toBe("-6px");
+    expect(top["margin-left"]).toBe("-6px");
+    const outBottom = declarations(
+      ':root[data-theme="light"] .vport-out-bottom',
+    );
+    expect(outBottom["bottom"]).toBe("-6px");
+    const then = declarations(
+      ':root[data-theme="light"] .vport-then.vport-bottom',
+    );
+    expect(then["margin-left"]).toBe("-6px");
+  });
+
   it("keeps the connection layer transparent to the pointer", () => {
     // The arrows paint in front of the blocks, but they must never
     // swallow a click meant for a block or a port.
     const links = declarations(".links");
     expect(links["pointer-events"]).toBe("none");
+  });
+
+  it("keeps the Casting checkbox compact and inline", () => {
+    const label = declarations(".field-check-label");
+    expect(label["display"]).toBe("inline-flex");
+    expect(label["align-items"]).toBe("center");
+    const checkbox = declarations('.field-check input[type="checkbox"]');
+    // The generic `.field input` 40px glass sizing must not stretch the
+    // checkbox into a full-width bar.
+    expect(checkbox["width"]).toBe("16px");
+    expect(checkbox["height"]).toBe("16px");
+    expect(checkbox["min-height"]).toBe("0");
+    expect(checkbox["padding"]).toBe("0");
+    expect(checkbox["flex"]).toBe("0 0 auto");
+  });
+
+  it("anchors the Casting plate above the block with an inverted-L link", () => {
+    const plate = declarations(".vblock-casting");
+    expect(plate["position"]).toBe("absolute");
+    expect(plate["left"]).toBe("6px");
+    expect(plate["bottom"]).toBe("calc(100% + 12px)");
+    expect(plate["pointer-events"]).toBe("none");
+
+    const link = declarations(".vblock-casting-link");
+    expect(link["position"]).toBe("absolute");
+    expect(link["top"]).toBe("100%");
+    expect(link["width"]).toBe("15px");
+    expect(link["height"]).toBe("12px");
+    expect(link["border-left"]).toContain("1.5px solid");
+    expect(link["border-bottom"]).toContain("1.5px solid");
   });
 });
