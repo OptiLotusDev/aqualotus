@@ -10,7 +10,7 @@ import {
   planMoveToEnd,
   predecessorsOf,
 } from "./graph";
-import { initialLayout, reconcileLayout } from "./layout";
+import { branchDropPos, initialLayout, reconcileLayout } from "./layout";
 
 describe("filterBlocks", () => {
   it("returns everything on an empty query", () => {
@@ -63,6 +63,7 @@ describe("findAvailableBlock", () => {
     ]) {
       expect(findAvailableBlock(kind)?.kind).toBe(kind);
     }
+    expect(findAvailableBlock("cast")).toBe(null);
     expect(findAvailableBlock("nope")).toBe(null);
   });
 });
@@ -441,5 +442,45 @@ describe("planChainAll", () => {
       ),
     ).toBe(null);
     expect(planChainAll([], null)).toBe(null);
+  });
+});
+
+describe("branchDropPos", () => {
+  const ifRect = { x: 100, y: 50, w: 140, h: 80 };
+
+  it("drops into an empty branch below the if, in the column of that side", () => {
+    // TRUE body under the if card, FALSE body strictly beside it (the
+    // if plus column gap) — the two lanes never overlap.
+    expect(
+      branchDropPos({ branch: "then", ifRect, memberRects: [] }),
+    ).toEqual({ x: 100, y: 50 + 80 + 40 });
+    expect(
+      branchDropPos({ branch: "else", ifRect, memberRects: [] }),
+    ).toEqual({ x: 100 + 140 + 24, y: 50 + 80 + 40 });
+  });
+
+  it("stacks a newcomer under the branch's last member", () => {
+    expect(
+      branchDropPos({
+        branch: "then",
+        ifRect,
+        memberRects: [
+          [100, 44],
+          [100 + 44 + 24, 44],
+        ],
+      }),
+    ).toEqual({ x: 100, y: 100 + 44 + 24 + 44 + 24 });
+  });
+
+  it("ignores member x — the column is fixed", () => {
+    expect(
+      branchDropPos({
+        branch: "else",
+        ifRect,
+        memberRects: [
+          [4000, 30],
+        ],
+      }),
+    ).toEqual({ x: 100 + 140 + 24, y: 4000 + 30 + 24 });
   });
 });

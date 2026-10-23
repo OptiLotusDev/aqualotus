@@ -7,6 +7,7 @@ import {
   CASTING_DISABLED,
   castConvertedVariableNote,
   castingIncomplete,
+  convertedVariableName,
   declaredTypeOf,
 } from "../lib/casting";
 import {
@@ -205,8 +206,14 @@ function KindFields(props: {
   onChange: (next: CommandDraft) => void;
   /** Declared type of the assignment destination, when known. */
   readonly destinationType?: OptilotusType;
+  /**
+   * Every variable name alive in the function (hidden reserved names
+   * included). Used to preview the exact name a created converted
+   * variable will get, disambiguated the same way the apply does.
+   */
+  readonly takenNames?: readonly string[];
 }): ReactElement {
-  const { draft, onChange, destinationType } = props;
+  const { draft, onChange, destinationType, takenNames } = props;
   switch (draft.kind) {
     case "declare": {
       const valueHint = declareValueHint(draft.ty);
@@ -321,6 +328,20 @@ function KindFields(props: {
         destinationType,
         draft.name,
       );
+      // The name the created converted variable will get, when the apply
+      // will create one (a target that differs from the destination's
+      // declared type). Derived from the live command list so a taken
+      // name is disambiguated exactly like the real apply does.
+      const convertedVariable =
+        casting.enabled === true &&
+        casting.targetType !== null &&
+        casting.targetType !== destinationType
+          ? convertedVariableName(
+              takenNames ?? [],
+              draft.name,
+              casting.targetType,
+            )
+          : null;
       return (
         <>
           <div className="field">
@@ -379,8 +400,9 @@ function KindFields(props: {
               <span>Casting</span>
             </label>
             <div className="field-hint">
-              Optional conversion before storing. Off by default; ordinary
-              assignments are unchanged.
+              Optional conversion of the assigned value. Off by default; a
+              target that differs from the destination's declared type
+              creates the converted value in a new variable instead.
             </div>
           </div>
           {casting.enabled === true ? (
@@ -428,11 +450,25 @@ function KindFields(props: {
                   </span>
                 )}
                 . Every legal target can be selected; the Engine converts
-                the value at run time. For a target that differs from the
-                destination's declared type, applying replaces this block
-                with a Cast that creates the converted value in a new
-                variable.
+                the value at run time. A target that differs from the
+                destination's declared type creates the converted value in a
+                new variable of that target type instead of writing the
+                destination.
               </div>
+              {convertedVariable !== null ? (
+                <div
+                  className="field-hint"
+                  data-testid="cast-converted-variable"
+                  data-cast-converted-name={convertedVariable}
+                  data-cast-target-type={casting.targetType ?? ""}
+                >
+                  Converted variable: {convertedVariable}
+                  {casting.targetType !== null ? ` (${casting.targetType})` : ""}
+                  {" — "}a new program variable. The original variable keeps
+                  its declaration, its type and its value; this block becomes
+                  the Engine cast that produces the converted value.
+                </div>
+              ) : null}
               {convertedNote !== null ? (
                 <div
                   className="field-hint"
@@ -770,6 +806,9 @@ export default function Inspector(props: InspectorProps): ReactElement {
             draft={edit}
             onChange={setEdit}
             destinationType={destinationType}
+            takenNames={(commands ?? []).flatMap((c) =>
+              c.var === undefined ? [] : [c.var],
+            )}
           />
           <button
             type="submit"

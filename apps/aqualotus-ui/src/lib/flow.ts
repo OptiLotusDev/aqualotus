@@ -297,15 +297,21 @@ export function resolveRunPath(
     const cmd = byId.get(current);
     if (cmd === undefined) break;
     const next = cmd.next;
-    if (next === null || next === undefined || !byId.has(next)) break;
+    // An `if` may be the last block on the chain (no successor, no join):
+    // its decided branch still runs, so the glow must travel the branch's
+    // head wire and column links even though there is no merge target and
+    // no `if`→successor edge to follow. Handle the branch before the
+    // terminal-chain break below so a terminal `if` is not skipped.
     if (cmd.kind === "if" && decidable) {
       const taken = decideBranch(cmd, offset);
       if (taken !== null) {
         const members = visible(taken === "then" ? cmd.then_body : cmd.else_body);
         // The decided branch: its wire into the first member, its
-        // member→member column links, and the engine's merge back into
-        // the join block (the branch tail exits to the `if`'s own
-        // `next` — `Package::if_append` ends the member's chain there).
+        // member→member column links, and, when there is a successor, the
+        // engine's merge back into the join block (the branch tail exits
+        // to the `if`'s own `next` — `Package::if_append` ends the
+        // member's chain there). A terminal `if` has no join, so no
+        // merge edge is drawn — there is nothing to rejoin into.
         if (members.length > 0) {
           edges.push({
             fid,
@@ -323,7 +329,12 @@ export function resolveRunPath(
           }
           const tail = members[members.length - 1]!.id;
           const join = next;
-          if (cmd.next !== null && byId.has(join)) {
+          if (
+            join !== null &&
+            join !== undefined &&
+            byId.has(join) &&
+            cmd.next !== null
+          ) {
             edges.push({
               fid,
               from: tail,
@@ -335,11 +346,13 @@ export function resolveRunPath(
         offset += members.filter((m) => m.kind === "print").length;
       } else {
         // First undecided `if`: the rest of the run travels the chain
-        // only (never both branches, never an invented branch).
+        // only (never both branches, never an invented branch). A terminal
+        // undecided `if` simply has no successor edge to travel.
         decidable = false;
       }
     }
     if (cmd.kind === "print") offset += 1;
+    if (next === null || next === undefined || !byId.has(next)) break;
     edges.push({ fid, from: cmd.id, to: next, kind: "chain" });
     current = next;
   }

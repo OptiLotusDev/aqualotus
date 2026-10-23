@@ -20,8 +20,10 @@ import {
   optilotus_runProgram,
   type CommandSpec,
 } from "../lib/optilotus";
-import { planChainAll, planDropLink, edgesOf } from "../lib/graph";
+import { planChainAll, planDropLink, edgesOf, mergeEdgesOf } from "../lib/graph";
 import type { CommandDraft } from "../lib/program";
+import type { CommandSummary, OptilotusType } from "../lib/optilotus";
+import type { CastingInfo } from "../lib/casting";
 import { useProgram } from "./useProgram";
 
 let seq = 0;
@@ -1497,5 +1499,1156 @@ describe("The `if` gap — the connection the engine cannot report", () => {
     });
     // Exactly one planned edge: the one the engine cannot report.
     expect(edges.filter((e) => e.planned).length).toBe(1);
+  });
+});
+
+/**
+ * PARITY-013 — assignment with cast.
+ *
+ * The Engine has no single "assign and cast" operation, but a real
+ * conversion is expressible through public bridge calls: a hidden
+ * `declare` anchor, a hidden `cast` into a reserved temporary variable,
+ * and the visible `assign` storing `{temp}` into the destination. These
+ * tests prove the whole path against the shipped Engine: creation,
+ * projection, execution, real runtime failures, deletion and undo/redo.
+ */
+describe("PARITY-013 — assignment with cast executes through the bridge", () => {
+  function ifDraft(condition: string): CommandDraft {
+    return { kind: "if", condition, then: [], else: null };
+  }
+
+  function castingDraft(
+    name: string,
+    expr: string,
+    targetType: OptilotusType,
+  ): CommandDraft {
+    return {
+      kind: "assign",
+      name,
+      expr,
+      casting: { enabled: true, targetType },
+    };
+  }
+
+  /** A declare draft with an explicit type tag. */
+  function declareDraft2(name: string, ty: OptilotusType): CommandDraft {
+    return { kind: "declare", name, ty, init: "0" };
+  }
+
+  function visibleAssign(api: () => Api): {
+    id: number;
+    casting?: { targetType: string };
+  } {
+    const command = api().snapshot.commands.find((c) => c.kind === "assign");
+    expect(command).toBeDefined();
+    return command as { id: number; casting?: { targetType: string } };
+  }
+
+  /**
+   * The single visible block that carries a conversion: the assignment
+   * when the target equals the destination's declared type (the group
+   * hides behind it), or the created Cast block — the converted
+   * variable — when the target differs.
+   */
+  function visibleCasting(api: () => Api): CommandSummary & {
+    casting?: CastingInfo;
+  } {
+    const command = api().snapshot.commands.find(
+      (c) => c.casting !== undefined,
+    );
+    expect(command).toBeDefined();
+    if (command === undefined) throw new Error("no visible casting block");
+    return command;
+  }
+
+  /** Every hidden reserved command the Engine currently holds. */
+  function internalNames(): string[] {
+    const listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return [];
+    return listed.commands
+      .map((c) => c.var ?? "")
+      .filter((name) => name.startsWith("__aqualotus_internal_"));
+  }
+
+  it("creates a hidden conversion group and projects one visible assign", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, declareDraft("n", "7"));
+    });
+    act(() => {
+      api().addCommand(0, {
+        kind: "declare",
+        name: "f",
+        ty: "float64",
+        init: "0",
+      });
+    });
+    act(() => {
+      api().addCommand(0, castingDraft("f", "{n}", "float64"));
+    });
+
+    expect(api().snapshot.actionError).toBe("");
+    // The projection collapses the hidden anchor/cast: one visible
+    // Assign Variable block, carrying the user's source expression.
+    expect(api().snapshot.commands).toHaveLength(3);
+    const assign = visibleAssign(api);
+    expect(assign).toMatchObject({
+      kind: "assign",
+      var: "f",
+      expr: "{n}",
+      casting: { targetType: "float64" },
+    });
+
+    // The Engine really holds the two internal commands, with reserved
+    // names and the real cast target type.
+    const listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    const internalVars = listed.commands
+      .map((c) => c.var ?? "")
+      .filter((name) => name.startsWith("__aqualotus_internal_"));
+    expect(internalVars).toHaveLength(2);
+    expect(internalVars.some((name) => name.includes("anchor"))).toBe(true);
+    expect(internalVars.some((name) => name.includes("cast"))).toBe(true);
+    expect(
+      listed.commands.find(
+        (c) => c.kind === "cast" && (c.var ?? "").includes("cast_"),
+      )?.ty,
+    ).toBe("float64");
+  });
+
+  it("executes the conversion and prints the converted value", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, declareDraft("n", "7"));
+    });
+    act(() => {
+      api().addCommand(0, {
+        kind: "declare",
+        name: "f",
+        ty: "float64",
+        init: "0",
+      });
+    });
+    act(() => {
+      api().addCommand(0, castingDraft("f", "{n}", "float64"));
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"{f}"' });
+    });
+    connectAll(api, 0);
+
+    act(() => {
+      api().run();
+    });
+
+    const run = api().snapshot.run;
+    expect(run?.status).toBe("ok");
+    if (run?.status !== "ok") return;
+    // int32 7 was really converted to float64 and stored in `f`.
+    expect(run.printed).toEqual(["7.0"]);
+    expect(api().snapshot.actionError).toBe("");
+  });
+
+  it("surfaces the Engine's real runtime conversion failure", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, {
+        kind: "declare",
+        name: "s",
+        ty: "string",
+        init: '"abc"',
+      });
+    });
+    act(() => {
+      api().addCommand(0, declareDraft("i", "0"));
+    });
+    // `i` is int32, so int32 is the only store-compatible target; the
+    // failure is the actual value conversion (string "abc" → int32),
+    // which the Engine can only detect at run time.
+    act(() => {
+      api().addCommand(0, castingDraft("i", "{s}", "int32"));
+    });
+    connectAll(api, 0);
+
+    act(() => {
+      api().run();
+    });
+
+    const run = api().snapshot.run;
+    expect(run?.status).toBe("error");
+    if (run?.status !== "error") return;
+    expect(run.kind).toBe("TypeMismatch");
+    expect(api().snapshot.actionError).toContain("TypeMismatch");
+    expect(api().snapshot.error?.detail).toContain(
+      'cannot cast string "abc" to integer',
+    );
+    // The failure is in the hidden cast compute, which no visible block
+    // owns; the UI must not invent an attribution.
+    expect(api().snapshot.errorBlockId).toBeNull();
+  });
+
+  it("creates a new converted variable for a cross-type target and executes it", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, declareDraft("n", "7"));
+    });
+    act(() => {
+      api().addCommand(0, {
+        kind: "declare",
+        name: "f",
+        ty: "float64",
+        init: "0",
+      });
+    });
+    // Target int32 differs from the float64 destination: the converted
+    // value cannot live in `f`, so the apply creates a new int32
+    // variable whose name is derived from the destination.
+    act(() => {
+      api().addCommand(0, castingDraft("f", "{n}", "int32"));
+    });
+
+    expect(api().snapshot.actionError).toBe("");
+    const converted = visibleCasting(api);
+    expect(converted).toMatchObject({
+      kind: "cast",
+      var: "f_i32",
+      ty: "int32",
+      expr: "{n}",
+      casting: { targetType: "int32" },
+    });
+    // The original destination keeps its declaration, its type and its
+    // value, and no assignment into it is created.
+    expect(
+      api().snapshot.commands.find(
+        (c) => c.kind === "declare" && c.var === "f",
+      ),
+    ).toMatchObject({ ty: "float64", expr: "0" });
+    expect(api().snapshot.commands.some((c) => c.kind === "assign")).toBe(false);
+
+    const listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    // Exactly one conversion, and the hidden anchor beside it — no
+    // second, hidden conversion into the destination's declared type.
+    const casts = listed.commands.filter((c) => c.kind === "cast");
+    expect(casts).toHaveLength(1);
+    expect(casts[0]).toMatchObject({ var: "f_i32", ty: "int32", expr: "{n}" });
+    const internal = listed.commands.filter((c) =>
+      (c.var ?? "").startsWith("__aqualotus_internal_"),
+    );
+    expect(internal).toHaveLength(1);
+    expect(internal[0]?.var).toBe("__aqualotus_internal_anchor_f_i32");
+    expect(
+      listed.commands.some((c) => c.kind === "assign" && c.var === "f"),
+    ).toBe(false);
+
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"{f_i32}"' });
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"{f}"' });
+    });
+    connectAll(api, 0);
+    act(() => {
+      api().run();
+    });
+    const run = api().snapshot.run;
+    expect(run?.status).toBe("ok");
+    if (run?.status !== "ok") return;
+    // int32 7 -> the new int32 variable; the float64 destination still
+    // holds its own value.
+    expect(run.printed).toEqual(["7", "0.0"]);
+  });
+
+  it("gives the converted variable the selected target type (int32 → uint128)", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, declareDraft("n", "7"));
+    });
+    act(() => {
+      api().addCommand(0, declareDraft2("x", "int32"));
+    });
+    act(() => {
+      api().addCommand(0, castingDraft("x", "{n}", "uint128"));
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"{x_u128}"' });
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"{x}"' });
+    });
+    connectAll(api, 0);
+
+    expect(api().snapshot.actionError).toBe("");
+    expect(visibleCasting(api)).toMatchObject({
+      kind: "cast",
+      var: "x_u128",
+      ty: "uint128",
+      expr: "{n}",
+    });
+    // The original `x` keeps its int32 declaration and its own value.
+    expect(
+      api().snapshot.commands.find(
+        (c) => c.kind === "declare" && c.var === "x",
+      ),
+    ).toMatchObject({ ty: "int32", expr: "0" });
+
+    act(() => {
+      api().run();
+    });
+    const run = api().snapshot.run;
+    expect(run?.status).toBe("ok");
+    if (run?.status !== "ok") return;
+    // int32 7 -> uint128 in the new variable; `x` still prints 0.
+    expect(run.printed).toEqual(["7", "0"]);
+  });
+
+  it("surfaces the engine's error for an impossible conversion and keeps the original intact", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, { kind: "declare", name: "n", ty: "int32", init: "300" });
+    });
+    // 300 cannot be represented in the selected int8 target; the Engine
+    // can only detect that at run time.
+    act(() => {
+      api().addCommand(0, castingDraft("n", "{n}", "int8"));
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"{n_i8}"' });
+    });
+    connectAll(api, 0);
+
+    expect(visibleCasting(api)).toMatchObject({
+      kind: "cast",
+      var: "n_i8",
+      ty: "int8",
+    });
+
+    act(() => {
+      api().run();
+    });
+
+    const run = api().snapshot.run;
+    expect(run?.status).toBe("error");
+    if (run?.status !== "error") return;
+    expect(run.kind).toBe("TypeMismatch");
+    expect(api().snapshot.actionError).toContain("TypeMismatch");
+    expect(api().snapshot.error?.detail).toContain("overflow");
+    // The failure is in the hidden conversion compute, which no visible
+    // block owns; the UI must not invent an attribution.
+    expect(api().snapshot.errorBlockId).toBeNull();
+    // The original variable is untouched by the failed conversion.
+    expect(
+      api().snapshot.commands.find(
+        (c) => c.kind === "declare" && c.var === "n",
+      ),
+    ).toMatchObject({ ty: "int32", expr: "300" });
+  });
+
+  /**
+   * The reported defect, pinned at the UI + engine level.
+   *
+   * The regressed implementation performed
+   * `source value → selected target type → the destination's declared
+   * type → store into the destination`. That sequence is invisible in
+   * the value it stores (the last conversion wins), so this test pins
+   * the program's *shape* as well as its output: the converted value
+   * must live in a new variable of the target type, and no conversion
+   * into the destination's declared type may exist.
+   */
+  it("never converts the converted value back into the destination's declared type", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, declareDraft("x", "5"));
+    });
+    // The user's conversion: int32 → float64, on a block whose
+    // destination is the int32 variable `x`.
+    act(() => {
+      api().addCommand(0, castingDraft("x", "{x}", "float64"));
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"{x_f64}"' });
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"{x}"' });
+    });
+    connectAll(api, 0);
+    act(() => {
+      api().run();
+    });
+
+    const run = api().snapshot.run;
+    expect(run?.status).toBe("ok");
+    if (run?.status !== "ok") return;
+    // The converted value is a real float64 (5.0) and the original int32
+    // variable still holds 5. Under the regressed sequence the program
+    // could not exist at all: there would be no float64 variable, and
+    // the first print would not resolve.
+    expect(run.printed).toEqual(["5.0", "5"]);
+
+    const listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    // Exactly one conversion — into the selected target. No conversion
+    // into int32 (the destination's declared type) exists anywhere, and
+    // nothing stores the converted value into `x`.
+    const casts = listed.commands.filter((c) => c.kind === "cast");
+    expect(casts).toHaveLength(1);
+    expect(casts[0]).toMatchObject({
+      var: "x_f64",
+      ty: "float64",
+      expr: "{x}",
+    });
+    expect(casts.some((c) => c.ty === "int32")).toBe(false);
+    expect(
+      listed.commands.find((c) => c.kind === "declare" && c.var === "x"),
+    ).toMatchObject({ ty: "int32", expr: "5" });
+    expect(listed.commands.some((c) => c.kind === "assign")).toBe(false);
+
+    // The projection shows the converted variable as its own block,
+    // carrying the target type the user chose.
+    const converted = visibleCasting(api);
+    expect(converted).toMatchObject({ kind: "cast", var: "x_f64", ty: "float64" });
+    expect(converted.casting?.targetType).toBe("float64");
+    expect(converted.casting?.destinationName).toBe("x");
+  });
+
+  it("does not create an empty cast when the source expression is empty", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, declareDraft("n", "7"));
+    });
+    act(() => {
+      api().addCommand(0, castingDraft("n", "", "int32"));
+    });
+
+    // The Engine's own message is preserved, not replaced by a generic
+    // UI error.
+    expect(api().snapshot.actionError).toContain(
+      "cast expression must not be empty",
+    );
+    const listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    expect(listed.commands).toHaveLength(1);
+    expect(
+      listed.commands.some((c) =>
+        (c.var ?? "").startsWith("__aqualotus_internal_"),
+      ),
+    ).toBe(false);
+  });
+
+  it("requires a target type and writes nothing for an incomplete draft", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, declareDraft("n", "7"));
+    });
+    act(() => {
+      api().addCommand(0, {
+        kind: "assign",
+        name: "n",
+        expr: "{n} + 1",
+        casting: { enabled: true, targetType: null },
+      });
+    });
+
+    expect(api().snapshot.actionError).toContain(
+      "Select a target type to complete casting.",
+    );
+    const listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    expect(listed.commands).toHaveLength(1);
+  });
+
+  it("names the converted variable after an undeclared destination", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, declareDraft("n", "7"));
+    });
+    // `ghost` is not declared: the apply never writes it, so the name is
+    // only the base for the converted variable's name.
+    act(() => {
+      api().addCommand(0, castingDraft("ghost", "{n}", "int32"));
+    });
+
+    expect(api().snapshot.actionError).toBe("");
+    expect(visibleCasting(api)).toMatchObject({
+      kind: "cast",
+      var: "ghost_i32",
+      ty: "int32",
+      expr: "{n}",
+      casting: { targetType: "int32" },
+    });
+    // The Engine holds the created variable and the hidden anchor only.
+    expect(internalNames()).toEqual(["__aqualotus_internal_anchor_ghost_i32"]);
+    const listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    expect(
+      listed.commands.some(
+        (c) => (c.var ?? "") === "ghost" && c.kind === "declare",
+      ),
+    ).toBe(false);
+  });
+
+  it("deletes the whole hidden group and restores it through undo/redo", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, declareDraft("n", "7"));
+    });
+    act(() => {
+      api().addCommand(0, {
+        kind: "declare",
+        name: "f",
+        ty: "float64",
+        init: "0",
+      });
+    });
+    act(() => {
+      api().addCommand(0, castingDraft("f", "{n}", "float64"));
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"{f}"' });
+    });
+    connectAll(api, 0);
+    const assignId = visibleAssign(api).id;
+
+    act(() => {
+      api().deleteCommand(0, assignId);
+    });
+    expect(api().snapshot.commands.map((c) => c.kind)).toEqual([
+      "declare",
+      "declare",
+      "print",
+    ]);
+    let listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    expect(
+      listed.commands.some((c) =>
+        (c.var ?? "").startsWith("__aqualotus_internal_"),
+      ),
+    ).toBe(false);
+
+    act(() => {
+      api().run();
+    });
+    let run = api().snapshot.run;
+    expect(run?.status).toBe("ok");
+    if (run?.status === "ok") expect(run.printed).toEqual(["0.0"]);
+
+    act(() => {
+      api().undo();
+    });
+    const restored = visibleAssign(api);
+    expect(restored.casting).toBeDefined();
+    expect(restored.casting?.targetType).toBe("float64");
+    listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    expect(
+      listed.commands.filter((c) =>
+        (c.var ?? "").startsWith("__aqualotus_internal_"),
+      ),
+    ).toHaveLength(2);
+
+    act(() => {
+      api().run();
+    });
+    run = api().snapshot.run;
+    expect(run?.status).toBe("ok");
+    if (run?.status === "ok") expect(run.printed).toEqual(["7.0"]);
+
+    act(() => {
+      api().redo();
+    });
+    expect(api().snapshot.commands.map((c) => c.kind)).toEqual([
+      "declare",
+      "declare",
+      "print",
+    ]);
+    listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    expect(
+      listed.commands.some((c) =>
+        (c.var ?? "").startsWith("__aqualotus_internal_"),
+      ),
+    ).toBe(false);
+  });
+
+  it("deletes and restores a created converted variable through undo/redo without dangling ids", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, declareDraft("n", "7"));
+    });
+    act(() => {
+      api().addCommand(0, {
+        kind: "declare",
+        name: "f",
+        ty: "float64",
+        init: "0",
+      });
+    });
+    // Cross-type: int32 target on a float64 destination creates the
+    // converted variable `f_i32`; the declaration is never rewritten.
+    act(() => {
+      api().addCommand(0, castingDraft("f", "{n}", "int32"));
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"{f_i32}"' });
+    });
+    connectAll(api, 0);
+    const convertedId = visibleCasting(api).id;
+    expect(visibleCasting(api)).toMatchObject({
+      kind: "cast",
+      var: "f_i32",
+      ty: "int32",
+    });
+
+    act(() => {
+      api().deleteCommand(0, convertedId);
+    });
+    expect(
+      api().snapshot.commands.find((c) => c.kind === "cast"),
+    ).toBeUndefined();
+    let listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    // The converted variable and its hidden anchor are gone — no
+    // dangling raw references — and the destination keeps its type.
+    expect(internalNames()).toHaveLength(0);
+    expect(
+      listed.commands.find((c) => c.kind === "declare" && c.var === "f"),
+    ).toMatchObject({ ty: "float64", expr: "0" });
+
+    act(() => {
+      api().undo();
+    });
+    const restored = visibleCasting(api);
+    expect(restored).toMatchObject({
+      kind: "cast",
+      var: "f_i32",
+      ty: "int32",
+    });
+    expect(restored.casting?.targetType).toBe("int32");
+    listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    expect(internalNames()).toHaveLength(1);
+
+    connectAll(api, 0);
+    act(() => {
+      api().run();
+    });
+    const run = api().snapshot.run;
+    expect(run?.status).toBe("ok");
+    if (run?.status !== "ok") return;
+    expect(run.printed).toEqual(["7"]);
+
+    act(() => {
+      api().redo();
+    });
+    expect(internalNames()).toHaveLength(0);
+  });
+
+  it("moves the whole group into an if branch", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, declareDraft("n", "7"));
+    });
+    act(() => {
+      api().addCommand(0, {
+        kind: "declare",
+        name: "f",
+        ty: "float64",
+        init: "0",
+      });
+    });
+    act(() => {
+      api().addCommand(0, {
+        kind: "declare",
+        name: "flag",
+        ty: "bool",
+        init: "true",
+      });
+    });
+    act(() => {
+      api().addCommand(0, ifDraft("true"));
+    });
+    act(() => {
+      api().addCommand(0, castingDraft("f", "{n}", "float64"));
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"{f}"' });
+    });
+
+    const ifId = api().snapshot.commands.find((c) => c.kind === "if")?.id;
+    const assignId = visibleAssign(api).id;
+    const printId = api().snapshot.commands.find((c) => c.kind === "print")?.id;
+    expect(ifId).toBeDefined();
+    expect(printId).toBeDefined();
+    if (ifId === undefined || printId === undefined) return;
+
+    act(() => {
+      expect(api().applyIfAppend(0, ifId, "then", assignId)).toBe(true);
+    });
+    act(() => {
+      expect(api().applyIfAppend(0, ifId, "then", printId)).toBe(true);
+    });
+    connectAll(api, 0);
+
+    act(() => {
+      api().run();
+    });
+    const run = api().snapshot.run;
+    expect(run?.status).toBe("ok");
+    if (run?.status !== "ok") return;
+    expect(run.printed).toEqual(["7.0"]);
+  });
+
+  it("turns a casting assignment back into an ordinary assignment", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, declareDraft("n", "7"));
+    });
+    act(() => {
+      api().addCommand(0, {
+        kind: "declare",
+        name: "f",
+        ty: "float64",
+        init: "0",
+      });
+    });
+    act(() => {
+      api().addCommand(0, castingDraft("f", "{n}", "float64"));
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"{f}"' });
+    });
+    connectAll(api, 0);
+
+    act(() => {
+      api().run();
+    });
+    const converted = api().snapshot.run;
+    expect(converted?.status).toBe("ok");
+    if (converted?.status !== "ok") return;
+    expect(converted.printed).toEqual(["7.0"]);
+
+    const assignId = visibleAssign(api).id;
+    act(() => {
+      api().replaceCommand(0, assignId, {
+        kind: "assign",
+        name: "f",
+        expr: "2.5",
+      });
+    });
+
+    const ordinary = visibleAssign(api);
+    expect(ordinary.casting).toBeUndefined();
+    const listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    expect(
+      listed.commands.some((c) =>
+        (c.var ?? "").startsWith("__aqualotus_internal_"),
+      ),
+    ).toBe(false);
+    expect(
+      listed.commands.filter(
+        (c) => c.kind === "assign" && c.var === "f",
+      ),
+    ).toHaveLength(1);
+    expect(
+      listed.commands.find((c) => c.kind === "assign" && c.var === "f")
+        ?.expr,
+    ).toBe("2.5");
+
+    act(() => {
+      api().run();
+    });
+    const run = api().snapshot.run;
+    expect(run?.status).toBe("ok");
+    if (run?.status !== "ok") return;
+    expect(run.printed).toEqual(["2.5"]);
+  });
+
+  it("keeps the user's conversion target when the declaration type changes", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, declareDraft("n", "7"));
+    });
+    act(() => {
+      api().addCommand(0, {
+        kind: "declare",
+        name: "f",
+        ty: "float64",
+        init: "0",
+      });
+    });
+    act(() => {
+      api().addCommand(0, castingDraft("f", "{n}", "float64"));
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"{f}"' });
+    });
+
+    // Wire the program before editing: the edit must keep every block in
+    // its existing slot, not rely on the creation order of the list.
+    connectAll(api, 0);
+
+    // Target equals the declared type, so the assignment stores the
+    // conversion result directly.
+    expect(visibleCasting(api)).toMatchObject({
+      kind: "assign",
+      var: "f",
+      ty: "float64",
+    });
+
+    const fId = api().snapshot.commands.find(
+      (c) => c.kind === "declare" && c.var === "f",
+    )?.id;
+    expect(fId).toBeDefined();
+    if (fId === undefined) return;
+
+    act(() => {
+      api().replaceCommand(0, fId, {
+        kind: "declare",
+        name: "f",
+        ty: "int64",
+        init: "0",
+      });
+    });
+
+    // The user's chosen conversion target survives the declaration edit
+    // untouched — casting never rewrites a declare block. float64 no
+    // longer matches the declaration, so the rebuilt group creates the
+    // converted value in a NEW float64 variable instead of storing it.
+    const converted = visibleCasting(api);
+    expect(converted).toMatchObject({
+      kind: "cast",
+      var: "f_f64",
+      ty: "float64",
+      expr: "{n}",
+    });
+    expect(converted.casting?.targetType).toBe("float64");
+    expect(converted.casting?.destinationName).toBe("f");
+
+    const listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    // The declaration keeps the type the user just set...
+    expect(
+      listed.commands.find((c) => c.kind === "declare" && c.var === "f"),
+    ).toMatchObject({ ty: "int64", expr: "0" });
+    // ...and the only conversion is the user's float64 one: nothing
+    // converts into int64, and no stale float64 store group remains.
+    const casts = listed.commands.filter((c) => c.kind === "cast");
+    expect(casts).toHaveLength(1);
+    expect(casts[0]).toMatchObject({ var: "f_f64", ty: "float64" });
+    expect(
+      listed.commands.some((c) => c.kind === "assign" && c.var === "f"),
+    ).toBe(false);
+
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"{f_f64}"' });
+    });
+    connectAll(api, 0);
+    act(() => {
+      api().run();
+    });
+    const run = api().snapshot.run;
+    expect(run?.status).toBe("ok");
+    if (run?.status !== "ok") return;
+    // int32 7 -> the new float64 variable (7.0); the original `f` is now
+    // an int64 and still holds its own 0.
+    expect(run.printed).toEqual(["0", "7.0"]);
+  });
+});
+
+/**
+ * Vertical If/Else body wiring — the engine cases behind the rebuilt
+ * `if` canvas. These run against the real artifact and assert only
+ * engine-reachable behavior: body membership, run order, and honest
+ * rejections. What the engine cannot do (nest an `if` in a branch,
+ * move a member back to the main chain) is asserted as an engine
+ * refusal, never papered over.
+ */
+describe("The vertical If/Else body — engine-run branch bodies", () => {
+  /** An `if` with the given condition and no branch members yet. */
+  function ifDraft(condition: string): CommandDraft {
+    return { kind: "if", condition, then: [], else: null };
+  }
+
+  function lastPrintId(api: () => Api): number | undefined {
+    return api()
+      .snapshot.commands.filter((c) => c.kind === "print")
+      .at(-1)?.id;
+  }
+
+  it("runs a two-member TRUE body in engine order", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, declareDraft("x", "10"));
+    });
+    act(() => {
+      api().addCommand(0, ifDraft("true"));
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"A"' });
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"B"' });
+    });
+    const ifId = api().snapshot.commands.find((c) => c.kind === "if")?.id;
+    expect(ifId).toBeDefined();
+    if (ifId === undefined) return;
+
+    const prints = api()
+      .snapshot.commands.filter((c) => c.kind === "print")
+      .map((c) => c.id);
+    const printAId = prints[0] as number;
+    const printBId = prints[1] as number;
+    expect(printAId).toBeDefined();
+    expect(printBId).toBeDefined();
+
+    // Wire both prints into the TRUE body, then the body chains
+    // print A → print B inside the branch.
+    act(() => {
+      expect(api().applyIfAppend(0, ifId, "then", printAId)).toBe(true);
+    });
+    act(() => {
+      expect(api().applyIfAppend(0, ifId, "then", printBId)).toBe(true);
+    });
+    expect(api().snapshot.actionError).toBe("");
+
+    // The engine's branch list holds both members in body order.
+    const listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    const body =
+      listed.commands.find((c) => c.id === ifId)?.then_body ?? [];
+    expect(body.filter((id) => id === printAId || id === printBId)).toEqual([
+      printAId,
+      printBId,
+    ]);
+
+    connectAll(api, 0);
+    act(() => {
+      api().run();
+    });
+    const run = api().snapshot.run;
+    expect(run?.status).toBe("ok");
+    if (run?.status !== "ok") return;
+    // The branch executes its members exactly in wiring order.
+    expect(run.printed).toEqual(["A", "B"]);
+  });
+
+  it("moves one of the if's own members between its branches", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, ifDraft("true"));
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"member"' });
+    });
+    const ifId = api().snapshot.commands.find((c) => c.kind === "if")?.id;
+    expect(ifId).toBeDefined();
+    if (ifId === undefined) return;
+    const memberId = lastPrintId(api);
+    expect(memberId).toBeDefined();
+    if (memberId === undefined) return;
+    act(() => {
+      expect(api().applyIfAppend(0, ifId, "then", memberId)).toBe(true);
+    });
+
+    // Same if, opposite branch: the engine allows the move.
+    act(() => {
+      expect(api().applyIfAppend(0, ifId, "else", memberId)).toBe(true);
+    });
+    expect(api().snapshot.actionError).toBe("");
+
+    const listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    const body = listed.commands.find((c) => c.id === ifId);
+    expect(body?.then_body ?? []).not.toContain(memberId);
+    expect(body?.else_body ?? []).toContain(memberId);
+  });
+
+  it("refuses to nest an `if` in a branch — and says so", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, ifDraft("true"));
+    });
+    act(() => {
+      api().addCommand(0, ifDraft("false"));
+    });
+    const commands = api().snapshot.commands.filter(
+      (c) => c.kind === "if",
+    );
+    const outerIfId = commands.at(0)?.id;
+    const innerIfId = commands.at(1)?.id;
+    expect(outerIfId).toBeDefined();
+    expect(innerIfId).toBeDefined();
+    if (outerIfId === undefined || innerIfId === undefined) return;
+
+    // The engine has no `if` inside a branch: it must reject the
+    // wiring, the UI must surface that refusal, and nothing may be
+    // fabricated instead (no fake nesting, no silently swallowed
+    // member).
+    act(() => {
+      expect(api().applyIfAppend(0, outerIfId, "then", innerIfId)).toBe(false);
+    });
+    expect(api().snapshot.actionError).not.toBe("");
+
+    const listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    const body = listed.commands.find((c) => c.id === outerIfId);
+    expect(body?.then_body ?? []).not.toContain(innerIfId);
+    // The rejected block still exists on the canvas as itself.
+    expect(
+      api().snapshot.commands.some((c) => c.id === innerIfId),
+    ).toBe(true);
+  });
+
+  it("prunes the branch when a member is deleted (no move-back exists)", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, ifDraft("true"));
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"member"' });
+    });
+    const ifId = api().snapshot.commands.find((c) => c.kind === "if")?.id;
+    expect(ifId).toBeDefined();
+    if (ifId === undefined) return;
+    const memberId = lastPrintId(api);
+    expect(memberId).toBeDefined();
+    if (memberId === undefined) return;
+    act(() => {
+      expect(api().applyIfAppend(0, ifId, "then", memberId)).toBe(true);
+    });
+
+    act(() => {
+      api().deleteCommand(0, memberId);
+    });
+    expect(api().snapshot.actionError).toBe("");
+
+    const listed = optilotus_listCommands(0);
+    expect(listed.status).toBe("ok");
+    if (listed.status !== "ok") return;
+    expect(
+      listed.commands.find((c) => c.id === ifId)?.then_body ?? [],
+    ).not.toContain(memberId);
+    expect(api().snapshot.commands.some((c) => c.id === memberId)).toBe(false);
+
+    // The program still runs: the emptied branch executes nothing.
+    connectAll(api, 0);
+    act(() => {
+      api().run();
+    });
+    const run = api().snapshot.run;
+    expect(run?.status).toBe("ok");
+    if (run?.status !== "ok") return;
+    expect(run.printed).toEqual([]);
+  });
+
+  it("flows a TRUE body's tail into the if's own successor", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, declareDraft("x", "10"));
+    });
+    act(() => {
+      api().addCommand(0, ifDraft("{x} > 5"));
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"in branch"' });
+    });
+    act(() => {
+      api().addCommand(0, { kind: "print", template: '"after"' });
+    });
+    const ifId = api().snapshot.commands.find((c) => c.kind === "if")?.id;
+    expect(ifId).toBeDefined();
+    if (ifId === undefined) return;
+    // The TRUE body's member is the '"in branch"' print — NOT the
+    // '"after"' print, which belongs to the chain after the `if`.
+    const memberId = api()
+      .snapshot.commands.find((c) => c.template === '"in branch"')?.id;
+    expect(memberId).toBeDefined();
+    if (memberId === undefined) return;
+    act(() => {
+      expect(api().applyIfAppend(0, ifId, "then", memberId)).toBe(true);
+    });
+
+    // The print after the `if` is chained at the if's own `next`. The
+    // engine ends the member's chain there — the merge rejoin at the
+    // if's successor is the executor's documented walk, which the run
+    // below must show.
+    connectAll(api, 0);
+    const commands = api().snapshot.commands;
+    const afterId = commands.find((c) => c.template === '"after"')?.id;
+    expect(afterId).toBeDefined();
+    if (afterId === undefined) return;
+    const mergeEdges = mergeEdgesOf(commands);
+    expect(mergeEdges).toContainEqual({
+      ifId,
+      from: memberId,
+      to: afterId,
+    });
+
+    act(() => {
+      api().run();
+    });
+    const run = api().snapshot.run;
+    expect(run?.status).toBe("ok");
+    if (run?.status !== "ok") return;
+    // Body first, then the if's successor — the merge rail's order.
+    expect(run.printed).toEqual(["in branch", "after"]);
   });
 });

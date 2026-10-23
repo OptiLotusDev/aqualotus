@@ -269,6 +269,94 @@ describe("AppShell error block attribution", () => {
   });
 });
 
+/* If/Else merge controls: toggling the manual join. Unmerge is
+ * atomic — the circle goes away and the engine's continuation detaches
+ * with it, in one action (task 4). */
+function mergeSnapshot(): ProgramSnapshot {
+  return {
+    ...snapshot(),
+    commands: [
+      { id: 1, kind: "declare", next: 2, var: "n", ty: "int32", expr: "41" },
+      { id: 2, kind: "if", next: 3, condition: 4, then_body: [], else_body: [] },
+      { id: 3, kind: "print", next: null, template: '"after"' },
+    ],
+    commandsByFunction: {
+      0: [
+        { id: 1, kind: "declare", next: 2, var: "n", ty: "int32", expr: "41" },
+        { id: 2, kind: "if", next: 3, condition: 4, then_body: [], else_body: [] },
+        { id: 3, kind: "print", next: null, template: '"after"' },
+      ],
+    },
+    selectedCommandId: 2,
+  };
+}
+
+describe("AppShell If/Else merge controls", () => {
+  function openInspector(): {
+    props: React.ComponentProps<typeof AppShell>;
+    rerender: (ui: React.ReactElement) => void;
+  } {
+    const props = shellProps();
+    Object.assign(props, { program: mergeSnapshot() });
+    const view = render(<AppShell {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
+    return { props, rerender: view.rerender };
+  }
+
+  it("merges without touching the engine's links", () => {
+    const { props } = openInspector();
+    const toggle = screen.getByTestId("merge-toggle");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggle);
+    // The join is presentation only: the button flips pressed, and no
+    // bridge call rewires anything behind it.
+    expect(screen.getByTestId("merge-toggle").getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(props.onApplyLinks).not.toHaveBeenCalled();
+  });
+
+  it("unmerges atomically: join off and continuation detached, in one action", () => {
+    const { props, rerender } = openInspector();
+    // First click turns the join on (merge on: the drawing state only).
+    fireEvent.click(screen.getByTestId("merge-toggle"));
+    expect(props.onApplyLinks).not.toHaveBeenCalled();
+    rerender(<AppShell {...props} />);
+    // Second click unmerges: the continuation print 3 detaches in the
+    // SAME action — the join's wires only exist while the join does.
+    fireEvent.click(screen.getByTestId("merge-toggle"));
+    expect(props.onApplyLinks).toHaveBeenCalledOnce();
+    expect(props.onApplyLinks).toHaveBeenCalledWith(0, {
+      edits: [{ id: 2, next: null }],
+      entry: { type: "keep" },
+    });
+  });
+
+  it("unmerge detaches nothing when the if has no continuation", () => {
+    const props = shellProps();
+    Object.assign(props, {
+      program: {
+        ...mergeSnapshot(),
+        commands: mergeSnapshot().commands.map((cmd) =>
+          cmd.id === 2 ? { ...cmd, next: null } : cmd,
+        ),
+        commandsByFunction: {
+          0: mergeSnapshot()
+            .commandsByFunction[0]!
+            .map((cmd) => (cmd.id === 2 ? { ...cmd, next: null } : cmd)),
+        },
+      },
+    });
+    const view = render(<AppShell {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
+    fireEvent.click(screen.getByTestId("merge-toggle"));
+    view.rerender(<AppShell {...props} />);
+    fireEvent.click(screen.getByTestId("merge-toggle"));
+    // Nothing to detach: no bridge call, the join toggle alone happened.
+    expect(props.onApplyLinks).not.toHaveBeenCalled();
+  });
+});
+
 describe("AppShell run action", () => {
   it("starts the flow travel with the run", async () => {
     const props = shellProps();
