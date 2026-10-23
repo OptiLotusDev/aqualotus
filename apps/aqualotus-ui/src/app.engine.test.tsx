@@ -257,7 +257,7 @@ describe("PARITY-022 — the whole app runs a real program", () => {
     await user.clear(screen.getByLabelText("Name"));
     await user.type(screen.getByLabelText("Name"), "x");
     await user.clear(screen.getByLabelText("Value"));
-    await user.type(screen.getByLabelText("Value"), "{x}");
+    await user.type(screen.getByLabelText("Value"), "{{x}");
     await user.click(screen.getByRole("checkbox", { name: "Casting" }));
     await user.selectOptions(screen.getByLabelText("Cast to type"), "float64");
     // The Inspector names the new variable and its type before applying.
@@ -277,11 +277,11 @@ describe("PARITY-022 — the whole app runs a real program", () => {
     // 5. Downstream blocks read the new variable (and the original).
     await addBlock(user, "Print");
     await user.clear(screen.getByLabelText("Value"));
-    await user.type(screen.getByLabelText("Value"), '"{x_f64}"');
+    await user.type(screen.getByLabelText("Value"), "{{x_f64}");
     await user.click(screen.getByRole("button", { name: "Apply edit" }));
     await addBlock(user, "Print");
     await user.clear(screen.getByLabelText("Value"));
-    await user.type(screen.getByLabelText("Value"), '"{x}"');
+    await user.type(screen.getByLabelText("Value"), "{{x}");
     await user.click(screen.getByRole("button", { name: "Apply edit" }));
 
     // 6. Wire and execute the real program.
@@ -293,9 +293,6 @@ describe("PARITY-022 — the whole app runs a real program", () => {
 
     // 7. The engine's own output: the converted float64 prints 5.0, the
     //    original int32 still prints 5.
-    console.log("DBG-LIST", JSON.stringify(optilotus_listCommands(0)));
-    console.log("DBG-OUT", JSON.stringify(screen.queryByLabelText("Program output")?.textContent ?? null));
-    console.log("DBG-ERR", screen.queryByTestId("runner-error")?.textContent ?? null);
     await waitFor(() => {
       expect(screen.getByLabelText("Program output").textContent).toBe(
         "> 5.0\n> 5",
