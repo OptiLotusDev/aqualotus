@@ -15,14 +15,33 @@ import type {
   FunctionSummary,
 } from "../lib/optilotus";
 import {
+  branchEdgeEnds,
+  columnEdgeEnds,
   edgeEnds,
   edgePath,
   edgesOf,
+  joinDefaultPos,
+  JOIN_FALLBACK_SIZE,
+  mergeEdgesOf,
+  mergeJoinRailsOf,
+  portEdgeEnds,
+  verticalEdgePath,
+  branchOwnerOf,
+  buildIfShapes,
+  BRANCH_PORT_FRACTION,
+  type BlockRect,
   type BlockSide,
+  type BranchSide,
+  type IfShape,
+  type MergeJoin,
+  type PortRole,
 } from "../lib/graph";
+import { resolveBranchConnect } from "../lib/branching";
+import type { UiCommand } from "../lib/program";
 import type { FlowState } from "../lib/flow";
 import type { LayoutMap, Pos } from "../lib/layout";
 import {
+  branchDropPos,
   LAYOUT_ROW_Y,
   LAYOUT_START_X,
   LAYOUT_STEP_X,
@@ -33,9 +52,11 @@ import {
   filterVisibleBlocks,
   isZoomWheel,
   pinchFactor,
+  rectsIntersect,
   screenToWorld,
   visibleWorldRect,
   wheelDeltaPx,
+  withOverscan,
   zoomFactorForWheel,
   ZOOM_STEP,
   type ViewRect,
@@ -89,6 +110,16 @@ interface VisualEditorProps {
     id: CommandId,
     pos: Pos,
   ) => void;
+  /**
+   * The manual merge-join state per `if` id ("End of If Block").
+   * `on` switches the join circle on; `pos` is the user-dragged spot in
+   * function-container coordinates (`null` = auto-placed below the
+   * branch frames). Absent/`off` entries draw the classic direct
+   * tail→continuation rails. Presentation state only — UI-owned.
+   */
+  readonly mergeJoins?: Readonly<Record<number, MergeJoin>>;
+  /** Commit the dragged join circle's new spot (same state as mergeJoins). */
+  readonly onMoveJoin?: (ifId: CommandId, pos: Pos) => void;
   readonly onDropBlock: (
     fid: FunctionId,
     kind: string,
@@ -104,6 +135,13 @@ interface VisualEditorProps {
   readonly onZoomSettled?: (before: number, after: number) => void;
   /** Compact-only extra toolbar controls (desktop keeps them in the appbar). */
   readonly toolbarExtra?: ReactNode;
+  /**
+   * The condition expression the engine reports for an `if`
+   * (`if_condition`), or null when the bridge cannot recover it. The
+   * summary's own `condition` field is a hidden value id, so the card
+   * only shows the user's text through this probe — nothing guessed.
+   */
+  readonly conditionTextFor?: (fid: FunctionId, ifId: CommandId) => string | null;
   /** Running execution-flow visualisation (presentation only). */
   readonly flow?: FlowState | null;
 }
@@ -111,6 +149,28 @@ interface VisualEditorProps {
 interface Size {
   readonly w: number;
   readonly h: number;
+}
+
+/** One connection as the edges layer draws it (from the planners +
+ * branch/merge derivation). */
+interface DrawnEdge {
+  readonly key: string;
+  readonly from: number;
+  readonly to: number;
+  readonly fid: number;
+  readonly d: string;
+  /** The engine cannot report this edge (the planned `into an if` gap). */
+  readonly planned: boolean;
+  /** A merge wire or the `if`'s own post-body continuation rail. */
+  readonly merge: boolean;
+  /**
+   * Manual-merge mode: this rail ends at the branch's join circle
+   * ("End of If Block") instead of running straight to the continuation;
+   * `joinIfId` names the `if` whose `jo:` continuation wire carries the
+   * flow onward (the execution-path expansion goes through both).
+   */
+  readonly joinTail?: boolean;
+  readonly joinIfId?: number;
 }
 
 const FALLBACK_SIZE: Size = { w: 216, h: 104 };
@@ -202,6 +262,9 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     onRegisterZoom,
     onZoomSettled,
     toolbarExtra,
+    conditionTextFor,
+    mergeJoins,
+    onMoveJoin,
     flow = null,
   } = props;
 
@@ -293,6 +356,35 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     });
   }
 
+  // Vertical If/Else shapes: one derived record per `if` — branch
+  // membership, container frames, and merge target — rebuilt from the
+  // engine summaries + the UI's own relative layout whenever either
+  // changes. Rects stay *relative* to their function container (the
+  // same coordinates `layoutStore` stores); the edges below convert to
+  // world space per function. Memoized like `edges` so selection,
+  // dragging, and scrolling never rebuild it.
+  const ifShapesByFunction = useMemo(() => {
+    const out = new Map<number, readonly IfShape[]>();
+    for (const fn of functions) {
+      const cmds = commandsByFunction[fn.id] ?? [];
+      const byIndex = new Map<number, number>();
+      cmds.forEach((cmd, i) => byIndex.set(cmd.id, i));
+      const store = layoutStore[fn.id];
+      const rectOf = (id: number): BlockRect | undefined => {
+        const cmd = cmds[byIndex.get(id) ?? -1];
+        if (cmd === undefined) return undefined;
+        const p = store?.[cmd.id] ?? fallbackPos(byIndex.get(id) ?? 0);
+        const s = sizes.get(`${fn.id}:${id}`) ?? FALLBACK_SIZE;
+        return { x: p.x, y: p.y, w: s.w, h: s.h };
+      };
+      out.set(fn.id, buildIfShapes(cmds, rectOf, rectOf));
+    }
+    return out;
+    // `blockWorld`/layout read via layoutStore/sizes directly; `pkgOff`
+    // must not re-derive shapes (only `layout` below shifts the world).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [functions, commandsByFunction, layoutStore, sizes]);
+
   // World geometry of the Package → Struct → Function nesting, in
   // canvas coordinates (before zoom). Function containers auto-size
   // from their blocks and stack vertically; memoized so effects can
@@ -317,6 +409,15 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
         bottom = Math.max(bottom, p.y + size(fn.id, cmd.id).h);
         right = Math.max(right, p.x + size(fn.id, cmd.id).w);
       });
+      // The vertical If/Else body frames hang below their `if` card: the
+      // function container must span them too (they are presentation,
+      // but a frame poking out of its function border reads broken).
+      for (const shape of ifShapesByFunction.get(fn.id) ?? []) {
+        for (const frame of shape.frames) {
+          bottom = Math.max(bottom, frame.rect.y + frame.rect.h);
+          right = Math.max(right, frame.rect.x + frame.rect.w);
+        }
+      }
       heights.set(
         fn.id,
         Math.max(FUNC_MIN_HEIGHT, bottom === 0 ? 0 : bottom + 36),
@@ -390,6 +491,7 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     layoutStore,
     sizes,
     pkgOff,
+    ifShapesByFunction,
   ]);
 
   // Viewport tracking for block culling + startup fit: the scrollable
@@ -566,77 +668,195 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
   // the viewport-sized SVG overlay below (which clips), not by skipping
   // paths here: the graph itself is never altered, and path building
   // runs once per program edit — never per scroll frame.
-  const edges: {
-    key: string;
-    from: number;
-    to: number;
-    fid: number;
-    d: string;
-    planned: boolean;
-  }[] =
-    useMemo(() => {
-      const out: {
-        key: string;
-        from: number;
-        to: number;
-        fid: number;
-        d: string;
-        planned: boolean;
-      }[] = [];
-      for (const fn of functions) {
-        const cmds = commandsByFunction[fn.id] ?? [];
-        const byId = new Map<number, number>();
-        cmds.forEach((c, i) => byId.set(c.id, i));
-        // One planner for the whole canvas: the chain edges (the
-        // engine's own `next` pointers plus the connections the engine
-        // accepted but cannot report) and the branch wires (the `if`'s
-        // port to the head of a branch). The planner only ever names
-        // visible blocks, so a wire never starts or ends at a hidden
-        // raw node (the `if`'s condition compute, a print's tail).
-        for (const edge of edgesOf(cmds)) {
-          const fromIndex = byId.get(edge.from);
-          const toIndex = byId.get(edge.to);
-          if (fromIndex === undefined || toIndex === undefined) continue;
-          const from = cmds[fromIndex];
-          const to = cmds[toIndex];
-          if (from === undefined || to === undefined) continue;
-          const a = blockWorld(fn.id, from, fromIndex);
-          const b = blockWorld(fn.id, to, toIndex);
-          const sa = sizes.get(`${fn.id}:${from.id}`) ?? FALLBACK_SIZE;
-          const sb = sizes.get(`${fn.id}:${to.id}`) ?? FALLBACK_SIZE;
-          if (edge.branch !== null) {
-            // Branch wire: the `if`'s then/else port to the head of the
-            // branch. The head is the branch's first *visible* member.
-            const ox = a.x + sa.w;
-            const oy = a.y + sa.h * (edge.branch === "then" ? 0.25 : 0.75);
-            out.push({
-              key: `${fn.id}:branch:${edge.branch}:${edge.from}:head`,
-              from: edge.from,
-              to: edge.to,
-              fid: fn.id,
-              d: edgePath(ox, oy, b.x, b.y + sb.h / 2, true),
-              planned: false,
-            });
-            continue;
-          }
-          const ends = edgeEnds(
-            { x: a.x, y: a.y, w: sa.w, h: sa.h },
-            { x: b.x, y: b.y, w: sb.w, h: sb.h },
-          );
+  const edges: DrawnEdge[] = useMemo(() => {
+    const out: DrawnEdge[] = [];
+    for (const fn of functions) {
+      const cmds = commandsByFunction[fn.id] ?? [];
+      const byId = new Map<number, number>();
+      cmds.forEach((c, i) => byId.set(c.id, i));
+      // Which branch a chain edge runs *inside* of: two members of the
+      // same body run top → bottom, so their link is drawn as a
+      // vertical column edge instead of the classic left → right one.
+      const owners = branchOwnerOf(cmds);
+      const worldRect = (c: CommandSummary, i: number): BlockRect => {
+        const p = blockWorld(fn.id, c, i);
+        const s = sizes.get(`${fn.id}:${c.id}`) ?? FALLBACK_SIZE;
+        return { x: p.x, y: p.y, w: s.w, h: s.h };
+      };
+      // The manual merge join state of this function's `if`s — keyed by
+      // the (globally unique) `if` id. Presentation only, UI-owned.
+      const joinOn = (ifId: number): boolean =>
+        mergeJoins?.[ifId]?.on === true;
+      // One planner for the whole canvas: the chain edges (the
+      // engine's own `next` pointers plus the connections the engine
+      // accepted but cannot report) and the branch wires (the `if`'s
+      // bottom port to the head of a branch). The planner only ever
+      // names visible blocks, so a wire never starts or ends at a
+      // hidden raw node (the `if`'s condition compute, a print's
+      // tail).
+      for (const edge of edgesOf(cmds)) {
+        const fromIndex = byId.get(edge.from);
+        const toIndex = byId.get(edge.to);
+        if (fromIndex === undefined || toIndex === undefined) continue;
+        const from = cmds[fromIndex];
+        const to = cmds[toIndex];
+        if (from === undefined || to === undefined) continue;
+        const a = worldRect(from, fromIndex);
+        const b = worldRect(to, toIndex);
+        if (edge.branch !== null) {
+          // Branch wire: the `if`'s bottom TRUE/FALSE port down into
+          // the head of the branch (the body's first *visible*
+          // member). The head is entered through its top edge — a
+          // branch body reads top → bottom.
+          const ends = branchEdgeEnds(a, b, edge.branch);
+          out.push({
+            key: `${fn.id}:branch:${edge.branch}:${edge.from}:head`,
+            from: edge.from,
+            to: edge.to,
+            fid: fn.id,
+            d: verticalEdgePath(ends.x1, ends.y1, ends.x2, ends.y2),
+            planned: false,
+            merge: false,
+          });
+          continue;
+        }
+        // The `if` card carries no right out-port: its continuation
+        // never leaves the card directly. Join off — the branch tails'
+        // merge rails carry the flow onward (below); join on — the
+        // manual join circle's own wire does (also below). One drawn
+        // truth per connection, never two.
+        if (from.kind === "if") continue;
+        const ownerFrom = owners.get(edge.from);
+        const ownerTo = owners.get(edge.to);
+        if (
+          ownerFrom !== undefined &&
+          ownerTo !== undefined &&
+          ownerFrom.ifId === ownerTo.ifId &&
+          ownerFrom.branch === ownerTo.branch
+        ) {
+          // Column link: member → next member of the same body.
+          const ends = columnEdgeEnds(a, b);
           out.push({
             key: `${fn.id}:${edge.from}`,
             from: edge.from,
             to: edge.to,
             fid: fn.id,
-            d: edgePath(ends.x1, ends.y1, ends.x2, ends.y2, ends.horizontal),
+            d: verticalEdgePath(ends.x1, ends.y1, ends.x2, ends.y2),
             planned: edge.planned,
+            merge: false,
           });
+          continue;
         }
+        // Every chain edge reads left → right through the side ports —
+        // the `if` card's input is its left in-port (its TRUE/FALSE
+        // pair enters the branch bodies, never the card's top).
+        const ends = edgeEnds(a, b);
+        out.push({
+          key: `${fn.id}:${edge.from}`,
+          from: edge.from,
+          to: edge.to,
+          fid: fn.id,
+          d: ends.horizontal
+            ? edgePath(ends.x1, ends.y1, ends.x2, ends.y2, true)
+            : verticalEdgePath(ends.x1, ends.y1, ends.x2, ends.y2),
+          planned: edge.planned,
+          // No chain edge leaves the `if` card any more (no right
+          // port): only ordinary blocks chain side to side here.
+          merge: false,
+        });
       }
-      return out;
-      // blockWorld/layout intentionally read via layout.* (stable memo).
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [functions, commandsByFunction, sizes, layoutStore, layout]);
+      // Merge rails (join off): each populated branch's tail runs back
+      // into the block after the `if` (the engine's documented join —
+      // the body walk stops at the tail and flow continues at the
+      // `if`'s own `next`). Engine truth, never a reported pointer.
+      // With the join on, the circular join of the same fact is drawn
+      // from `mergeJoinRailsOf` below instead.
+      for (const merge of mergeEdgesOf(cmds)) {
+        if (joinWorldRect(fn.id, merge.ifId) !== null) continue;
+        const fromIndex = byId.get(merge.from);
+        const toIndex = byId.get(merge.to);
+        if (fromIndex === undefined || toIndex === undefined) continue;
+        const from = cmds[fromIndex];
+        const to = cmds[toIndex];
+        if (from === undefined || to === undefined) continue;
+        const ends = edgeEnds(worldRect(from, fromIndex), worldRect(to, toIndex));
+        out.push({
+          key: `${fn.id}:merge:${merge.from}`,
+          from: merge.from,
+          to: merge.to,
+          fid: fn.id,
+          d: edgePath(ends.x1, ends.y1, ends.x2, ends.y2, ends.horizontal),
+          planned: false,
+          merge: true,
+        });
+      }
+      // Manual-merge mode (the join circle shown): one incoming rail per
+      // TRUE/FALSE branch — a populated branch through its tail's
+      // bottom port, an **empty** branch through the `if` card's own
+      // TRUE/FALSE port — so both arrows address the circle even when
+      // the `if` has no continuation block at all (the circle is the
+      // branch flows' destination; `next` is not read here). One
+      // circle→continuation wire carries the flow onward, once per `if`
+      // (the else branch below).
+      for (const rail of mergeJoinRailsOf(cmds)) {
+        if (!joinOn(rail.ifId)) continue;
+        const join = joinWorldRect(fn.id, rail.ifId);
+        if (join === null) continue;
+        const fromIndex = byId.get(rail.from);
+        const from = fromIndex === undefined ? undefined : cmds[fromIndex];
+        if (from === undefined || fromIndex === undefined) continue;
+        // A tail's rail leaves the body's bottom port; an empty
+        // branch's rail leaves the `if` card's own TRUE/FALSE port.
+        const fromRole: PortRole = rail.emptyBranch ? rail.branch : "outBottom";
+        const ends = portEdgeEnds(worldRect(from, fromIndex), join, fromRole, "joinIn");
+        out.push({
+          key: rail.emptyBranch
+            ? `${fn.id}:merge:${rail.ifId}:${rail.branch}`
+            : `${fn.id}:merge:${rail.from}`,
+          from: rail.from,
+          // `to` names the join circle's host card: the rail's drawn
+          // end is the circle itself (keyed by its `if`), and the
+          // `jo:` wire below carries the flow past it.
+          to: rail.ifId,
+          fid: fn.id,
+          d: verticalEdgePath(ends.x1, ends.y1, ends.x2, ends.y2),
+          planned: false,
+          merge: true,
+          joinTail: true,
+          joinIfId: rail.ifId,
+        });
+      }
+      // The join circle's continuation wire, once per `if` (every tail
+      // rail shares it — the travelled path expands through both
+      // without drawing it twice).
+      const joinOutSeen = new Set<number>();
+      for (const shape of ifShapesByFunction.get(fn.id) ?? []) {
+        if (!joinOn(shape.ifId)) continue;
+        if (joinOutSeen.has(shape.ifId)) continue;
+        joinOutSeen.add(shape.ifId);
+        const join = joinWorldRect(fn.id, shape.ifId);
+        const contId = shape.join;
+        if (join === null || contId === null) continue;
+        const contIndex = byId.get(contId);
+        const cont = contIndex === undefined ? undefined : cmds[contIndex];
+        if (cont === undefined || contIndex === undefined) continue;
+        const ends = portEdgeEnds(join, worldRect(cont, contIndex), "joinOut", "inLeft");
+        out.push({
+          key: `${fn.id}:jo:${shape.ifId}`,
+          from: shape.ifId,
+          to: contId,
+          fid: fn.id,
+          d: edgePath(ends.x1, ends.y1, ends.x2, ends.y2, ends.horizontal),
+          planned: false,
+          merge: true,
+          joinIfId: shape.ifId,
+        });
+      }
+    }
+    return out;
+    // blockWorld/layout intentionally read via layout.* (stable memo).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [functions, commandsByFunction, sizes, layoutStore, layout, ifShapesByFunction, mergeJoins]);
 
   const selectedFunc =
     functions.find((f) => f.id === selectedFunctionId) ?? null;
@@ -685,16 +905,38 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
   // has no indicator: the visualisation never invents geometry.
   const travelEdges = useMemo(() => {
     if (flow === null || flow === undefined) return [];
-    const byKey = new Map(edges.map((edge) => [edge.key, edge]));
+    // Match by drawn edges themselves: `"chain"` edges travel the
+    // connection that starts at the flow edge's source; a decided
+    // branch's wire at exactly its (if → head) endpoints.
+    const byEnds = new Map(edges.map((e) => [`${e.fid}:${e.from}:${e.to}`, e]));
+    // Manual-merge mode: a `merge` flow edge (decided tail → block after
+    // the `if`) travels the tail's join rail **and** the join circle's
+    // continuation wire — each exactly once, however many tails feed it.
+    const joinOutAfter = new Map<number, string>();
+    for (const e of edges) {
+      if (e.joinTail === true && e.joinIfId !== undefined) {
+        joinOutAfter.set(e.from, `${e.fid}:jo:${e.joinIfId}`);
+      }
+    }
+    const travelSeen = new Set<string>();
     const out: { key: string; selected: boolean }[] = [];
+    const push = (key: string, selected: boolean): void => {
+      if (travelSeen.has(key)) return;
+      travelSeen.add(key);
+      out.push({ key, selected });
+    };
     flow.edges.forEach((edge) => {
-      const drawn = byKey.get(`${edge.fid}:${edge.from}`);
+      const selected =
+        edge.from === selectedCommandId && edge.fid === selectedFunctionId;
+      if (edge.kind === "merge") {
+        push(`${edge.fid}:merge:${edge.from}`, selected);
+        const joinOut = joinOutAfter.get(edge.from);
+        if (joinOut !== undefined) push(joinOut, selected);
+        return;
+      }
+      const drawn = byEnds.get(`${edge.fid}:${edge.from}:${edge.to}`);
       if (drawn === undefined) return;
-      out.push({
-        key: drawn.key,
-        selected:
-          edge.from === selectedCommandId && edge.fid === selectedFunctionId,
-      });
+      push(drawn.key, selected);
     });
     return out;
   }, [edges, flow, selectedCommandId, selectedFunctionId]);
@@ -949,10 +1191,55 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     x: number;
     y: number;
   } | null>(null);
+  /**
+   * Live offset of a dragged TRUE/FALSE branch container: every member
+   * of that one branch shifts by `dx`/`dy` while the gesture runs, and
+   * the per-member commit lands on pointer-up. Presentation only.
+   */
+  const [branchDrag, setBranchDrag] = useState<{
+    fid: number;
+    ifId: number;
+    branch: BranchSide;
+    dx: number;
+    dy: number;
+  } | null>(null);
+  const branchDragRef = useRef<{
+    fid: number;
+    ifId: number;
+    branch: BranchSide;
+    dx: number;
+    dy: number;
+  } | null>(null);
+  /** Live offset of a dragged merge-join circle ("End of If Block"). */
+  const [joinDrag, setJoinDrag] = useState<{
+    ifId: number;
+    dx: number;
+    dy: number;
+  } | null>(null);
+  const joinDragRef = useRef<{ ifId: number; dx: number; dy: number } | null>(
+    null,
+  );
+  /** Where a dragged whole-branch drag started (per member, live base). */
+  interface BranchDragMember {
+    readonly id: number;
+    readonly orig: Pos;
+  }
+  const branchMembersRef = useRef<readonly BranchDragMember[]>([]);
+  /** Live base spot of a dragged merge-join circle (function-relative). */
+  const joinBaseRef = useRef<Pos | null>(null);
   const [hint, setHint] = useState<string>("");
   const gestureRef = useRef<
     | { kind: "block"; fid: number; id: number; startX: number; startY: number; orig: Pos }
     | { kind: "connect"; fid: number; sourceId: number; side: BlockSide }
+    | {
+        kind: "branch";
+        fid: number;
+        ifId: number;
+        branch: BranchSide;
+        startX: number;
+        startY: number;
+      }
+    | { kind: "join"; fid: number; ifId: number; startX: number; startY: number }
     | { kind: "pkg"; startX: number; startY: number; orig: Pos }
     | { kind: "pan"; startX: number; startY: number; left: number; top: number }
     | { kind: "pinch"; startZoom: number; lastDist: number }
@@ -1004,6 +1291,64 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     });
   }
 
+  /**
+   * Where the join circle of one `if` sits right now (function-relative
+   * coordinates): the stored drag position, else the auto spot below
+   * the branch frames. `null` when there is no shape to host it.
+   */
+  function joinBasePos(fid: number, ifId: number): Pos | null {
+    const state = mergeJoins?.[ifId];
+    if (state === undefined || !state.on) return null;
+    const shape = (ifShapesByFunction.get(fid) ?? []).find(
+      (s) => s.ifId === ifId,
+    );
+    const pos = state.pos ?? joinDefaultPos(shape?.frames ?? []);
+    if (pos === null) return null;
+    return { x: pos.x, y: pos.y };
+  }
+
+  /**
+   * The join circle of one `if` in **world** coordinates (its stored
+   * or auto position plus the function origin): every anchor drawn at
+   * the circle — the join rails into it, its own continuation wire
+   * out, and a connection preview sourced from it — reads the same
+   * rect, so the wires and the pill can never drift apart. (A live
+   * join drag moves the pill only until drop: the committed spot is
+   * when every wire re-anchors together, never mid-gesture.)
+   */
+  function joinWorldRect(fid: number, ifId: number): BlockRect | null {
+    const base = joinBasePos(fid, ifId);
+    if (base === null) return null;
+    const s = sizes.get(`${fid}:join:${ifId}`) ?? JOIN_FALLBACK_SIZE;
+    const f = layout.funcOrigin(fid);
+    return { x: f.x + base.x, y: f.y + base.y, w: s.w, h: s.h };
+  }
+
+  /** Live join position, including an in-flight drag offset. */
+  function joinLivePos(fid: number, ifId: number): Pos | null {
+    const base = joinBasePos(fid, ifId);
+    if (base === null) return null;
+    const drag = joinDrag !== null && joinDrag.ifId === ifId ? joinDrag : null;
+    if (drag === null) return base;
+    return {
+      x: base.x + drag.dx,
+      y: base.y + drag.dy,
+    };
+  }
+
+  /** Which branch of which `if` a block belongs to (presentation read
+   * of the engine's branch lists), for the member port pair. */
+  function memberSideOf(
+    fid: number,
+    id: CommandId,
+  ): "then" | "else" | undefined {
+    for (const shape of ifShapesByFunction.get(fid) ?? []) {
+      const side = shape.branchOf.get(id);
+      if (side !== undefined) return side;
+    }
+    return undefined;
+  }
+
   function onBoardPointerDown(e: React.PointerEvent<HTMLDivElement>): void {
     if (busy) return;
     const board = boardRef.current;
@@ -1039,8 +1384,9 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
         return;
       }
       const side = (port.dataset.side ?? "right") as BlockSide;
-      // Two ports only: the right out-port (or then/else for if) starts
-      // a connection.
+      // The ordinary block's right out-port, an `if` card's bottom
+      // TRUE/FALSE ports, a branch member's bottom column port, and the
+      // join circle's right port (naming its `if`) all start a wire.
       gestureRef.current = { kind: "connect", fid, sourceId: id, side };
       movedRef.current = false;
       try {
@@ -1074,6 +1420,85 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
         orig: effectivePos(fid, origin, index),
       };
       movedRef.current = false;
+      return;
+    }
+    // The merge-join circle ("End of If Block"): draggable when merge is
+    // on. Its right out-port was handled above (it starts a connection
+    // sourced by the `if` itself), the rest of the pill drags it.
+    const join = target.closest(".vjoin");
+    if (join instanceof HTMLElement) {
+      const fid = Number((join as HTMLElement).dataset.fid ?? NaN);
+      const ifId = Number((join as HTMLElement).dataset.joinOf ?? NaN);
+      if (!Number.isFinite(fid) || !Number.isFinite(ifId)) return;
+      if (fid !== selectedFunctionId) {
+        onSelectFunction(fid);
+        return;
+      }
+      const base = joinBasePos(fid, ifId);
+      if (base === null) return;
+      joinBaseRef.current = base;
+      gestureRef.current = {
+        kind: "join",
+        fid,
+        ifId,
+        startX: e.clientX,
+        startY: e.clientY,
+      };
+      movedRef.current = false;
+      try {
+        (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+      } catch {
+        // Synthetic pointers: gesture still works.
+      }
+      return;
+    }
+    // A TRUE/FALSE body frame carries its whole branch: dragging the
+    // container moves every member with it (live), and commits each
+    // member's position on pointer-up. Blocks inside keep their own
+    // gestures — the frame's blank area is the handle.
+    const frame = target.closest(".vbranch");
+    if (frame instanceof HTMLElement) {
+      const fid = Number(frame.dataset.fid ?? NaN);
+      const ifId = Number(frame.dataset.ifId ?? NaN);
+      const branch = frame.dataset.ifBranch;
+      if (!Number.isFinite(fid) || !Number.isFinite(ifId)) return;
+      if (branch !== "then" && branch !== "else") return;
+      if (fid !== selectedFunctionId) {
+        onSelectFunction(fid);
+        return;
+      }
+      const shape = (ifShapesByFunction.get(fid) ?? []).find(
+        (s) => s.ifId === ifId,
+      );
+      const ids = shape === undefined ? [] : branch === "then" ? shape.then : shape.else;
+      const cmds = commandsByFunction[fid] ?? [];
+      const byIndex = new Map<number, number>(cmds.map((c, i) => [c.id, i]));
+      const store = layoutStore[fid];
+      const members: { id: number; orig: Pos }[] = [];
+      for (const id of ids) {
+        const index = byIndex.get(id);
+        if (index === undefined) continue;
+        members.push({
+          id,
+          orig: store?.[id] ?? fallbackPos(index),
+        });
+      }
+      if (members.length === 0) return;
+      branchMembersRef.current = members;
+      gestureRef.current = {
+        kind: "branch",
+        fid,
+        ifId,
+        branch,
+        startX: e.clientX,
+        startY: e.clientY,
+      };
+      movedRef.current = false;
+      try {
+        (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+      } catch {
+        // Synthetic pointers: gesture still works.
+      }
       return;
     }
     const func = target.closest(".funcc");
@@ -1176,6 +1601,26 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
         x: p.x,
         y: p.y,
       });
+    } else if (gesture.kind === "branch") {
+      // Whole-branch container drag: every member shifts by the same
+      // delta (live via `branchDragOffsets`); the commit lands per
+      // member on pointer-up.
+      const dx = (e.clientX - gesture.startX) / zoom;
+      const dy = (e.clientY - gesture.startY) / zoom;
+      if (!movedRef.current && Math.hypot(dx, dy) * zoom < 4) return;
+      movedRef.current = true;
+      const next = { fid: gesture.fid, ifId: gesture.ifId, branch: gesture.branch, dx, dy };
+      branchDragRef.current = next;
+      setBranchDrag(next);
+    } else if (gesture.kind === "join") {
+      // Merge-join circle drag: live offset, committed on pointer-up.
+      const dx = (e.clientX - gesture.startX) / zoom;
+      const dy = (e.clientY - gesture.startY) / zoom;
+      if (!movedRef.current && Math.hypot(dx, dy) * zoom < 4) return;
+      movedRef.current = true;
+      const next = { ifId: gesture.ifId, dx, dy };
+      joinDragRef.current = next;
+      setJoinDrag(next);
     } else if (gesture.kind === "pkg") {
       const dx = (e.clientX - gesture.startX) / zoom;
       const dy = (e.clientY - gesture.startY) / zoom;
@@ -1305,10 +1750,108 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
             ? portBlock
             : null;
       if (block === null) {
-        if (movedRef.current) {
+        // Vertical If/Else body frames are drop targets too: a wire
+        // released inside a frame's blank area offers the dragged block
+        // to that branch. The engine remains authoritative — it rejects
+        // what it cannot hold (an `if`/`return` in a branch, a member of
+        // another `if`), and the rejection surfaces honestly.
+        const cmdsHere = commandsByFunction[gesture.fid] ?? [];
+        // The manual join circle ("End of If Block") is itself a drop
+        // target: a wire released on it resolves to the `if` it belongs
+        // to (the drop point of the branch's tails).
+        const joinHit = stack.find(
+          (el) =>
+            el instanceof HTMLElement && (el as HTMLElement).dataset.joinOf !== undefined,
+        );
+        if (joinHit instanceof HTMLElement && movedRef.current) {
+          const joinFid = Number(joinHit.dataset.fid ?? NaN);
+          const joinIfId = Number(joinHit.dataset.joinOf ?? NaN);
+          if (
+            Number.isFinite(joinFid) &&
+            joinFid === gesture.fid &&
+            Number.isFinite(joinIfId)
+          ) {
+            const resolved = resolveBranchConnect(
+              cmdsHere,
+              gesture.sourceId,
+              joinIfId,
+            );
+            if (resolved.kind === "reject") {
+              flashHint(resolved.reason);
+              return;
+            }
+            const applied = onReconnect(
+              gesture.fid,
+              gesture.sourceId,
+              joinIfId,
+              "after",
+              gesture.side,
+            );
+            if (!applied) {
+              flashHint("Those blocks are already connected.");
+            } else if (resolved.kind === "append") {
+              placeBranchMember(
+                gesture.fid,
+                resolved.ifId,
+                resolved.branch,
+                gesture.sourceId,
+              );
+            }
+          }
+          return;
+        }
+        const containerHit = stack.find(
+          (el) =>
+            el instanceof HTMLElement && el.dataset.ifBranch !== undefined,
+        );
+        const container =
+          containerHit instanceof HTMLElement ? containerHit : null;
+        if (!movedRef.current) return;
+        if (container === null) {
+          // A branch member's wire has nowhere to go on empty canvas:
+          // the resolver refuses a drop that would sever the body chain
+          // before the planner can sever nothing.
+          const resolved = resolveBranchConnect(
+            cmdsHere,
+            gesture.sourceId,
+            null,
+          );
+          if (resolved.kind === "reject") {
+            flashHint(resolved.reason);
+            return;
+          }
           const applied = onReconnect(gesture.fid, gesture.sourceId, null, "end", gesture.side);
           if (!applied) flashHint("That block is already last.");
+          return;
         }
+        const side = container.dataset.ifBranch;
+        const ifId = Number(container.dataset.ifId);
+        const containerFid = Number(container.dataset.fid);
+        if (
+          (side !== "then" && side !== "else") ||
+          !Number.isFinite(ifId) ||
+          !Number.isFinite(containerFid)
+        ) {
+          return;
+        }
+        if (containerFid !== gesture.fid) {
+          flashHint("Connections stay inside one function.");
+          return;
+        }
+        const applied = onReconnect(
+          gesture.fid,
+          gesture.sourceId,
+          ifId,
+          "after",
+          side,
+        );
+        if (!applied) {
+          flashHint("The engine could not wire that connection.");
+          return;
+        }
+        // The engine wired the block into the branch: give it its body
+        // column spot (presentation only — membership stays the engine's).
+        placeBranchMember(gesture.fid, ifId, side, gesture.sourceId);
       } else {
         const targetFid = Number(block.dataset.fid ?? NaN);
         if (!Number.isFinite(targetFid) || targetFid !== gesture.fid) {
@@ -1316,6 +1859,21 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
             flashHint("Connections stay inside one function.");
           }
         } else {
+          // Branch resolution first: a wire whose source or target runs
+          // inside a branch never re-splices the chain (the resolver
+          // answers before any planner — see `lib/branching.ts`).
+          const cmdsHere = commandsByFunction[gesture.fid] ?? [];
+          const targetId = Number(block.dataset.blockId);
+          if (!Number.isFinite(targetId)) return;
+          const resolved = resolveBranchConnect(
+            cmdsHere,
+            gesture.sourceId,
+            targetId,
+          );
+          if (resolved.kind === "reject") {
+            if (movedRef.current) flashHint(resolved.reason);
+            return;
+          }
           // Left in-port → forward port-to-port wiring (a detached
           // source slots in before the target; a chained source pulls
           // the target after itself). Block body → the target moves to
@@ -1324,20 +1882,82 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
             inPortHit !== undefined && block.contains(inPortHit)
               ? inPortHit
               : undefined;
-          const targetId = Number(block.dataset.blockId);
-          if (Number.isFinite(targetId)) {
-            const applied = onReconnect(
+          const where = inPort !== undefined ? "before" : "after";
+          const applied = onReconnect(
+            gesture.fid,
+            gesture.sourceId,
+            targetId,
+            resolved.kind === "append" ? "after" : where,
+            gesture.side,
+          );
+          if (!applied) {
+            flashHint("Those blocks are already connected.");
+          } else if (resolved.kind === "append") {
+            // The dropped block joined the source branch (the engine
+            // moved it there): give it its body column spot.
+            placeBranchMember(
+              gesture.fid,
+              resolved.ifId,
+              resolved.branch,
+              targetId,
+            );
+          } else if (
+            gesture.side === "then" ||
+            gesture.side === "else"
+          ) {
+            // A wire dragged from an `if`'s bottom branch port wires the
+            // drop target into that branch of the `if`: the target
+            // takes its column spot below the branch's existing body.
+            placeBranchMember(
               gesture.fid,
               gesture.sourceId,
-              targetId,
-              inPort !== undefined ? "before" : "after",
               gesture.side,
+              targetId,
             );
-            if (!applied) flashHint("Those blocks are already connected.");
           }
         }
       }
+    } else if (gesture.kind === "branch") {
+      // Whole-branch commit: every member adopted the dragged offset.
+      const drag =
+        branchDragRef.current !== null &&
+        branchDragRef.current.ifId === gesture.ifId
+          ? branchDragRef.current
+          : null;
+      branchDragRef.current = null;
+      setBranchDrag(null);
+      if (movedRef.current && drag !== null) {
+        for (const member of branchMembersRef.current) {
+          onMoveBlock(
+            gesture.fid,
+            member.id,
+            {
+              x: Math.max(8, member.orig.x + drag.dx),
+              y: Math.max(BLOCK_MIN_Y, member.orig.y + drag.dy),
+            },
+          );
+        }
+      }
+      branchMembersRef.current = [];
+    } else if (gesture.kind === "join") {
+      // Join circle commit: one position, one UI-state write.
+      const drag =
+        joinDragRef.current !== null && joinDragRef.current.ifId === gesture.ifId
+          ? joinDragRef.current
+          : null;
+      joinDragRef.current = null;
+      setJoinDrag(null);
+      const base = joinBaseRef.current;
+      joinBaseRef.current = null;
+      if (movedRef.current && drag !== null && base !== null) {
+        onMoveJoin?.(gesture.ifId, {
+          x: Math.max(8, base.x + drag.dx),
+          y: Math.max(BLOCK_MIN_Y, base.y + drag.dy),
+        });
+      }
     } else {
+      // pan / pkg: a click without movement deselects, like any other
+      // empty-canvas click.
       if (!movedRef.current) onSelectCommand(null);
     }
     movedRef.current = false;
@@ -1394,11 +2014,296 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     }
   }
 
+  /**
+   * Auto-place a freshly wired branch member under its body column.
+   *
+   * The layout store owns positions; this only writes the newcomer's
+   * spot (below the branch's last member as the engine listed it
+   * *before* the wire, or at the empty body's placeholder when the
+   * branch had none). Membership itself is never touched: the engine
+   * wired the member, the canvas merely reads the pre-wire shape from
+   * the memo. A stored position the user may have set is only moved for
+   * the block that was just wired — drags replay through `onMoveBlock`
+   * like any other.
+   *
+   * The block being placed is excluded from the anchor list: the
+   * canvas-gesture path reads it before the props list the new member,
+   * and the membership-diff effect (`branchMembersSeenRef`) runs after
+   * the props already carry it — anchoring below *itself* (its stale
+   * stored spot) would push later members ever further down the canvas.
+   */
+  function placeBranchMember(
+    fid: number,
+    ifId: number,
+    branch: BlockSide,
+    blockId: number,
+  ): void {
+    if (branch !== "then" && branch !== "else") return;
+    const cmds = commandsByFunction[fid] ?? [];
+    const byIndex = new Map<number, number>(
+      cmds.map((c, i) => [c.id, i] as const),
+    );
+    const ifIndex = byIndex.get(ifId);
+    const ifCmd = ifIndex === undefined ? undefined : cmds[ifIndex];
+    if (ifCmd === undefined || ifIndex === undefined) return;
+    const store = layoutStore[fid];
+    const ifPos = store?.[ifId] ?? fallbackPos(ifIndex);
+    const ifSize = sizes.get(`${fid}:${ifId}`) ?? FALLBACK_SIZE;
+    const shape = (ifShapesByFunction.get(fid) ?? []).find(
+      (s) => s.ifId === ifId,
+    );
+    const memberIds =
+      branch === "then"
+        ? (shape?.then ?? [])
+        : (shape?.else ?? []);
+    const memberRects: (readonly [number, number])[] = [];
+    for (const id of memberIds) {
+      // The block being placed anchors below the members the engine
+      // listed *before* it — its own stale spot is not an anchor.
+      if (id === blockId) continue;
+      const index = byIndex.get(id) ?? -1;
+      const cmd = cmds[index];
+      if (cmd === undefined) continue;
+      const p = store?.[cmd.id] ?? fallbackPos(index);
+      const s = sizes.get(`${fid}:${cmd.id}`) ?? FALLBACK_SIZE;
+      memberRects.push([p.y, s.h] as const);
+    }
+    onMoveBlock(
+      fid,
+      blockId,
+      branchDropPos({
+        branch,
+        ifRect: { x: ifPos.x, y: ifPos.y, w: ifSize.w, h: ifSize.h },
+        memberRects,
+      }),
+    );
+  }
+
+  // Which ids a whole-branch drag currently offsets, and by how much:
+  // re-derived from the engine's branch lists so a live container drag
+  // can never shift a non-member. Presentation only.
+  const branchDragOffsets = useMemo((): {
+    readonly fid: number;
+    readonly map: ReadonlyMap<number, Pos>;
+  } | null => {
+    const drag = branchDrag;
+    if (drag === null) return null;
+    const map = new Map<number, Pos>();
+    for (const shape of ifShapesByFunction.get(drag.fid) ?? []) {
+      if (shape.ifId !== drag.ifId) continue;
+      const ids = drag.branch === "then" ? shape.then : shape.else;
+      for (const id of ids) map.set(id, { x: drag.dx, y: drag.dy });
+    }
+    return { fid: drag.fid, map };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchDrag, ifShapesByFunction]);
+
+  // Auto-place newcomers that joined a branch outside a live canvas
+  // gesture. A wire released on a frame's blank area or an `if` port
+  // already places its block in `endGesture`; this effect covers the
+  // membership changes that did not pass through one — the engine
+  // replayed `if_append` (undo/redo of an intersecting wire plan) or an
+  // append resolved from a state the gesture could not see. Diffing the
+  // derived branch lists (never engine state) and only moving a block
+  // that is not already inside its body frame keeps this from ever
+  // fighting a user's placement.
+  const branchMembersSeenRef = useRef<ReadonlyMap<string, readonly number[]>>(
+    new Map(),
+  );
+  useEffect(() => {
+    const next = new Map<string, readonly number[]>();
+    const gains: {
+      fid: number;
+      ifId: number;
+      branch: BranchSide;
+      id: number;
+      /** The branch's members before this gain (the diff's "before"). */
+      prev: readonly number[];
+    }[] = [];
+    for (const fn of functions) {
+      for (const shape of ifShapesByFunction.get(fn.id) ?? []) {
+        for (const branch of ["then", "else"] as const) {
+          const ids = branch === "then" ? shape.then : shape.else;
+          const key = `${fn.id}:${shape.ifId}:${branch}`;
+          next.set(key, ids);
+          const prev = branchMembersSeenRef.current.get(key);
+          if (prev === undefined) continue;
+          for (const id of ids) {
+            if (!prev.includes(id)) {
+              gains.push({ fid: fn.id, ifId: shape.ifId, branch, id, prev });
+            }
+          }
+        }
+      }
+    }
+    branchMembersSeenRef.current = next;
+    if (gains.length === 0 || busy) return;
+    for (const gain of gains) {
+      const cmds = commandsByFunction[gain.fid] ?? [];
+      const byIndex = new Map(cmds.map((c, i) => [c.id, i] as const));
+      const rectOf = (id: number): BlockRect | undefined => {
+        const index = byIndex.get(id);
+        const cmd = index === undefined ? undefined : cmds[index];
+        if (cmd === undefined || index === undefined) return undefined;
+        const p = layoutStore[gain.fid]?.[id] ?? fallbackPos(index);
+        const s = sizes.get(`${gain.fid}:${id}`) ?? FALLBACK_SIZE;
+        return { x: p.x, y: p.y, w: s.w, h: s.h };
+      };
+      // The frame as it stood *before* the gain, built from the previous
+      // member list through the same frame math the canvas draws: the
+      // newcomer's own stale spot is inside the *current* frame (which
+      // grew around it), so deciding "already placed" on that would
+      // swallow every off-gesture gain. Rewinding the branch list to
+      // the pre-gain state restores the honest bounds.
+      const preCmds: readonly UiCommand[] = cmds.map((c) => {
+        if (!(c.id === gain.ifId && c.kind === "if")) return c;
+        if (gain.branch === "then") {
+          return { ...c, then_body: [...gain.prev] };
+        }
+        return { ...c, else_body: [...gain.prev] };
+      });
+      const preFrame = buildIfShapes(preCmds, rectOf, rectOf)
+        .find((s) => s.ifId === gain.ifId)
+        ?.frames.find((f) => f.branch === gain.branch)?.rect;
+      const p =
+        layoutStore[gain.fid]?.[gain.id] ?? fallbackPos(byIndex.get(gain.id) ?? -1);
+      if (
+        preFrame !== undefined &&
+        p.x >= preFrame.x &&
+        p.x <= preFrame.x + preFrame.w &&
+        p.y >= preFrame.y &&
+        p.y <= preFrame.y + preFrame.h
+      ) {
+        // Already inside its body frame before the gain: a user parked
+        // it there — do not fight the placement.
+        continue;
+      }
+      placeBranchMember(gain.fid, gain.ifId, gain.branch, gain.id);
+    }
+    // The gain-diffing contract is the gate: this effect must decide from
+    // the settled command list, not re-fire when inline `sizes` or the
+    // guarded `placeBranchMember` closures turn over.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [functions, commandsByFunction, ifShapesByFunction, layoutStore, busy]);
+
   function dragEffectivePos(fid: number, cmd: CommandSummary, index: number): Pos {
     if (dragPos !== null && dragPos.fid === fid && dragPos.id === cmd.id) {
       return dragPos.pos;
     }
-    return effectivePos(fid, cmd, index);
+    const base = effectivePos(fid, cmd, index);
+    const drag =
+      branchDragOffsets !== null &&
+      branchDragOffsets.fid === fid
+        ? branchDragOffsets.map.get(cmd.id)
+        : undefined;
+    if (drag === undefined) return base;
+    return {
+      x: Math.max(8, base.x + drag.x),
+      y: Math.max(BLOCK_MIN_Y, base.y + drag.y),
+    };
+  }
+
+  // One renderer for both connection layers (the full-world fallback and
+  // the viewport-clipped overlay): identical classes and attributes, so
+  // a viewer can never be shown two truths about the same wire.
+  function edgeNode(edge: DrawnEdge): ReactElement {
+    const isSelected =
+      edge.from === selectedCommandId && edge.fid === selectedFunctionId;
+    const isDrawing = drawing.has(edge.key);
+    // Planned: a connection the engine accepted but cannot report (the
+    // edge into an `if`). Merge: a branch body's tail running back into
+    // the block after the `if`, or the `if`'s own post-body continuation.
+    const edgeClass = [
+      "edge",
+      isSelected ? "edge-selected" : "",
+      edge.planned ? "edge-planned" : "",
+      edge.merge ? "edge-merge" : "",
+      isDrawing ? "edge-draw" : "",
+    ]
+      .filter((part) => part !== "")
+      .join(" ");
+    return (
+      <Fragment key={edge.key}>
+        <path
+          d={edge.d}
+          data-fid={edge.fid}
+          data-from={edge.from}
+          data-to={edge.to}
+          pathLength={1}
+          markerEnd={isDrawing ? undefined : "url(#arrow-flow)"}
+          className={edgeClass}
+          ref={(el) => {
+            if (el !== null) {
+              edgeEls.current.set(edge.key, el);
+            } else {
+              edgeEls.current.delete(edge.key);
+            }
+          }}
+        />
+        {isDrawing ? (
+          <path
+            d={edge.d}
+            pathLength={1}
+            markerEnd="url(#arrow-flow)"
+            className="edge-draw-head"
+          />
+        ) : null}
+      </Fragment>
+    );
+  }
+
+  // The dragged wire's ghost. It leaves the same anchor the real edges
+  // use: the dragged block's right out-port — the `if` card's bottom
+  // TRUE/FALSE ports for branch wires, the bottom-centre port of a
+  // branch member for its vertical column flow — and, for a wire
+  // dragged from the manual join circle, the circle's own right port.
+  // The join's out-port names the `if` (the planners need it), but the
+  // card itself carries no right port: the wire leaves the circle.
+  function previewNode(): ReactElement | null {
+    if (preview === null) return null;
+    const sourceCmds = commandsByFunction[preview.fid] ?? [];
+    const sourceIndex = sourceCmds.findIndex((c) => c.id === preview.sourceId);
+    const source = sourceIndex >= 0 ? sourceCmds[sourceIndex] : undefined;
+    if (source === undefined) return null;
+    const origin = blockWorld(preview.fid, source, Math.max(0, sourceIndex));
+    const size = sizeOf(preview.fid, preview.sourceId);
+    // Join-circle source: the ghost leaves the circle's right out port
+    // — exactly where the persisted continuation wire leaves (the card
+    // itself carries no right port, the pill's port merely names the
+    // `if` for the planners).
+    const join =
+      source.kind === "if" && preview.side === "right"
+        ? joinWorldRect(preview.fid, preview.sourceId)
+        : null;
+    if (join !== null) {
+      return (
+        <path
+          d={edgePath(join.x + join.w, join.y + join.h / 2, preview.x, preview.y, true)}
+          markerEnd="url(#arrow-flow)"
+          className="edge edge-preview"
+        />
+      );
+    }
+    const fraction =
+      preview.side === "then"
+        ? BRANCH_PORT_FRACTION.then
+        : preview.side === "else"
+          ? BRANCH_PORT_FRACTION.else
+          : null;
+    const centerBottom = fraction !== null || preview.side === "bottom";
+    const ox = fraction === null
+      ? preview.side === "bottom"
+        ? origin.x + size.w / 2
+        : origin.x + size.w
+      : origin.x + size.w * fraction;
+    const oy = centerBottom ? origin.y + size.h : origin.y + size.h / 2;
+    return (
+      <path
+        d={edgePath(ox, oy, preview.x, preview.y, true)}
+        markerEnd="url(#arrow-flow)"
+        className="edge edge-preview"
+      />
+    );
   }
 
   // Viewport culling of blocks (WebKit fix): only blocks intersecting
@@ -1433,6 +2338,59 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     });
     return filterVisibleBlocks(items, viewport, VIEW_OVERSCAN, pinnedBlocks)
       .visible;
+  }
+
+  /**
+   * The vertical If/Else body frames of one function, in world-relative
+   * (function-container) coordinates — culled like the blocks when the
+   * viewport is measured, so off-screen frames cost nothing to paint.
+   * Deriving, not storing: the frames chase branch membership and block
+   * drags with no state of their own (and a live whole-branch drag
+   * drags its frame with the member offsets).
+   */
+  function branchFrames(
+    fid: number,
+  ): { ifId: number; branch: BranchSide; rect: BlockRect; empty: boolean }[] {
+    const f = layout.funcOrigin(fid);
+    const overscan =
+      viewport === null ? null : withOverscan(viewport, VIEW_OVERSCAN);
+    const frames: {
+      ifId: number;
+      branch: BranchSide;
+      rect: BlockRect;
+      empty: boolean;
+    }[] = [];
+    for (const shape of ifShapesByFunction.get(fid) ?? []) {
+      for (const frame of shape.frames) {
+        let rect = frame.rect;
+        const drag =
+          branchDrag !== null &&
+          branchDrag.fid === fid &&
+          branchDrag.ifId === shape.ifId &&
+          branchDrag.branch === frame.branch
+            ? branchDrag
+            : null;
+        if (drag !== null) {
+          rect = {
+            x: rect.x + drag.dx,
+            y: rect.y + drag.dy,
+            w: rect.w,
+            h: rect.h,
+          };
+        }
+        if (overscan !== null) {
+          const world = {
+            x: f.x + rect.x,
+            y: f.y + rect.y,
+            w: rect.w,
+            h: rect.h,
+          };
+          if (!rectsIntersect(overscan, world)) continue;
+        }
+        frames.push({ ...frame, rect, ifId: shape.ifId });
+      }
+    }
+    return frames;
   }
 
   // Blocks that just left the model fade out where they stood instead of
@@ -1571,6 +2529,13 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
           gestureRef.current = null;
           pointersRef.current.clear();
           setDragPos(null);
+          dragPosRef.current = null;
+          branchDragRef.current = null;
+          branchMembersRef.current = [];
+          setBranchDrag(null);
+          joinDragRef.current = null;
+          joinBaseRef.current = null;
+          setJoinDrag(null);
           setPreview(null);
         }}
         onKeyDown={onBoardKeyDown}
@@ -1631,6 +2596,101 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                           }}
                           onSelect={() => onSelectFunction(fn.id)}
                         >
+                          {/* Vertical If/Else body frames: derived from the
+                            * engine's branch lists + the layout store; they
+                            * sit BEHIND the branch's blocks (drawn first) and
+                            * stay decorative — the blocks themselves remain
+                            * the interactive/selectable elements. The empty
+                            * placeholder keeps the branch's drop target
+                            * somewhere visible until a member arrives. */}
+                          {branchFrames(fn.id).map((frame) => (
+                            <div
+                              key={`ifbody-${frame.ifId}-${frame.branch}`}
+                              className={`vbranch${
+                                frame.empty ? " vbranch-empty" : ""
+                              }`}
+                              data-if-id={frame.ifId}
+                              data-fid={fn.id}
+                              data-if-branch={frame.branch}
+                              data-empty={frame.empty}
+                              aria-hidden="true"
+                              style={{
+                                left: frame.rect.x,
+                                top: frame.rect.y,
+                                width: frame.rect.w,
+                                height: frame.rect.h,
+                              }}
+                            >
+                              <span className="vbranch-tag">
+                                {frame.branch === "then" ? "true" : "false"}
+                                {frame.empty ? " · empty" : ""}
+                              </span>
+                            </div>
+                          ))}
+                          {/* Manual merge join points ("End of If
+                            * Block"): one per `if` with the merge on.
+                            * Draggable; the tails address its top port
+                            * and the continuation leaves its right
+                            * port (which sources the `if` itself, so
+                            * wiring from it continues the branch flow
+                            * with the ordinary planners). A wire
+                            * dragged from it previews a ghost that
+                            * leaves the circle's right port, too. */}
+                          {(ifShapesByFunction.get(fn.id) ?? []).map(
+                            (shape) => {
+                              const state = mergeJoins?.[shape.ifId];
+                              if (state === undefined || !state.on) {
+                                return null;
+                              }
+                              const pos = joinLivePos(fn.id, shape.ifId);
+                              if (pos === null) return null;
+                              const dragging =
+                                joinDrag !== null && joinDrag.ifId === shape.ifId;
+                              return (
+                                <div
+                                  key={`vjoin-${shape.ifId}`}
+                                  id={`vjoin-${fn.id}-${shape.ifId}`}
+                                  className="vjoin"
+                                  data-join-of={shape.ifId}
+                                  data-fid={fn.id}
+                                  data-dragging={dragging ? "true" : undefined}
+                                  data-connect-from={
+                                    preview !== null &&
+                                    preview.sourceId === shape.ifId &&
+                                    preview.fid === fn.id
+                                      ? "true"
+                                      : undefined
+                                  }
+                                  ref={(el) => {
+                                    const key = `${fn.id}:join:${shape.ifId}`;
+                                    if (el !== null) {
+                                      blockEls.current.set(key, el);
+                                    } else {
+                                      blockEls.current.delete(key);
+                                    }
+                                  }}
+                                  style={{ left: pos.x, top: pos.y }}
+                                >
+                                  <span
+                                    className="vport vport-top"
+                                    data-port="in"
+                                    aria-hidden="true"
+                                  />
+                                  <span className="vjoin-tag">
+                                    End of If Block
+                                  </span>
+                                  <span
+                                    className="vport vport-right"
+                                    data-port="out"
+                                    data-side="right"
+                                    data-block-id={shape.ifId}
+                                    data-fid={fn.id}
+                                    aria-hidden="true"
+                                  />
+                                </div>
+                              );
+                            },
+                          )}
                           {visibleCmds(fn.id, cmds).map(({ cmd, index }) => (
                             <div
                               key={cmd.id}
@@ -1665,6 +2725,12 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                                   preview?.sourceId === cmd.id &&
                                   preview?.fid === fn.id
                                 }
+                                conditionText={
+                                  cmd.kind === "if" && conditionTextFor !== undefined
+                                    ? conditionTextFor(fn.id, cmd.id)
+                                    : undefined
+                                }
+                                branchMember={memberSideOf(fn.id, cmd.id)}
                                 interactive={fn.id === selectedFunctionId}
                               />
                             </div>
@@ -1688,6 +2754,19 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                                     selected={false}
                                     failed={false}
                                     connectFrom={false}
+                                    conditionText={
+                                      cmd.kind === "if" &&
+                                      conditionTextFor !== undefined
+                                        ? conditionTextFor(
+                                            ghost.item.fid,
+                                            cmd.id,
+                                          )
+                                        : undefined
+                                    }
+                                    branchMember={memberSideOf(
+                                      ghost.item.fid,
+                                      cmd.id,
+                                    )}
                                     interactive={false}
                                     exiting
                                   />
@@ -1741,52 +2820,7 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                     <path d="M 0 1 L 9 5 L 0 9 z" className="marker-flow" />
                   </marker>
                 </defs>
-                {edges.map((edge) => {
-                  const isSelected =
-                    edge.from === selectedCommandId &&
-                    edge.fid === selectedFunctionId;
-                  const isDrawing = drawing.has(edge.key);
-                  // A planned connection is one the engine accepted but
-                  // cannot report (the edge into an `if`): it is drawn
-                  // dashed, so a viewer can tell it apart from the
-                  // connections the engine confirms itself.
-                  const edgeClass = [
-                    "edge",
-                    isSelected ? "edge-selected" : "",
-                    edge.planned ? "edge-planned" : "",
-                    isDrawing ? "edge-draw" : "",
-                  ]
-                    .filter((part) => part !== "")
-                    .join(" ");
-                  return (
-                    <Fragment key={edge.key}>
-                      <path
-                        d={edge.d}
-                        data-fid={edge.fid}
-                        data-from={edge.from}
-                        data-to={edge.to}
-                        pathLength={1}
-                        markerEnd={isDrawing ? undefined : "url(#arrow-flow)"}
-                        className={edgeClass}
-                        ref={(el) => {
-                          if (el !== null) {
-                            edgeEls.current.set(edge.key, el);
-                          } else {
-                            edgeEls.current.delete(edge.key);
-                          }
-                        }}
-                      />
-                      {isDrawing ? (
-                        <path
-                          d={edge.d}
-                          pathLength={1}
-                          markerEnd="url(#arrow-flow)"
-                          className="edge-draw-head"
-                        />
-                      ) : null}
-                    </Fragment>
-                  );
-                })}
+                {edges.map((edge) => edgeNode(edge))}
                 <FlowTravel
                   edges={travelEdges}
                   paths={edgeEls.current}
@@ -1794,37 +2828,7 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                   runId={flow?.runId ?? 0}
                   reduced={reducedMotion}
                 />
-                {preview !== null
-                  ? (() => {
-                      const sourceCmds = commandsByFunction[preview.fid] ?? [];
-                      const sourceIndex = sourceCmds.findIndex(
-                        (c) => c.id === preview.sourceId,
-                      );
-                      const source =
-                        sourceIndex >= 0 ? sourceCmds[sourceIndex] : undefined;
-                      if (source === undefined) return null;
-                      const origin = blockWorld(
-                        preview.fid,
-                        source,
-                        Math.max(0, sourceIndex),
-                      );
-                      const size = sizeOf(preview.fid, preview.sourceId);
-                      const ox = origin.x + size.w;
-                      const oy =
-                        preview.side === "then"
-                          ? origin.y + size.h * 0.25
-                          : preview.side === "else"
-                            ? origin.y + size.h * 0.75
-                            : origin.y + size.h / 2;
-                      return (
-                        <path
-                          d={edgePath(ox, oy, preview.x, preview.y, true)}
-                          markerEnd="url(#arrow-flow)"
-                          className="edge edge-preview"
-                        />
-                      );
-                    })()
-                  : null}
+                {previewNode()}
               </svg>
             ) : (
               <svg
@@ -1849,40 +2853,7 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                   </marker>
                 </defs>
                 <g transform={`translate(${-viewport.x} ${-viewport.y})`}>
-                  {edges.map((edge) => {
-                    const isSelected =
-                      edge.from === selectedCommandId &&
-                      edge.fid === selectedFunctionId;
-                    const isDrawing = drawing.has(edge.key);
-                    return (
-                      <Fragment key={edge.key}>
-                        <path
-                          d={edge.d}
-                          data-fid={edge.fid}
-                          pathLength={1}
-                          markerEnd={isDrawing ? undefined : "url(#arrow-flow)"}
-                          className={`${
-                            isSelected ? "edge edge-selected" : "edge"
-                          }${isDrawing ? " edge-draw" : ""}`}
-                          ref={(el) => {
-                            if (el !== null) {
-                              edgeEls.current.set(edge.key, el);
-                            } else {
-                              edgeEls.current.delete(edge.key);
-                            }
-                          }}
-                        />
-                        {isDrawing ? (
-                          <path
-                            d={edge.d}
-                            pathLength={1}
-                            markerEnd="url(#arrow-flow)"
-                            className="edge-draw-head"
-                          />
-                        ) : null}
-                      </Fragment>
-                    );
-                  })}
+                  {edges.map((edge) => edgeNode(edge))}
                   <FlowTravel
                     edges={travelEdges}
                     paths={edgeEls.current}
@@ -1890,37 +2861,7 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
                     runId={flow?.runId ?? 0}
                     reduced={reducedMotion}
                   />
-                  {preview !== null
-                    ? (() => {
-                        const sourceCmds = commandsByFunction[preview.fid] ?? [];
-                        const sourceIndex = sourceCmds.findIndex(
-                          (c) => c.id === preview.sourceId,
-                        );
-                        const source =
-                          sourceIndex >= 0 ? sourceCmds[sourceIndex] : undefined;
-                        if (source === undefined) return null;
-                        const origin = blockWorld(
-                          preview.fid,
-                          source,
-                          Math.max(0, sourceIndex),
-                        );
-                        const size = sizeOf(preview.fid, preview.sourceId);
-                        const ox = origin.x + size.w;
-                        const oy =
-                        preview.side === "then"
-                          ? origin.y + size.h * 0.25
-                          : preview.side === "else"
-                            ? origin.y + size.h * 0.75
-                            : origin.y + size.h / 2;
-                        return (
-                          <path
-                            d={edgePath(ox, oy, preview.x, preview.y, true)}
-                            markerEnd="url(#arrow-flow)"
-                            className="edge edge-preview"
-                          />
-                        );
-                      })()
-                    : null}
+                  {previewNode()}
                 </g>
               </svg>
             )}

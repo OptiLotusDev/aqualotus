@@ -13,11 +13,13 @@ import type { CommandDraft } from "../lib/program";
 import { declareEditAffected, freshName } from "../lib/program";
 import type { LinkPlan } from "../lib/graph";
 import {
-  branchMemberIds,
+  countUnconnectedBlocks,
   planChainAll,
   planDropLink,
   type BlockSide,
+  type MergeJoin,
 } from "../lib/graph";
+import { resolveBranchConnect } from "../lib/branching";
 import { findAvailableBlock } from "../lib/blocks";
 import { LAYOUT_ROW_Y, LAYOUT_START_X } from "../lib/layout";
 import type { CommandId, FunctionId, RunResult } from "../lib/optilotus";
@@ -383,6 +385,30 @@ export default function AppShell(props: AppShellProps): ReactElement {
   }
 
   /** Connection drop: plan minimal edits, apply only when meaningful. */
+  // Shelved-run state (above) and the manual merge-join state of the
+  // If/Else boards: which `if` shows the "End of If Block" join point
+  // and where the user dragged it. Function-container coordinates,
+  // keyed by the globally unique `if` id. UI state only — never engine
+  // semantics, never history: toggling and dragging are immediately
+  // presentation, so undo/redo of the program leaves them alone.
+  const [mergeJoins, setMergeJoins] = useState<Record<number, MergeJoin>>({});
+
+  /** Toggle an `if`'s join point; repeated activation is idempotent. */
+  function setMergeJoin(ifId: CommandId, next: MergeJoin): void {
+    setMergeJoins((prev) => {
+      const before = prev[ifId];
+      if (
+        before !== undefined &&
+        before.on === next.on &&
+        before.pos?.x === next.pos?.x &&
+        before.pos?.y === next.pos?.y
+      ) {
+        return prev;
+      }
+      return { ...prev, [ifId]: next };
+    });
+  }
+
   function reconnect(
     target: FunctionId,
     sourceId: CommandId,
@@ -390,17 +416,43 @@ export default function AppShell(props: AppShellProps): ReactElement {
     where: "after" | "before" | "end",
     side?: BlockSide,
   ): boolean {
-    // If the source is an `if` block, connecting from its then/else port
-    // appends the target to the corresponding branch instead of rewiring
-    // `next` (which would clobber the other branch).
-    const sourceCmd = (program.commandsByFunction[target] ?? []).find(
-      (c) => c.id === sourceId,
-    );
-    if (sourceCmd?.kind === "if" && targetId !== null) {
-      const branch = side === "else" ? "else" : "then";
-      return props.onAppendIfBranch(target, sourceId, branch, targetId);
+    // Branch wiring for an `if` works from both ends of the wire:
+    // - dragging from one of the if's bottom TRUE/FALSE ports (side =
+    //   the dragged port) appends the drop target into that branch of
+    //   the source `if`;
+    // - releasing a wire inside a TRUE/FALSE body frame (target =
+    //   that `if`) appends the dragged block into that branch.
+    // The engine call decides what actually happens: a branch can hold
+    // plain compute commands only, so wiring an `if` (else-if chains,
+    // nesting) or a `return` is rejected honestly right here.
+    if (targetId !== null && (side === "then" || side === "else")) {
+      const cmds = program.commandsByFunction[target] ?? [];
+      const sourceCmd = cmds.find((c) => c.id === sourceId);
+      if (sourceCmd?.kind === "if") {
+        return props.onAppendIfBranch(target, sourceId, side, targetId);
+      }
+      const targetCmd = cmds.find((c) => c.id === targetId);
+      if (targetCmd?.kind === "if") {
+        return props.onAppendIfBranch(target, targetId, side, sourceId);
+      }
     }
     const cmds = program.commandsByFunction[target] ?? [];
+    // Branch membership resolution (see `lib/branching.ts`): a wire
+    // whose source runs inside a branch appends the drop target into
+    // that same branch (auto branch membership) instead of re-splicing
+    // the chain, and a drop on a member is refused with the planner
+    // that would fabricate a second predecessor.
+    const resolved = resolveBranchConnect(cmds, sourceId, targetId);
+    if (resolved.kind === "reject") return false;
+    if (resolved.kind === "append") {
+      if (targetId === null) return false;
+      return props.onAppendIfBranch(
+        target,
+        resolved.ifId,
+        resolved.branch,
+        targetId,
+      );
+    }
     const entry = target === fid ? program.entry : null;
     const planned = planDropLink(cmds, entry, sourceId, targetId, where);
     if (planned === null) return false;
@@ -599,6 +651,34 @@ export default function AppShell(props: AppShellProps): ReactElement {
       onRenameFunction={(name) => {
         if (fid !== null) props.onRenameFunction(fid, name);
       }}
+      merge={
+        selectedCommand?.kind === "if" && fid !== null
+          ? {
+              on: mergeJoins[selectedCommand.id]?.on === true,
+              onToggle: (on: boolean) => {
+                const before = mergeJoins[selectedCommand.id];
+                setMergeJoin(selectedCommand.id, {
+                  on,
+                  pos: before?.pos ?? null,
+                });
+                // Unmerge is atomic: the join circle goes away **and**
+                // the branch flow's continuation detaches — the merge
+                // wires exist only where the join does, so leaving the
+                // engine's `if.next` attached would draw a continuation
+                // the "Unmerge branches" action just removed. The detach
+                // is an undoable "Rewire blocks" step; the block that
+                // used to run after the `if` stays on canvas (an orphan,
+                // ready to be re-wired anyway the user wants).
+                if (!on && (selectedCommand.next ?? null) !== null) {
+                  props.onApplyLinks(fid, {
+                    edits: [{ id: selectedCommand.id, next: null }],
+                    entry: { type: "keep" },
+                  });
+                }
+              },
+            }
+          : undefined
+      }
     />
   );
 
@@ -614,31 +694,12 @@ export default function AppShell(props: AppShellProps): ReactElement {
   // `if` was counted as an orphan.
   const entry = program.entry;
   // Blocks the engine runs *from* an `if` (its branch members) are not
-  // orphans: the `if` executes them, so the chain walk — which follows
-  // the user-level `next` pointers — must not count them as
-  // disconnected. The branch lists are part of every command summary,
-  // so the UI already knows them (the link planner skips them too).
-  const branchMembers = branchMemberIds(program.commands);
-  const orphanCount = (() => {
-    if (fid === null || program.commands.length === 0) return 0;
-    if (entry === null) {
-      return program.commands.filter((c) => !branchMembers.has(c.id)).length;
-    }
-    const nextOf = new Map(
-      program.commands.map((c) => [c.id, c.next ?? null]),
-    );
-    const seen = new Set<number>();
-    let cur: number | null = entry;
-    let guard = 0;
-    while (cur !== null && !seen.has(cur) && guard <= nextOf.size) {
-      seen.add(cur);
-      guard += 1;
-      cur = nextOf.get(cur) ?? null;
-    }
-    return program.commands.filter(
-      (c) => !seen.has(c.id) && !branchMembers.has(c.id),
-    ).length;
-  })();
+  // orphans: the `if` executes them. The walk itself lives in
+  // `lib/graph.ts` (`countUnconnectedBlocks`) so the counting is a pure,
+  // engine-mirroring projection with no second semantics — the same
+  // function both the notice and the tests read.
+  const { orphans } = countUnconnectedBlocks(program.commands, entry);
+  const orphanCount = orphans;
   const entryNotice =
     fid !== null &&
     program.selected !== null &&
@@ -870,12 +931,17 @@ export default function AppShell(props: AppShellProps): ReactElement {
                 onSelectCommand={selectCommandWithPanel}
                 onReconnect={reconnect}
                 onMoveBlock={moveBlockIn}
+                mergeJoins={mergeJoins}
+                onMoveJoin={(ifId, pos) => {
+                  setMergeJoin(ifId, { on: true, pos });
+                }}
                 onDropBlock={(target, kind, pos) => {
                   layout.placeNextAt(pos);
                   addLibraryBlockFor(target, kind);
                 }}
                 onRegisterDrop={registerDrop}
                 onRegisterZoom={registerZoom}
+                conditionTextFor={props.onConditionText}
                 flow={flow}
                 toolbarExtra={undoRedoTheme("")}
                 onRequestLibrary={() => {

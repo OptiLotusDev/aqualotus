@@ -41,23 +41,15 @@ export const BLOCKS: readonly BlockDefinition[] = [
     label: "If / Else",
     category: "Program",
     description:
-      "Branch on a boolean condition. Two outputs lead to the true and false branches, which converge into one at the end.",
+      "Branch on a boolean condition. Its bottom true/false ports drop into the TRUE and FALSE body containers, which converge into one flow at the merge point.",
     aliases: ["if", "condition", "branch"],
+    // Lean: no body yet. The vertical UI wires branches by dropping into
+    // the TRUE/FALSE containers, so the fresh card invites wiring rather
+    // than carrying a placeholder body.
     draft: {
       kind: "if",
       condition: "true",
-      then: [
-        {
-          kind: "print",
-          var: null,
-          ty: null,
-          access: null,
-          init: null,
-          expr: null,
-          template: '""',
-          to: null,
-        },
-      ],
+      then: [],
       else: null,
     },
   },
