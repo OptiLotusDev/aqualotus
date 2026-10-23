@@ -49,6 +49,17 @@ interface InspectorProps {
   readonly onClearEntry: () => void;
   readonly onDeclareVariable?: (name: string) => void;
   readonly onRenameFunction?: (name: string) => void;
+  /**
+   * The selected block's If/Else merge state ("End of If Block"): a
+   * manual join point the canvas draws when `on` (both branch tails
+   * visibly rejoin, the continuation leaves the join). Presentation
+   * only — the engine's `if.next` continuation is untouched, `undefined`
+   * for blocks that are not an `if`.
+   */
+  readonly merge?: {
+    readonly on: boolean;
+    readonly onToggle: (on: boolean) => void;
+  };
 }
 
 /**
@@ -555,6 +566,10 @@ function KindFields(props: {
           />
           <div className="hint">
             Only the condition changes; branch bodies keep their wiring.
+            The condition is checked when saved; the branch bodies run
+            only when it reads <em>true</em> (a non-boolean result fails
+            the run). A branch can hold plain compute commands only —
+            wiring a nested If or a Return is rejected by the engine.
           </div>
         </div>
       );
@@ -621,6 +636,7 @@ export default function Inspector(props: InspectorProps): ReactElement {
     onClearEntry,
     onDeclareVariable,
     onRenameFunction,
+    merge,
   } = props;
   // An `if` draft's raw summary condition is a temp id; when the engine
   // can report the expression the block was built from, overlay it so
@@ -671,6 +687,10 @@ export default function Inspector(props: InspectorProps): ReactElement {
         : undefined;
     const editBlocked =
       castIncomplete ||
+      // Engine cast rows cannot be edited in place (see `useProgram`'s
+      // `replaceCommand` guard): the group's execution head is a hidden
+      // `Compute` the bridge's user-level links cannot re-address.
+      edit.kind === "cast" ||
       (edit.kind === "declare" &&
         validateDeclareValue(edit.ty, edit.init) !== null);
     return (
@@ -702,6 +722,19 @@ export default function Inspector(props: InspectorProps): ReactElement {
             <div className="notice-title">Incomplete casting</div>
             <div data-testid="cast-incomplete">
               Select a target type to complete casting.
+            </div>
+          </div>
+        ) : null}
+        {edit.kind === "cast" ? (
+          <div className="notice notice-error" role="alert">
+            <div className="notice-title">
+              Engine cast is not editable in place
+            </div>
+            <div data-testid="cast-edit-blocked">
+              The block runs from a hidden conversion compute the engine
+              does not expose, so the editor cannot re-link it after a
+              rebuild. Delete the block and add an assignment with casting
+              instead (the public conversion flow).
             </div>
           </div>
         ) : null}
@@ -751,6 +784,25 @@ export default function Inspector(props: InspectorProps): ReactElement {
             Apply edit
           </button>
         </form>
+        {selected.kind === "if" && merge !== undefined ? (
+          <div className="field" data-testid={`merge-controls-${selected.id}`}>
+            <button
+              type="button"
+              className={`btn ${merge.on ? "btn-ghost" : "btn-primary"} btn-sm`}
+              disabled={busy}
+              aria-pressed={merge.on}
+              data-testid="merge-toggle"
+              onClick={() => merge.onToggle(!merge.on)}
+            >
+              {merge.on ? "Unmerge branches" : "Merge branches"}
+            </button>
+            <div className="hint">
+              {merge.on
+                ? "Both branches flow through the visible “End of If Block” point before the next block. Drag that point to move it."
+                : "Draw one visible join point the TRUE and FALSE branches both reconnect at. Unmerging detaches the block after the If — it stays on canvas, ready to re-wire."}
+            </div>
+          </div>
+        ) : null}
         <button
           type="button"
           className="btn btn-danger"

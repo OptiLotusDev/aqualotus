@@ -55,6 +55,7 @@ import {
   type CastingInfo,
 } from "../lib/casting";
 import {
+  branchOwnerOf,
   chainTailOf,
   resolveEntry,
   type LinkPlan,
@@ -541,8 +542,11 @@ function plannedLinksOf(
  * engine reports the successor itself, the engine's value wins and the
  * command is not marked as planned. A planned link whose target is
  * gone is dropped, so a deleted block never keeps a stale connection.
+ *
+ * Exported for the engine-level integration tests: they must build the
+ * same projection the canvas sees (see `load`).
  */
-function withPlannedLinks(
+export function withPlannedLinks(
   cmds: readonly CommandSummary[],
   planned: PlannedLinks,
 ): UiCommand[] {
@@ -1766,6 +1770,140 @@ export function useProgram(
     [load, deleteVisibleCommand, pushHistory],
   );
 
+  /**
+   * Append a block into an `if` branch: the engine's `if_append` (which
+   * moves the block's whole raw group out of wherever it chained, wires
+   * the branch tail to its head and ends its chain at the join) plus the
+   * two UI-level healers composition needs:
+   *
+   * - a planned connection the mover had is forgotten (the block leaves
+   *   the main chain), and
+   * - the `if`'s hidden condition compute is re-spliced ahead of the
+   *   `if` (`Package::if_append` detaching the appended group can steal
+   *   it when the member was chained straight into the `if`) — see the
+   *   in-body comment.
+   *
+   * `record` set to `false` performs the same engine mutations without
+   * pushing a history entry. Callers that own the history record (block
+   * replacement inside a branch, whose undo/redo reproduce the append)
+   * use it so the undo stack stays one entry per user action.
+   */
+  const appendIntoBranch = useCallback(
+    (
+      fid: FunctionId,
+      ifId: CommandId,
+      branch: "then" | "else",
+      targetId: CommandId,
+      record = true,
+    ): boolean => {
+      try {
+        const before = readLinks(
+          fid,
+          plannedLinksOf(plannedRef.current, fid),
+        );
+        setSnapshot((prev) => ({
+          ...clearFailure(prev),
+          busy: true,
+          recoveryVar: null,
+        }));
+        // A casting assignment is a hidden group behind one visible
+        // block: `anchor -> cast -> [assign]` (the assign is absent for
+        // the native-cast shape, whose visible block IS the cast row).
+        // The engine appends one user-level command at a time, so the
+        // whole group — in creation order, without repeating the
+        // visible cast — moves into the branch.
+        const listed = optilotus_listCommands(fid);
+        const casting = isOptilotusError(listed)
+          ? undefined
+          : collapseCasting(listed.commands).castings.get(targetId);
+        const appendIds =
+          casting === undefined
+            ? [targetId]
+            : casting.castId === targetId
+              ? [casting.anchorId, targetId]
+              : [casting.anchorId, casting.castId, targetId];
+        // A member the main chain wired into this `if` (a repaired edge,
+        // since every connection into an `if` is spliced — see
+        // `runLinkPlan`) drags the `if`'s fresh condition compute into
+        // the branch body when `if_append` extends the member's raw
+        // group. The main chain then reaches the `if` without a computed
+        // condition and the run fails with `MissingValue` — the same
+        // theft the engine already caused when the compute mirrored the
+        // chain path. This is engine-owned composition (`raw_group` has
+        // no user-level counterpart); the UI heals it with the engine's
+        // own repair primitive after the appends: a fresh compute is
+        // spliced ahead of the `if` again, and the stale copy inside the
+        // branch body runs harmlessly (the body walk stops when `next`
+        // leaves branch membership — never an Engine change).
+        const entryWasMember = before?.entry === targetId;
+        for (const appendId of appendIds) {
+          const result = optilotus_if_append(fid, ifId, branch, appendId);
+          if (isOptilotusError(result)) {
+            setSnapshot((prev) => failCommand(prev, result));
+            load(fid);
+            return false;
+          }
+        }
+        // The appended block leaves the main chain (the engine runs it
+        // from the `if` now): a planned connection it had is gone with
+        // it.
+        forgetPlannedLink(plannedRef.current, fid, targetId);
+        if (entryWasMember) {
+          // The entry was the appended member, so the engine's entry now
+          // points inside a stolen group. Move it to the `if` first; the
+          // repair below re-points the entry itself at the fresh compute
+          // (engine behavior of `if_set_condition`, mirrored by
+          // `resolveEntry`). Ordering matters: repairing first would
+          // strand the entry inside the branch body.
+          const moved = optilotus_setEntry(fid, ifId);
+          if (isOptilotusError(moved)) {
+            setSnapshot((prev) => failCommand(prev, moved));
+            load(fid);
+            return false;
+          }
+        }
+        // Healer: the fresh compute returns ahead of the `if`. Runs once
+        // per append; for an unplanned member it is a no-op refresh, the
+        // engine re-splicing what it already holds.
+        if (!repairIfCondition(fid, ifId)) {
+          load(fid);
+          return false;
+        }
+        const after = readLinks(
+          fid,
+          plannedLinksOf(plannedRef.current, fid),
+        );
+        load(fid);
+        if (record && before !== null && after !== null) {
+          const beforeLinks = before.links;
+          const beforeEntry = before.entry;
+          const afterLinks = after.links;
+          const afterEntry = after.entry;
+          pushHistory({
+            label: "Wire if branch",
+            undo: () => {
+              setSnapshot((prev) => ({ ...prev, busy: true }));
+              const ok = restoreLinks(fid, beforeLinks, beforeEntry, false);
+              load(fid);
+              return ok;
+            },
+            redo: () => {
+              setSnapshot((prev) => ({ ...prev, busy: true }));
+              const ok = restoreLinks(fid, afterLinks, afterEntry, false);
+              load(fid);
+              return ok;
+            },
+          });
+        }
+        return true;
+      } catch (e: unknown) {
+        setSnapshot((prev) => failThrown(prev, e));
+        return false;
+      }
+    },
+    [load, pushHistory, restoreLinks, repairIfCondition],
+  );
+
   const replaceCommand = useCallback(
     (fid: FunctionId, oldId: CommandId, draft: CommandDraft): void => {
       try {
@@ -1774,6 +1912,29 @@ export function useProgram(
           busy: true,
           recoveryVar: null,
         }));
+        // A `cast` Apply must never go through delete + recreate: the
+        // Engine's cast group is `Compute -> Cast -> Set`, whose
+        // execution head is the *hidden* `Compute` (the bridge reports
+        // only the final `Set` as the user-facing id). The delete tears
+        // the old group down completely, and a rebuild splices the
+        // user-level edge at the `Set` — the new group then runs with no
+        // inbound path to its own `Compute`, so the run dies with
+        // `MissingValue` (the `Set` reads a value nobody produced). The
+        // bridge offers no primitive that can re-splice a hidden compute
+        // of a general group (`if_set_condition` is `if`-specific), so
+        // the honest UI move is to refuse the edit and keep the block
+        // verbatim; conversions should be rebuilt instead through an
+        // assignment with casting (whose anchor head the links can
+        // address).
+        if (draft.kind === "cast") {
+          setSnapshot((prev) => ({
+            ...prev,
+            busy: false,
+            actionError:
+              "Engine casts cannot be edited in place: the hidden conversion compute the block runs from has no user-level id the editor can re-link. Delete the block and add an assignment with casting instead (the public conversion flow).",
+          }));
+          return;
+        }
         // An `if` Apply must never go through delete + recreate: the
         // branch bodies hold raw command ids a reconstruction cannot
         // preserve, so editing rewrites only the condition expression in
@@ -1843,6 +2004,17 @@ export function useProgram(
           }));
           return;
         }
+        // The replaced block may live inside an `if` branch: the engine
+        // drops a deleted id from every branch list, and inside a branch
+        // no block's predecessor points at it through a user-level edge
+        // (each member's span ends at a hidden tail that owns the inner
+        // pointer), so the rebuilt block would sit outside the branch
+        // with no inbound path — the run never reaches it. The owner is
+        // captured before any delete; after the splice succeeds the
+        // rebuild re-appends (the engine chains the branch tail to the
+        // rebuilt head there). Recorded without its own history entry:
+        // this Edit action's undo/redo reproduce the append.
+        const slotBranch = branchOwnerOf(ordered).get(oldId) ?? null;
         // No-op Apply (e.g. re-applying an untouched quoted string):
         // nothing changed, so record nothing and recreate nothing.
         if (commandDraftEqual(slot.draft, draft)) {
@@ -2184,42 +2356,17 @@ export function useProgram(
         // assign to an undeclared variable) leaves the user's block
         // exactly where it was instead of silently deleting it.
         //
-        // One engine-mandated exception — `cast` drafts: a cast also
-        // *introduces* its variable (the Engine's `declared_type` scans
-        // `declare` and `cast` rows alike), and `Package::cast` rejects
-        // a duplicate name while the original row is alive. Creating
-        // first would fail with `DuplicateVariable` for every same-name
-        // edit (including retargeting a cast block), so this shape
-        // deletes first and restores the original draft into its
-        // captured slot when the build fails (Issue 6 preserved).
-        const deleteFirst = draft.kind === "cast";
-        if (deleteFirst && !deleteVisibleCommand(fid, oldId)) {
-          load(fid);
-          return;
-        }
         const candidate = createDetached(fid, draft);
         if (candidate === null) {
-          if (deleteFirst) {
-            // Build failed after the original was removed: restore it
-            // into its captured slot, so no work is lost.
-            insertSlot(
-              fid,
-              slot.draft,
-              {
-                prevId: slot.prevId,
-                nextId: slot.nextId,
-                makeEntry: slot.wasEntry,
-              },
-              oldId,
-            );
-          }
+          // Build failed before anything was touched: the original
+          // block (still in place) plus the persistent error is the
+          // whole visible outcome; no work is lost.
           load(fid);
           return;
         }
-        // Candidate is live but detached; now remove the original (when
-        // not already removed above) and splice the candidate into its
-        // slot.
-        if (!deleteFirst && !deleteVisibleCommand(fid, oldId)) {
+        // Candidate is live but detached; now remove the original and
+        // splice the candidate into its slot.
+        if (!deleteVisibleCommand(fid, oldId)) {
           // Original could not be removed: drop the candidate to avoid
           // duplicating the block, keep the error, restore the view.
           deleteVisibleCommand(fid, candidate);
@@ -2246,6 +2393,19 @@ export function useProgram(
           // Splice failed partway: resync from the runtime (source of
           // truth), keep the persistent error, record no history. The
           // blocks all still exist; only their order may differ.
+          load(fid);
+          return;
+        }
+        if (
+          slotBranch !== null &&
+          !appendIntoBranch(
+            fid,
+            slotBranch.ifId,
+            slotBranch.branch,
+            candidate,
+            false,
+          )
+        ) {
           load(fid);
           return;
         }
@@ -2278,6 +2438,19 @@ export function useProgram(
             }
             remap.track(box.id, nid);
             box.id = nid;
+            if (
+              slotBranch !== null &&
+              !appendIntoBranch(
+                fid,
+                slotBranch.ifId,
+                slotBranch.branch,
+                nid,
+                false,
+              )
+            ) {
+              load(fid);
+              return false;
+            }
             load(fid);
             setSnapshot((prev) => ({ ...prev, selectedCommandId: nid }));
             return true;
@@ -2303,6 +2476,19 @@ export function useProgram(
             }
             remap.track(box.id, nid);
             box.id = nid;
+            if (
+              slotBranch !== null &&
+              !appendIntoBranch(
+                fid,
+                slotBranch.ifId,
+                slotBranch.branch,
+                nid,
+                false,
+              )
+            ) {
+              load(fid);
+              return false;
+            }
             load(fid);
             setSnapshot((prev) => ({ ...prev, selectedCommandId: nid }));
             return true;
@@ -2320,6 +2506,7 @@ export function useProgram(
       createDetached,
       runLinkPlan,
       restoreLinks,
+      appendIntoBranch,
       pushHistory,
     ],
   );
@@ -2467,84 +2654,15 @@ export function useProgram(
    * stays (the bridge exposes no branch-list reverse operation —
    * documented limitation, never a silent divergence).
    */
+  /** The polite form callers see: appends with one history record. */
   const applyIfAppend = useCallback(
     (
       fid: FunctionId,
       ifId: CommandId,
       branch: "then" | "else",
       targetId: CommandId,
-    ): boolean => {
-      try {
-        const before = readLinks(
-          fid,
-          plannedLinksOf(plannedRef.current, fid),
-        );
-        setSnapshot((prev) => ({
-          ...clearFailure(prev),
-          busy: true,
-          recoveryVar: null,
-        }));
-        // A casting assignment is a hidden group behind one visible
-        // block: `anchor -> cast -> [assign]` (the assign is absent for
-        // the native-cast shape, whose visible block IS the cast row).
-        // The engine appends one user-level command at a time, so the
-        // whole group — in creation order, without repeating the
-        // visible cast — moves into the branch.
-        const listed = optilotus_listCommands(fid);
-        const casting = isOptilotusError(listed)
-          ? undefined
-          : collapseCasting(listed.commands).castings.get(targetId);
-        const appendIds =
-          casting === undefined
-            ? [targetId]
-            : casting.castId === targetId
-              ? [casting.anchorId, targetId]
-              : [casting.anchorId, casting.castId, targetId];
-        for (const appendId of appendIds) {
-          const result = optilotus_if_append(fid, ifId, branch, appendId);
-          if (isOptilotusError(result)) {
-            setSnapshot((prev) => failCommand(prev, result));
-            load(fid);
-            return false;
-          }
-        }
-        // The appended block leaves the main chain (the engine runs it
-        // from the `if` now): a planned connection it had is gone with
-        // it.
-        forgetPlannedLink(plannedRef.current, fid, targetId);
-        const after = readLinks(
-          fid,
-          plannedLinksOf(plannedRef.current, fid),
-        );
-        load(fid);
-        if (before !== null && after !== null) {
-          const beforeLinks = before.links;
-          const beforeEntry = before.entry;
-          const afterLinks = after.links;
-          const afterEntry = after.entry;
-          pushHistory({
-            label: "Wire if branch",
-            undo: () => {
-              setSnapshot((prev) => ({ ...prev, busy: true }));
-              const ok = restoreLinks(fid, beforeLinks, beforeEntry, false);
-              load(fid);
-              return ok;
-            },
-            redo: () => {
-              setSnapshot((prev) => ({ ...prev, busy: true }));
-              const ok = restoreLinks(fid, afterLinks, afterEntry, false);
-              load(fid);
-              return ok;
-            },
-          });
-        }
-        return true;
-      } catch (e: unknown) {
-        setSnapshot((prev) => failThrown(prev, e));
-        return false;
-      }
-    },
-    [load, pushHistory, restoreLinks],
+    ): boolean => appendIntoBranch(fid, ifId, branch, targetId),
+    [appendIntoBranch],
   );
 
   /** Read an `if`'s condition expression (null on bridge error). */
