@@ -6,7 +6,7 @@ use optilotus::ir::CommandId;
 use optilotus::package::{CommandSummary, IfSide, Package, MAIN_ID};
 use optilotus::VecSink;
 
-fn summary<'a>(cmds: &'a [CommandSummary], id: CommandId) -> &'a CommandSummary {
+fn summary(cmds: &[CommandSummary], id: CommandId) -> &CommandSummary {
     cmds.iter().find(|c| c.id == id).expect("summary present")
 }
 
@@ -47,8 +47,10 @@ fn set_condition_false_then_run_prints_else() {
     let if_id = pkg.if_with_expr(MAIN_ID, "{x} > 3", &[], None).unwrap();
     let then_print = pkg.print(MAIN_ID, "\"then hit\"").unwrap();
     let else_print = pkg.print(MAIN_ID, "\"else hit\"").unwrap();
-    pkg.if_append(MAIN_ID, if_id, IfSide::Then, then_print).unwrap();
-    pkg.if_append(MAIN_ID, if_id, IfSide::Else, else_print).unwrap();
+    pkg.if_append(MAIN_ID, if_id, IfSide::Then, then_print)
+        .unwrap();
+    pkg.if_append(MAIN_ID, if_id, IfSide::Else, else_print)
+        .unwrap();
 
     let cond = pkg.if_condition(MAIN_ID, if_id).unwrap();
     assert_eq!(cond, "{x} > 3", "condition text round-trips");
