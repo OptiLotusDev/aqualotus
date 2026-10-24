@@ -1304,7 +1304,11 @@ impl Package {
                 .find_command(cmd_id)
                 .ok_or(PackageError::UnknownCommand(cmd_id))?;
             let branch = match &command.op {
-                Op::If { then_body, else_body, .. } => match side {
+                Op::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => match side {
                     IfSide::Then => then_body.clone(),
                     IfSide::Else => else_body.clone().unwrap_or_default(),
                 },
@@ -1342,7 +1346,12 @@ impl Package {
                 if other_cmd.id == cmd_id {
                     continue;
                 }
-                if let Op::If { then_body, else_body, .. } = &other_cmd.op {
+                if let Op::If {
+                    then_body,
+                    else_body,
+                    ..
+                } = &other_cmd.op
+                {
                     let in_else = else_body
                         .as_ref()
                         .map(|b| b.contains(&new_id))
@@ -1448,24 +1457,15 @@ impl Package {
         if let Some(meta) = self.meta.get_mut(&fid) {
             if let Some(summary) = meta.get_mut(&cmd_id) {
                 let mut updated = summary.clone();
-                let other_is_empty =
-                    other_after.as_ref().map_or(true, |list| list.is_empty());
+                let other_is_empty = other_after.as_ref().is_none_or(|list| list.is_empty());
                 match side {
                     IfSide::Then => {
                         updated.then_body = Some(branch_after);
-                        updated.else_body = if other_is_empty {
-                            None
-                        } else {
-                            other_after
-                        };
+                        updated.else_body = if other_is_empty { None } else { other_after };
                     }
                     IfSide::Else => {
                         updated.else_body = Some(branch_after);
-                        updated.then_body = if other_is_empty {
-                            None
-                        } else {
-                            other_after
-                        };
+                        updated.then_body = if other_is_empty { None } else { other_after };
                     }
                 }
                 *summary = updated;
@@ -1486,11 +1486,7 @@ impl Package {
     /// means locating that compute. Re-parsed conditions accumulate
     /// orphaned computes (harmless, never executed — `list_commands`
     /// skips commands without meta).
-    pub fn if_condition(
-        &self,
-        fid: FunctionId,
-        cmd_id: CommandId,
-    ) -> Result<String, PackageError> {
+    pub fn if_condition(&self, fid: FunctionId, cmd_id: CommandId) -> Result<String, PackageError> {
         let function = self
             .functions
             .get(&fid)
@@ -2126,7 +2122,12 @@ impl Package {
         // lingering reference would crash mid-branch. Hidden member ids
         // of the removed group are gone too (members list every raw id).
         for cmd in func.commands.iter_mut() {
-            if let Op::If { then_body, else_body, .. } = &mut cmd.op {
+            if let Op::If {
+                then_body,
+                else_body,
+                ..
+            } = &mut cmd.op
+            {
                 then_body.retain(|id| !to_delete.contains(id));
                 if let Some(list) = else_body {
                     list.retain(|id| !to_delete.contains(id));
@@ -2136,18 +2137,20 @@ impl Package {
         let if_snapshots: Vec<(CommandId, Vec<CommandId>, Option<Vec<CommandId>>)> = func
             .commands
             .iter()
-            .filter_map(|c| { 
-                match &c.op {
-                    Op::If { then_body, else_body, .. } => {
-                        Some((c.id, then_body.clone(), else_body.clone()))
-                    }
-                    _ => None,
-                }
+            .filter_map(|c| match &c.op {
+                Op::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => Some((c.id, then_body.clone(), else_body.clone())),
+                _ => None,
             })
             .collect();
         if let Some(meta) = self.meta.get_mut(&fid) {
             for (head, then_body, else_body) in if_snapshots {
-                let Some(summary) = meta.get_mut(&head) else { continue };
+                let Some(summary) = meta.get_mut(&head) else {
+                    continue;
+                };
                 summary.then_body = if then_body.is_empty() {
                     None
                 } else {

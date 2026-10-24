@@ -344,12 +344,7 @@ pub fn js_package_if(
 
 /// Append an existing command to the end of an `if` branch.
 #[wasm_bindgen(js_name = optilotus_if_append)]
-pub fn js_package_if_append(
-    fid: u32,
-    cmd_id: u32,
-    side: &str,
-    new_id: u32,
-) -> Result<(), JsValue> {
+pub fn js_package_if_append(fid: u32, cmd_id: u32, side: &str, new_id: u32) -> Result<(), JsValue> {
     init_panic_hook();
     with_package(|pkg| {
         let side = match side {
@@ -369,10 +364,7 @@ pub fn js_package_if_append(
 
 /// The expression an `if`'s condition was built from.
 #[wasm_bindgen(js_name = optilotus_if_condition)]
-pub fn js_package_if_condition(
-    fid: u32,
-    cmd_id: u32,
-) -> Result<String, JsValue> {
+pub fn js_package_if_condition(fid: u32, cmd_id: u32) -> Result<String, JsValue> {
     init_panic_hook();
     with_package(|pkg| {
         pkg.if_condition(crate::ir::FunctionId(fid), crate::ir::CommandId(cmd_id))
@@ -382,11 +374,7 @@ pub fn js_package_if_condition(
 
 /// Replace an `if`'s condition expression in place (bodies untouched).
 #[wasm_bindgen(js_name = optilotus_if_set_condition)]
-pub fn js_package_if_set_condition(
-    fid: u32,
-    cmd_id: u32,
-    expr: &str,
-) -> Result<(), JsValue> {
+pub fn js_package_if_set_condition(fid: u32, cmd_id: u32, expr: &str) -> Result<(), JsValue> {
     init_panic_hook();
     with_package(|pkg| {
         pkg.if_set_condition(
