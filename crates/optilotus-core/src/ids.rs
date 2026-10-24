@@ -1,8 +1,10 @@
-//! Stable identities for every stored object.
+//! Stable identities for the storage layer.
 //!
-//! Each id is a thin newtype over a `u32` so ids of different kinds
-//! cannot be confused at a call site. Ids are unique within one graph;
-//! the allocator that hands them out lives in `optilotus-core`.
+//! These identify stored objects. The program-level ids
+//! ([`crate::ir::FunctionId`], [`crate::ir::CommandId`],
+//! [`crate::ir::ValueId`]) are defined by `ir`, because they are part of
+//! what a program *means*; the ones here identify graph storage, which
+//! has no notion of commands.
 
 use serde::{Deserialize, Serialize};
 
@@ -13,10 +15,6 @@ macro_rules! id_type {
         pub struct $name(pub u32);
 
         impl $name {
-            /// First id of this kind. Allocators start at 1 so that 0 can
-            /// mean "no id" where a call site needs it.
-            pub const FIRST: Self = Self(1);
-
             /// Raw numeric value.
             pub const fn get(self) -> u32 {
                 self.0
@@ -43,18 +41,8 @@ macro_rules! id_type {
 }
 
 id_type! {
-    /// A function (a named bag of nodes with one entry).
-    FunctionId
-}
-
-id_type! {
-    /// A node in the graph — one unit of storage, one op.
+    /// A stored graph node.
     NodeId
-}
-
-id_type! {
-    /// A data value produced or consumed by a node.
-    ValueId
 }
 
 id_type! {

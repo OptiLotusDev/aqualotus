@@ -1,19 +1,27 @@
 //! Business layer: what a program means.
 //!
-//! Owns commands, programs, branching, validation and history. Depends on
-//! `optilotus-data` for storage and on nothing above it (refactor rule 1).
+//! Owns commands, programs, branching, validation, execution and history,
+//! plus the storage shape underneath them. Depends on `optilotus-data`
+//! and on nothing above it (refactor rule 1: dependencies point one way
+//! only).
 
+pub mod edge;
 pub mod error;
 pub mod exec;
 pub mod expr;
+pub mod graph;
+pub mod ids;
 pub mod ir;
+pub mod node;
 pub mod ops;
 pub mod package;
 pub mod run_resumable;
 pub mod sink;
+pub mod snapshot;
 pub mod types;
 pub mod value;
 
+pub use edge::{Edge, EdgeKind};
 pub use error::ExecError;
 pub use exec::{
     find_main, map_expr_fail_pub, run_command, run_function, run_function_returning,
@@ -24,7 +32,10 @@ pub use exec::{
 pub use expr::{
     check_var_name, eval_expr, eval_expr_with, render_template, ExprFail, MAX_EXPR_DEPTH,
 };
+pub use graph::Graph;
+pub use ids::{EdgeId, NodeId};
 pub use ir::{Command, CommandId, Function, FunctionId, Program, ValueId};
+pub use node::Node;
 pub use ops::{apply_arith, cast_value, parse_input_line, print_text, ArithKind, Op, OpError};
 pub use package::{
     Access, CommandKind, CommandSpec, CommandSummary, FunctionInfo, FunctionSummary, IfSide,
@@ -32,7 +43,6 @@ pub use package::{
 };
 pub use run_resumable::{PendingInput, RunSession, RunStatus};
 pub use sink::{InputSource, PrintSink, VecSink, VecSource};
+pub use snapshot::Snapshot;
 pub use types::Type;
 pub use value::Value;
-
-pub use optilotus_data as data;
