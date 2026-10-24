@@ -100,6 +100,8 @@ impl std::error::Error for PackageError {}
 /// Rust fields stay `snake_case`; wire JSON uses `camelCase` for the TS
 /// bridge (see `docs/api.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct FunctionSummary {
     pub id: FunctionId,
     pub name: String,
@@ -111,6 +113,8 @@ pub struct FunctionSummary {
 /// `command_count` is the user-visible count (matches `list_commands`
 /// length), not raw IR length.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct FunctionInfo {
     pub id: FunctionId,
     pub name: String,
@@ -123,7 +127,9 @@ pub struct FunctionInfo {
 
 /// User-facing kind, not raw `Op`. Serialized lowercase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "ts-bindings", ts(export))]
 pub enum CommandKind {
     Declare,
     Assign,
@@ -146,7 +152,9 @@ pub enum CommandKind {
 /// place for it; enforcement becomes observable when classes and
 /// multiple packages exist. See `docs/api.md` for the current limits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "ts-bindings", ts(export))]
 pub enum Access {
     /// Visible to every package (global scope). Currently equivalent to
     /// `Protected`, because only one package can exist.
@@ -189,6 +197,8 @@ impl Access {
 /// validates, allocates ids and expands each spec into the same raw
 /// commands the builders produce; callers never build or pass raw IR.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct CommandSpec {
     pub kind: CommandKind,
     pub var: Option<String>,
@@ -273,28 +283,38 @@ impl CommandSpec {
 /// every `list_commands` call, so rewires are always reflected. The
 /// stored meta keeps `None` — the raw `next` edges are the source of truth.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct CommandSummary {
     pub id: CommandId,
     pub kind: CommandKind,
     pub next: Option<CommandId>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub var: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub ty: Option<Type>,
     /// `declare` only: the variable's visibility. Omitted for every other
     /// kind, and for declarations made before access existed (which read
     /// as `private`, the historical behaviour).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub access: Option<Access>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub expr: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub template: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub condition: Option<ValueId>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub then_body: Option<Vec<CommandId>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub else_body: Option<Vec<CommandId>>,
 }
 

@@ -5,7 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{NodeId, ValueId};
+use crate::ids::NodeId;
+use crate::ir::ValueId;
 
 /// A node: an id, a payload, and the value slots it produces.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
