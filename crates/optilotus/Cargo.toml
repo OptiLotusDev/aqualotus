@@ -18,7 +18,7 @@ ts-rs = { version = "12", features = ["serde-compat"], optional = true }
 [features]
 # TypeScript binding generation. Off by default so the shipped wasm
 # binary never links a build-time codegen tool (P11/P12).
-ts-bindings = ["dep:ts-rs"]
+ts-bindings = ["dep:ts-rs", "optilotus-core/ts-bindings"]
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false
