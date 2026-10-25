@@ -12,4 +12,5 @@ pub enum CommandKind {
     Cast,
     Return,
     If,
+    Unknown,
 }

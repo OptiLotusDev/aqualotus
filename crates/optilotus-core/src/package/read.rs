@@ -128,7 +128,7 @@ impl Package {
             .ok_or(PackageError::UnknownFunction(fid))?;
         let summary = meta.get(&head).ok_or(PackageError::UnknownCommand(head))?;
         match summary.kind {
-            CommandKind::Return | CommandKind::If | CommandKind::Input | CommandKind::Cast => {
+            CommandKind::Return | CommandKind::If | CommandKind::Input | CommandKind::Cast | CommandKind::Unknown => {
                 Ok(head)
             }
             CommandKind::Declare | CommandKind::Assign | CommandKind::Print => {
