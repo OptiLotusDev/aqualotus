@@ -192,6 +192,11 @@ export function summaryToDraft(cmd: CommandSummary): CommandDraft {
         then: [],
         else: null,
       };
+    case "unknown":
+      // Internal commands (e.g. if-branch bodies) are not editable as
+      // standalone drafts; surface a benign placeholder so the
+      // exhaustiveness guard stays satisfied.
+      return { kind: "print", template: "" };
     default:
       return unreachableKind(cmd.kind);
   }
@@ -358,6 +363,8 @@ export function commandMainLine(cmd: CommandSummary): string {
       return `return ${cmd.expr ?? ""}`;
     case "if":
       return `if ${cmd.condition ?? "?"}`;
+    case "unknown":
+      return "[internal]";
     default:
       return unreachableKind(cmd.kind);
   }
@@ -397,6 +404,8 @@ export function commandSubLine(cmd: CommandSummary): string {
       return "ends the function";
     case "if":
       return "conditional branch";
+    case "unknown":
+      return "internal";
     default:
       return unreachableKind(cmd.kind);
   }
