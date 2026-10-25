@@ -11,8 +11,6 @@ use crate::package::registry::{MAIN_ID, MAIN_NAME};
 use crate::package::validation;
 
 impl Package {
-
-
     fn validate_function_name(&self, raw: &str) -> Result<String, PackageError> {
         validation::validate_function_name(self, raw)
     }

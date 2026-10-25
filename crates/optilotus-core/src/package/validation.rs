@@ -25,11 +25,9 @@ use crate::types::Type;
 /// declares) but does not check whether functions or variables exist.
 pub fn validate_spec(spec: &CommandSpec) -> Result<(), PackageError> {
     match spec.kind {
-        CommandKind::Unknown => {
-            Err(PackageError::InvalidCommand(
-                "unknown command kind".to_string(),
-            ))
-        }
+        CommandKind::Unknown => Err(PackageError::InvalidCommand(
+            "unknown command kind".to_string(),
+        )),
         CommandKind::Declare => {
             let var = spec.var.as_deref().unwrap_or("");
             check_var_name(var).map_err(|e| PackageError::InvalidName(e.to_string()))?;

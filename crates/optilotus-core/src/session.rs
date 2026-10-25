@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::package::kind::CommandKind;
+use crate::ir::{Command, CommandId, Function, FunctionId};
 use crate::package::command_summary::CommandSummary;
-use crate::ir::{Command, Function, FunctionId, CommandId};
+use crate::package::kind::CommandKind;
 use crate::package::registry::{Package, PackageSnapshot};
 
 /***
@@ -73,7 +73,9 @@ impl Commit {
                 }
             }
             Commit::FunctionCreated { name, .. } => format!("create function {}", name),
-            Commit::FunctionRenamed { old_name, new_name, .. } => {
+            Commit::FunctionRenamed {
+                old_name, new_name, ..
+            } => {
                 format!("rename {} to {}", old_name, new_name)
             }
             Commit::EntryChanged { .. } => "change entry".to_string(),
@@ -84,7 +86,13 @@ impl Commit {
     /// Apply forward (redo direction).
     pub fn forward_apply(&self, pkg: &mut Package) {
         match self {
-            Commit::CommandAdded { fid, head_id, commands, summary, .. } => {
+            Commit::CommandAdded {
+                fid,
+                head_id,
+                commands,
+                summary,
+                ..
+            } => {
                 // Re-add commands
                 if let Some(func) = pkg.functions.get_mut(fid) {
                     for cmd in commands {
@@ -110,11 +118,18 @@ impl Commit {
     /// Apply the inverse of this commit (undo direction).
     pub fn inverse_apply(&self, pkg: &mut Package) {
         match self {
-            Commit::CommandAdded { fid, head_id, commands, old_entry, .. } => {
+            Commit::CommandAdded {
+                fid,
+                head_id,
+                commands,
+                old_entry,
+                ..
+            } => {
                 // Remove added commands
                 if let Some(func) = pkg.functions.get_mut(fid) {
                     // Clear next pointers that pointed to removed commands
-                    let removed_ids: std::collections::HashSet<_> = commands.iter().map(|c| c.id).collect();
+                    let removed_ids: std::collections::HashSet<_> =
+                        commands.iter().map(|c| c.id).collect();
                     for cmd in func.commands.iter_mut() {
                         if let Some(next) = cmd.next {
                             if removed_ids.contains(&next) {

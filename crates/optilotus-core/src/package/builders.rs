@@ -9,8 +9,8 @@ use crate::value::Value;
 
 use crate::package::access::Access;
 use crate::package::registry::Package;
-use crate::session::Commit;
 use crate::package::validation;
+use crate::session::Commit;
 
 use crate::ir::Command;
 use crate::package::kind::CommandKind;

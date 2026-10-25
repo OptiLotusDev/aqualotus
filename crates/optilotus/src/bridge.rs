@@ -182,20 +182,16 @@ pub fn package_clear() -> String {
 }
 
 pub fn package_undo() -> String {
-    with_package(|pkg| {
-        match pkg.undo() {
-            Some(desc) => to_json(&OkResponse::new_with_description(desc)),
-            None => to_json(&OkResponse::new_noop()),
-        }
+    with_package(|pkg| match pkg.undo() {
+        Some(desc) => to_json(&OkResponse::new_with_description(desc)),
+        None => to_json(&OkResponse::new_noop()),
     })
 }
 
 pub fn package_redo() -> String {
-    with_package(|pkg| {
-        match pkg.redo() {
-            Some(desc) => to_json(&OkResponse::new_with_description(desc)),
-            None => to_json(&OkResponse::new_noop()),
-        }
+    with_package(|pkg| match pkg.redo() {
+        Some(desc) => to_json(&OkResponse::new_with_description(desc)),
+        None => to_json(&OkResponse::new_noop()),
     })
 }
 
