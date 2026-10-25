@@ -13,7 +13,7 @@ use crate::ids::{EdgeId, NodeId};
 use crate::node::Node;
 
 /// A copied graph, indexed for lookup.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
     nodes: Vec<Node>,
     edges: Vec<Edge>,
@@ -27,8 +27,13 @@ impl Snapshot {
         Self::default()
     }
 
-    /// Capture `nodes` and `edges`. Duplicate ids are kept as given; the
-    /// indexes then point at the first occurrence.
+    /// Capture `nodes` and `edges`.
+    ///
+    /// Duplicate ids are kept as given in the `nodes` / `edges` vectors,
+    /// but the `node` / `edge` lookup indexes only record the **first**
+    /// occurrence. Callers should ensure ids are unique before capturing;
+    /// otherwise `node(id)` / `edge(id)` return the first match while
+    /// `nodes()` / `edges()` return all entries.
     pub fn capture(nodes: Vec<Node>, edges: Vec<Edge>) -> Self {
         let mut nodes_by_id = HashMap::with_capacity(nodes.len());
         for (index, node) in nodes.iter().enumerate() {

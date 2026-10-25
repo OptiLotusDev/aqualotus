@@ -27,6 +27,10 @@ impl Graph {
     }
 
     /// Insert a node, replacing any node already at its id.
+    ///
+    /// Edges already touching `node.id` are left in place; they will now
+    /// point at the replacement node. If the previous node's edges should
+    /// not survive the replacement, call [`remove_node`] first.
     pub fn insert_node(&mut self, node: Node) {
         self.nodes.insert(node.id, node);
     }
