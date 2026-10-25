@@ -9,6 +9,7 @@ use crate::value::Value;
 
 use crate::package::access::Access;
 use crate::package::registry::Package;
+use crate::session::Commit;
 use crate::package::validation;
 
 use crate::ir::Command;
@@ -48,24 +49,32 @@ impl Package {
         }
         validation::validate_function_exists(self, fid)?;
         validation::validate_var_not_declared(self, fid, &var)?;
+        let old_entry = self.function(fid).and_then(|f| f.entry);
         let value = match init {
             Some(text) => {
                 parse_value(ty, text).map_err(|e| PackageError::InvalidCommand(e.to_string()))?
             }
             None => default_value(ty),
         };
-        let (head, _tail) = self.declare_group(fid, &var, ty, value)?;
+        let (head, tail) = self.declare_group(fid, &var, ty, value)?;
         self.link_chain(fid, head.id)?;
-        self.meta_mut(fid)?.insert(
-            head.id,
-            CommandSummary {
-                var: Some(var),
-                ty: Some(ty),
-                access: Some(access),
-                expr: init.map(|s| s.to_string()),
-                ..CommandSummary::blank(head.id, CommandKind::Declare)
-            },
-        );
+        let summary = CommandSummary {
+            var: Some(var.clone()),
+            ty: Some(ty),
+            access: Some(access),
+            expr: init.map(|s| s.to_string()),
+            ..CommandSummary::blank(head.id, CommandKind::Declare)
+        };
+        self.meta_mut(fid)?.insert(head.id, summary.clone());
+        self.record(Commit::CommandAdded {
+            fid,
+            head_id: head.id,
+            kind: CommandKind::Declare,
+            var: Some(var),
+            commands: vec![head.clone(), tail],
+            summary,
+            old_entry,
+        });
         Ok(head.id)
     }
 
@@ -122,17 +131,25 @@ impl Package {
                 "assign expression must not be empty".to_string(),
             ));
         }
-        let (head, _tail) = self.assign_group(fid, &var, ty, expr)?;
+        let (head, tail) = self.assign_group(fid, &var, ty, expr)?;
+        let old_entry = self.function(fid).and_then(|f| f.entry);
         self.link_chain(fid, head.id)?;
-        self.meta_mut(fid)?.insert(
-            head.id,
-            CommandSummary {
-                var: Some(var),
-                ty: Some(ty),
-                expr: Some(expr.to_string()),
-                ..CommandSummary::blank(head.id, CommandKind::Assign)
-            },
-        );
+        let summary = CommandSummary {
+            var: Some(var.clone()),
+            ty: Some(ty),
+            expr: Some(expr.to_string()),
+            ..CommandSummary::blank(head.id, CommandKind::Assign)
+        };
+        self.meta_mut(fid)?.insert(head.id, summary.clone());
+        self.record(Commit::CommandAdded {
+            fid,
+            head_id: head.id,
+            kind: CommandKind::Assign,
+            var: Some(var),
+            commands: vec![head.clone(), tail],
+            summary,
+            old_entry,
+        });
         Ok(head.id)
     }
 
@@ -170,15 +187,23 @@ impl Package {
     /// `print(template)`: `Lit(template)` -> `Print`.
     pub fn print(&mut self, fid: FunctionId, template: &str) -> Result<CommandId, PackageError> {
         validation::validate_function_exists(self, fid)?;
-        let (head, _tail) = self.print_group(fid, template)?;
+        let old_entry = self.function(fid).and_then(|f| f.entry);
+        let (head, tail) = self.print_group(fid, template)?;
         self.link_chain(fid, head.id)?;
-        self.meta_mut(fid)?.insert(
-            head.id,
-            CommandSummary {
-                template: Some(template.to_string()),
-                ..CommandSummary::blank(head.id, CommandKind::Print)
-            },
-        );
+        let summary = CommandSummary {
+            template: Some(template.to_string()),
+            ..CommandSummary::blank(head.id, CommandKind::Print)
+        };
+        self.meta_mut(fid)?.insert(head.id, summary.clone());
+        self.record(Commit::CommandAdded {
+            fid,
+            head_id: head.id,
+            kind: CommandKind::Print,
+            var: None,
+            commands: vec![head.clone(), tail],
+            summary,
+            old_entry,
+        });
         Ok(head.id)
     }
 
@@ -213,15 +238,23 @@ impl Package {
                 "cannot read a value of type void".to_string(),
             ));
         }
-        let (head, _tail) = self.input_group(fid, ty)?;
+        let old_entry = self.function(fid).and_then(|f| f.entry);
+        let (head, tail) = self.input_group(fid, ty)?;
         self.link_chain(fid, head.id)?;
-        self.meta_mut(fid)?.insert(
-            head.id,
-            CommandSummary {
-                ty: Some(ty),
-                ..CommandSummary::blank(head.id, CommandKind::Input)
-            },
-        );
+        let summary = CommandSummary {
+            ty: Some(ty),
+            ..CommandSummary::blank(head.id, CommandKind::Input)
+        };
+        self.meta_mut(fid)?.insert(head.id, summary.clone());
+        self.record(Commit::CommandAdded {
+            fid,
+            head_id: head.id,
+            kind: CommandKind::Input,
+            var: None,
+            commands: vec![head.clone(), tail],
+            summary,
+            old_entry,
+        });
         Ok(head.id)
     }
 
@@ -302,17 +335,25 @@ impl Package {
                 "cast expression must not be empty".to_string(),
             ));
         }
-        let (compute, _cast, set) = self.cast_group(fid, &var, to, expr)?;
+        let old_entry = self.function(fid).and_then(|f| f.entry);
+        let (compute, cast_cmd, set) = self.cast_group(fid, &var, to, expr)?;
         self.link_chain(fid, compute.id)?;
-        self.meta_mut(fid)?.insert(
-            set.id,
-            CommandSummary {
-                var: Some(var),
-                ty: Some(to),
-                expr: Some(expr.to_string()),
-                ..CommandSummary::blank(set.id, CommandKind::Cast)
-            },
-        );
+        let summary = CommandSummary {
+            var: Some(var.clone()),
+            ty: Some(to),
+            expr: Some(expr.to_string()),
+            ..CommandSummary::blank(set.id, CommandKind::Cast)
+        };
+        self.meta_mut(fid)?.insert(set.id, summary.clone());
+        self.record(Commit::CommandAdded {
+            fid,
+            head_id: set.id,
+            kind: CommandKind::Cast,
+            var: Some(var),
+            commands: vec![compute.clone(), cast_cmd.clone(), set.clone()],
+            summary,
+            old_entry,
+        });
         Ok(set.id)
     }
 
@@ -324,6 +365,7 @@ impl Package {
                 "return expression must not be empty".to_string(),
             ));
         }
+        let old_entry = self.function(fid).and_then(|f| f.entry);
         let head_id = self.alloc_command_id();
         let head = Command {
             id: head_id,
@@ -334,14 +376,21 @@ impl Package {
             outputs: vec![],
             next: None,
         };
-        self.append_raw(fid, head, None);
-        self.meta_mut(fid)?.insert(
+        self.append_raw(fid, head.clone(), None);
+        let summary = CommandSummary {
+            expr: Some(expr.to_string()),
+            ..CommandSummary::blank(head_id, CommandKind::Return)
+        };
+        self.meta_mut(fid)?.insert(head_id, summary.clone());
+        self.record(Commit::CommandAdded {
+            fid,
             head_id,
-            CommandSummary {
-                expr: Some(expr.to_string()),
-                ..CommandSummary::blank(head_id, CommandKind::Return)
-            },
-        );
+            kind: CommandKind::Return,
+            var: None,
+            commands: vec![head.clone()],
+            summary,
+            old_entry,
+        });
         Ok(head_id)
     }
 
@@ -356,8 +405,20 @@ impl Package {
         command: Command,
     ) -> Result<(), PackageError> {
         validation::validate_function_exists(self, fid)?;
+        let old_entry = self.function(fid).and_then(|f| f.entry);
+        let cmd_id = command.id;
         let func = self.function_mut(fid)?;
-        func.commands.push(command);
+        func.commands.push(command.clone());
+        let summary = CommandSummary::blank(cmd_id, CommandKind::Unknown); // placeholder
+        self.record(Commit::CommandAdded {
+            fid,
+            head_id: cmd_id,
+            kind: CommandKind::Unknown, // placeholder
+            var: None,
+            commands: vec![command.clone()],
+            summary,
+            old_entry,
+        });
         Ok(())
     }
 }

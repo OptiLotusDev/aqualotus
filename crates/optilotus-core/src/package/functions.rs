@@ -11,28 +11,7 @@ use crate::package::registry::{MAIN_ID, MAIN_NAME};
 use crate::package::validation;
 
 impl Package {
-    pub fn new() -> Self {
-        let mut functions = HashMap::new();
-        functions.insert(
-            MAIN_ID,
-            Function {
-                id: MAIN_ID,
-                name: MAIN_NAME.to_string(),
-                entry: None,
-                commands: Vec::new(),
-            },
-        );
-        let mut meta = HashMap::new();
-        meta.insert(MAIN_ID, HashMap::new());
-        Self {
-            functions,
-            order: vec![MAIN_ID],
-            meta,
-            next_function_id: 1,
-            next_command_id: 1,
-            next_value_id: 1,
-        }
-    }
+
 
     fn validate_function_name(&self, raw: &str) -> Result<String, PackageError> {
         validation::validate_function_name(self, raw)

@@ -25,6 +25,11 @@ impl Package {
         spec: &CommandSpec,
     ) -> Result<(CommandId, Vec<CommandId>), PackageError> {
         match spec.kind {
+            CommandKind::Unknown => {
+                Err(PackageError::InvalidCommand(
+                    "unknown command kind".to_string(),
+                ))
+            }
             CommandKind::Declare => {
                 let var = check_var_name(spec.var.as_deref().unwrap_or(""))
                     .map_err(|e| PackageError::InvalidName(e.to_string()))?;

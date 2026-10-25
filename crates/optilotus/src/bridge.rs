@@ -181,6 +181,24 @@ pub fn package_clear() -> String {
     })
 }
 
+pub fn package_undo() -> String {
+    with_package(|pkg| {
+        match pkg.undo() {
+            Some(desc) => to_json(&OkResponse::new_with_description(desc)),
+            None => to_json(&OkResponse::new_noop()),
+        }
+    })
+}
+
+pub fn package_redo() -> String {
+    with_package(|pkg| {
+        match pkg.redo() {
+            Some(desc) => to_json(&OkResponse::new_with_description(desc)),
+            None => to_json(&OkResponse::new_noop()),
+        }
+    })
+}
+
 /// `declare(fid, name, ty, init?)` -> `{"status":"ok","id"}` (user head).
 pub fn package_declare(fid: u32, name: &str, ty: &str, init: Option<String>) -> String {
     with_package(
@@ -480,6 +498,20 @@ pub fn js_package_rename(id: u32, name: &str) -> String {
 pub fn js_package_clear() -> String {
     init_panic_hook();
     package_clear()
+}
+
+/// JS: `optilotus_undo() -> string` (JSON)
+#[wasm_bindgen(js_name = optilotus_undo)]
+pub fn js_package_undo() -> String {
+    init_panic_hook();
+    package_undo()
+}
+
+/// JS: `optilotus_redo() -> string` (JSON)
+#[wasm_bindgen(js_name = optilotus_redo)]
+pub fn js_package_redo() -> String {
+    init_panic_hook();
+    package_redo()
 }
 
 /// JS: `optilotus_declare(fid, name, ty, init?) -> string` (JSON)
