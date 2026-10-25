@@ -1,20 +1,21 @@
 //! One unit of storage in the graph.
 //!
-//! A node holds an opaque payload. The data layer does not interpret it —
-//! `optilotus-core` decides what a payload means and how it may be linked.
+//! A node holds an opaque payload. The data layer does not interpret it.
+//! `outputs` are raw value-slot references (u32); their meaning belongs
+//! to whichever consumer interprets the graph.
 
 use serde::{Deserialize, Serialize};
 
 use crate::ids::NodeId;
-use crate::ir::ValueId;
 
 /// A node: an id, a payload, and the value slots it produces.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     pub id: NodeId,
-    /// Opaque payload. Its meaning belongs to `optilotus-core`.
+    /// Opaque payload. Its meaning belongs to the consumer of the graph.
     pub payload: String,
-    pub outputs: Vec<ValueId>,
+    /// Raw value-slot references produced by this node.
+    pub outputs: Vec<u32>,
 }
 
 impl Node {
@@ -28,7 +29,7 @@ impl Node {
     }
 
     /// A node producing the given value slots.
-    pub fn with_outputs(id: NodeId, payload: impl Into<String>, outputs: Vec<ValueId>) -> Self {
+    pub fn with_outputs(id: NodeId, payload: impl Into<String>, outputs: Vec<u32>) -> Self {
         Self {
             id,
             payload: payload.into(),

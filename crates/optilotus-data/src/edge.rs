@@ -2,15 +2,15 @@
 //!
 //! An edge records only that `from` leads to `to`. Whether an edge is
 //! control flow, a data dependency, or a branch membership is a meaning
-//! `optilotus-core` attaches; the data layer keeps them interchangeable.
+//! the data layer does not attach; it keeps them interchangeable.
 
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{EdgeId, NodeId};
 
 /// What an edge carries. The data layer treats these identically; the
-/// tag exists so `optilotus-core` can tell them apart without guessing
-/// from node contents.
+/// tag exists so consumers can tell them apart without guessing from
+/// node contents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EdgeKind {
     /// The next node to visit in execution order.
