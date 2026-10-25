@@ -15,9 +15,9 @@ pub mod ir;
 pub mod ops;
 pub mod package;
 pub mod run_resumable;
+pub mod session;
 pub mod sink;
 pub mod types;
-pub mod session;
 pub mod value;
 
 pub use error::ExecError;

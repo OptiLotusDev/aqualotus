@@ -1,7 +1,7 @@
-use optilotus_core::session::Commit;
-use optilotus_core::ir::{FunctionId, CommandId, Function};
-use optilotus_core::package::CommandKind;
+use optilotus_core::ir::{CommandId, Function, FunctionId};
 use optilotus_core::package::registry::PackageSnapshot;
+use optilotus_core::package::CommandKind;
+use optilotus_core::session::Commit;
 
 #[test]
 fn test_commit_enum_variants() {
