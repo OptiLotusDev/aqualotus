@@ -1,9 +1,8 @@
 //! Business layer: what a program means.
 //!
 //! Owns commands, programs, branching, validation, execution and history,
-//! plus the storage shape underneath them. Depends on `optilotus-data`
-//! and on nothing above it (refactor rule 1: dependencies point one way
-//! only).
+//! plus the storage shape underneath them. Has no crate dependencies above
+//! it (refactor rule 1: dependencies point one way only).
 
 pub mod edge;
 pub mod error;
