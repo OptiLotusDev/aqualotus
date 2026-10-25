@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build:wasm": "wasm-pack build ../../crates/optilotus --target web --out-dir ../../apps/aqualotus-ui/src/wasm/optilotus --out-name optilotus && rm -f ./src/wasm/optilotus/.gitignore",
-    "build:bindings": "cargo test -p optilotus-core --lib --features ts-bindings",
+    "build:bindings": "cargo test -p optilotus-core --lib --features ts-bindings && cargo test -p optilotus --lib --features ts-bindings",
     "build:wasm:all": "npm run build:wasm && npm run build:bindings",
     "dev": "npm run build:wasm:all && vite",
     "dev:ui": "vite",
