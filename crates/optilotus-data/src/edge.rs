@@ -22,7 +22,7 @@ pub enum EdgeKind {
 }
 
 /// One directed edge.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Edge {
     pub id: EdgeId,
     pub from: NodeId,

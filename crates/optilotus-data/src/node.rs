@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::ids::NodeId;
 
 /// A node: an id, a payload, and the value slots it produces.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Node {
     pub id: NodeId,
     /// Opaque payload. Its meaning belongs to the consumer of the graph.
