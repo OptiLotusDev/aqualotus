@@ -22,6 +22,7 @@ pub mod run;
 pub mod spec;
 pub mod stage;
 pub mod summary;
+pub mod validation;
 
 pub use crate::ir::{CommandId, FunctionId, ValueId};
 pub use access::Access;

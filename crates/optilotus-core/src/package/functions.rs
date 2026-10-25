@@ -8,6 +8,7 @@ use crate::types::Type;
 use crate::package::kind::CommandKind;
 use crate::package::registry::Package;
 use crate::package::registry::{MAIN_ID, MAIN_NAME};
+use crate::package::validation;
 
 impl Package {
     pub fn new() -> Self {
@@ -34,24 +35,7 @@ impl Package {
     }
 
     fn validate_function_name(&self, raw: &str) -> Result<String, PackageError> {
-        let name = raw.trim().to_string();
-        if name.is_empty() {
-            return Err(PackageError::InvalidName(
-                "function name must not be empty".to_string(),
-            ));
-        }
-        if name.chars().any(|c| c == '{' || c == '}' || c == '"') {
-            return Err(PackageError::InvalidName(format!(
-                "invalid function name {name:?}: must not contain '{{', '}}' or '\"'"
-            )));
-        }
-        if name == MAIN_NAME {
-            return Err(PackageError::ReservedName(name));
-        }
-        if self.functions.values().any(|f| f.name == name) {
-            return Err(PackageError::DuplicateName(name));
-        }
-        Ok(name)
+        validation::validate_function_name(self, raw)
     }
 
     /// List all functions in id order (`main` first).
