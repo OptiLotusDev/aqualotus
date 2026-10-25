@@ -9,6 +9,7 @@ use crate::value::Value;
 
 use crate::package::access::Access;
 use crate::package::registry::Package;
+use crate::package::validation;
 
 use crate::ir::Command;
 use crate::package::kind::CommandKind;
@@ -39,20 +40,14 @@ impl Package {
         access: Access,
     ) -> Result<CommandId, PackageError> {
         let var = check_var_name(name).map_err(|e| PackageError::InvalidName(e.to_string()))?;
-        let Some(ty) = Type::parse_tag(ty_tag) else {
-            return Err(PackageError::UnknownType(ty_tag.to_string()));
-        };
+        let ty = validation::parse_type_tag(ty_tag)?;
         if ty == Type::Void {
             return Err(PackageError::InvalidCommand(
                 "cannot declare a variable of type void".to_string(),
             ));
         }
-        if !self.functions.contains_key(&fid) {
-            return Err(PackageError::UnknownFunction(fid));
-        }
-        if self.declared_type(fid, &var).is_some() {
-            return Err(PackageError::DuplicateVariable(var));
-        }
+        validation::validate_function_exists(self, fid)?;
+        validation::validate_var_not_declared(self, fid, &var)?;
         let value = match init {
             Some(text) => {
                 parse_value(ty, text).map_err(|e| PackageError::InvalidCommand(e.to_string()))?
@@ -120,12 +115,8 @@ impl Package {
         expr: &str,
     ) -> Result<CommandId, PackageError> {
         let var = check_var_name(name).map_err(|e| PackageError::InvalidName(e.to_string()))?;
-        if !self.functions.contains_key(&fid) {
-            return Err(PackageError::UnknownFunction(fid));
-        }
-        let Some(ty) = self.declared_type(fid, &var) else {
-            return Err(PackageError::UndeclaredVariable(var));
-        };
+        validation::validate_function_exists(self, fid)?;
+        let ty = validation::validate_var_declared(self, fid, &var)?;
         if expr.trim().is_empty() {
             return Err(PackageError::InvalidCommand(
                 "assign expression must not be empty".to_string(),
@@ -178,9 +169,7 @@ impl Package {
 
     /// `print(template)`: `Lit(template)` -> `Print`.
     pub fn print(&mut self, fid: FunctionId, template: &str) -> Result<CommandId, PackageError> {
-        if !self.functions.contains_key(&fid) {
-            return Err(PackageError::UnknownFunction(fid));
-        }
+        validation::validate_function_exists(self, fid)?;
         let (head, _tail) = self.print_group(fid, template)?;
         self.link_chain(fid, head.id)?;
         self.meta_mut(fid)?.insert(
@@ -217,12 +206,8 @@ impl Package {
 
     /// `input(ty)`: single `Op::Input` producing one typed value.
     pub fn input(&mut self, fid: FunctionId, ty_tag: &str) -> Result<CommandId, PackageError> {
-        if !self.functions.contains_key(&fid) {
-            return Err(PackageError::UnknownFunction(fid));
-        }
-        let Some(ty) = Type::parse_tag(ty_tag) else {
-            return Err(PackageError::UnknownType(ty_tag.to_string()));
-        };
+        validation::validate_function_exists(self, fid)?;
+        let ty = validation::parse_type_tag(ty_tag)?;
         if ty == Type::Void {
             return Err(PackageError::InvalidCommand(
                 "cannot read a value of type void".to_string(),
@@ -304,20 +289,14 @@ impl Package {
         expr: &str,
     ) -> Result<CommandId, PackageError> {
         let var = check_var_name(name).map_err(|e| PackageError::InvalidName(e.to_string()))?;
-        let Some(to) = Type::parse_tag(to_tag) else {
-            return Err(PackageError::UnknownType(to_tag.to_string()));
-        };
+        let to = validation::parse_type_tag(to_tag)?;
         if to == Type::Void {
             return Err(PackageError::InvalidCommand(
                 "cannot cast to void".to_string(),
             ));
         }
-        if !self.functions.contains_key(&fid) {
-            return Err(PackageError::UnknownFunction(fid));
-        }
-        if self.declared_type(fid, &var).is_some() {
-            return Err(PackageError::DuplicateVariable(var));
-        }
+        validation::validate_function_exists(self, fid)?;
+        validation::validate_var_not_declared(self, fid, &var)?;
         if expr.trim().is_empty() {
             return Err(PackageError::InvalidCommand(
                 "cast expression must not be empty".to_string(),
@@ -339,9 +318,7 @@ impl Package {
 
     /// `return(expr)`: single `Op::Return`.
     pub fn return_(&mut self, fid: FunctionId, expr: &str) -> Result<CommandId, PackageError> {
-        if !self.functions.contains_key(&fid) {
-            return Err(PackageError::UnknownFunction(fid));
-        }
+        validation::validate_function_exists(self, fid)?;
         if expr.trim().is_empty() {
             return Err(PackageError::InvalidCommand(
                 "return expression must not be empty".to_string(),
@@ -378,9 +355,7 @@ impl Package {
         fid: FunctionId,
         command: Command,
     ) -> Result<(), PackageError> {
-        if !self.functions.contains_key(&fid) {
-            return Err(PackageError::UnknownFunction(fid));
-        }
+        validation::validate_function_exists(self, fid)?;
         let func = self.function_mut(fid)?;
         func.commands.push(command);
         Ok(())

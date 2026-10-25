@@ -5,104 +5,13 @@ use crate::package::literal::{default_value, parse_value};
 use crate::package::spec::CommandSpec;
 use crate::types::Type;
 
-use crate::package::access::Access;
 use crate::package::kind::CommandKind;
 use crate::package::registry::Package;
+use crate::package::validation;
 
 impl Package {
     fn validate_spec(spec: &CommandSpec) -> Result<(), PackageError> {
-        match spec.kind {
-            CommandKind::Declare => {
-                let var = spec.var.as_deref().unwrap_or("");
-                check_var_name(var).map_err(|e| PackageError::InvalidName(e.to_string()))?;
-                let Some(ty) = spec.ty else {
-                    return Err(PackageError::InvalidCommand(
-                        "declare spec needs a type".to_string(),
-                    ));
-                };
-                if ty == Type::Void {
-                    return Err(PackageError::InvalidCommand(
-                        "cannot declare a variable of type void".to_string(),
-                    ));
-                }
-                if let Some(text) = &spec.init {
-                    parse_value(ty, text)
-                        .map_err(|e| PackageError::InvalidCommand(e.to_string()))?;
-                }
-                // Access is accepted here for shape-compatibility with a
-                // top-level `declare`, but a body variable is scoped to
-                // the branch and never appears in `listCommands`, so
-                // there is nothing for a wider visibility to mean yet.
-                // Reject a non-default value rather than silently
-                // dropping it (P22: fail explicitly).
-                if let Some(access) = spec.access {
-                    if access != Access::default() {
-                        return Err(PackageError::InvalidCommand(format!(
-                            "access '{}' is not supported on an if-body declare",
-                            access.tag()
-                        )));
-                    }
-                }
-                Ok(())
-            }
-            CommandKind::Assign => {
-                let var = spec.var.as_deref().unwrap_or("");
-                check_var_name(var).map_err(|e| PackageError::InvalidName(e.to_string()))?;
-                if spec
-                    .expr
-                    .as_deref()
-                    .map(|e| e.trim().is_empty())
-                    .unwrap_or(true)
-                {
-                    return Err(PackageError::InvalidCommand(
-                        "assign expression must not be empty".to_string(),
-                    ));
-                }
-                Ok(())
-            }
-            CommandKind::Print => Ok(()),
-            CommandKind::Input => {
-                let Some(ty) = spec.ty else {
-                    return Err(PackageError::InvalidCommand(
-                        "input spec needs a type".to_string(),
-                    ));
-                };
-                if ty == Type::Void {
-                    return Err(PackageError::InvalidCommand(
-                        "cannot read a value of type void".to_string(),
-                    ));
-                }
-                Ok(())
-            }
-            CommandKind::Cast => {
-                let var = spec.var.as_deref().unwrap_or("");
-                check_var_name(var).map_err(|e| PackageError::InvalidName(e.to_string()))?;
-                let Some(to) = spec.to else {
-                    return Err(PackageError::InvalidCommand(
-                        "cast spec needs a target type".to_string(),
-                    ));
-                };
-                if to == Type::Void {
-                    return Err(PackageError::InvalidCommand(
-                        "cannot cast to void".to_string(),
-                    ));
-                }
-                if spec
-                    .expr
-                    .as_deref()
-                    .map(|e| e.trim().is_empty())
-                    .unwrap_or(true)
-                {
-                    return Err(PackageError::InvalidCommand(
-                        "cast expression must not be empty".to_string(),
-                    ));
-                }
-                Ok(())
-            }
-            CommandKind::Return | CommandKind::If => Err(PackageError::InvalidCommand(
-                "return and if cannot be staged as if-body commands".to_string(),
-            )),
-        }
+        validation::validate_spec(spec)
     }
 
     /// Expand one validated spec into raw commands, pushed into the
@@ -150,19 +59,14 @@ impl Package {
                         "assign expression must not be empty".to_string(),
                     ));
                 }
-                // Type comes from the visible declaration (declare/cast).
-                let Some(ty) = self.declared_type(fid, &var) else {
-                    return Err(PackageError::UndeclaredVariable(var));
-                };
+                let ty = self
+                    .declared_type(fid, &var)
+                    .ok_or_else(|| PackageError::UndeclaredVariable(var.to_string()))?;
                 let (head, tail) = self.assign_group(fid, &var, ty, expr)?;
                 Ok((head.id, vec![head.id, tail.id]))
             }
             CommandKind::Print => {
-                let Some(template) = spec.template.as_deref() else {
-                    return Err(PackageError::InvalidCommand(
-                        "print spec needs a template".to_string(),
-                    ));
-                };
+                let template = spec.template.as_deref().unwrap_or("");
                 let (head, tail) = self.print_group(fid, template)?;
                 Ok((head.id, vec![head.id, tail.id]))
             }
@@ -244,7 +148,6 @@ impl Package {
 
     /// Create an `Op::If` from a condition expression and ordered body
     /// specs — the frontend-friendly alternative to `eval_cond` + `if_`.
-    ///
     /// The condition expression is evaluated into a hidden `ValueId`
     /// appended to the main chain; each body spec expands into the same
     /// raw commands the builders produce, linked in order. No raw ids or
@@ -257,14 +160,8 @@ impl Package {
         then_specs: &[CommandSpec],
         else_specs: Option<&[CommandSpec]>,
     ) -> Result<CommandId, PackageError> {
-        if !self.functions.contains_key(&fid) {
-            return Err(PackageError::UnknownFunction(fid));
-        }
-        if cond_expr.trim().is_empty() {
-            return Err(PackageError::InvalidCommand(
-                "condition expression must not be empty".to_string(),
-            ));
-        }
+        validation::validate_function_exists(self, fid)?;
+        validation::validate_condition_expr(cond_expr)?;
         // Validate everything first so a bad spec never leaves the
         // package half-built (no partial staging on error).
         for spec in then_specs {

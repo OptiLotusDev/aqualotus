@@ -6,6 +6,7 @@ use crate::package::if_side::IfSide;
 use crate::package::kind::CommandKind;
 
 use crate::package::registry::Package;
+use crate::package::validation;
 
 impl Package {
     pub fn eval_cond(&mut self, fid: FunctionId, expr: &str) -> Result<ValueId, PackageError> {
@@ -21,14 +22,8 @@ impl Package {
         fid: FunctionId,
         expr: &str,
     ) -> Result<Command, PackageError> {
-        if !self.functions.contains_key(&fid) {
-            return Err(PackageError::UnknownFunction(fid));
-        }
-        if expr.trim().is_empty() {
-            return Err(PackageError::InvalidCommand(
-                "condition expression must not be empty".to_string(),
-            ));
-        }
+        validation::validate_function_exists(self, fid)?;
+        validation::validate_condition_expr(expr)?;
         let vid = self.alloc_value_id();
         let head_id = self.alloc_command_id();
         Ok(Command {
@@ -56,9 +51,7 @@ impl Package {
         then_body: Vec<CommandId>,
         else_body: Option<Vec<CommandId>>,
     ) -> Result<CommandId, PackageError> {
-        if !self.functions.contains_key(&fid) {
-            return Err(PackageError::UnknownFunction(fid));
-        }
+        validation::validate_function_exists(self, fid)?;
         let head_id = self.alloc_command_id();
         let head = Command {
             id: head_id,
