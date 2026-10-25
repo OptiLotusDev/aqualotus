@@ -113,10 +113,7 @@ pub fn validate_spec(spec: &CommandSpec) -> Result<(), PackageError> {
 }
 
 /// Validate that a function id exists in the package.
-pub fn validate_function_exists(
-    pkg: &Package,
-    fid: FunctionId,
-) -> Result<(), PackageError> {
+pub fn validate_function_exists(pkg: &Package, fid: FunctionId) -> Result<(), PackageError> {
     if !pkg.functions.contains_key(&fid) {
         return Err(PackageError::UnknownFunction(fid));
     }
@@ -146,10 +143,7 @@ pub fn validate_var_not_declared(
 }
 
 /// Validate a function name (non-empty, no special chars, not "main", no duplicates).
-pub fn validate_function_name(
-    pkg: &Package,
-    raw: &str,
-) -> Result<String, PackageError> {
+pub fn validate_function_name(pkg: &Package, raw: &str) -> Result<String, PackageError> {
     let name = raw.trim().to_string();
     if name.is_empty() {
         return Err(PackageError::InvalidName(
@@ -182,8 +176,7 @@ pub fn validate_condition_expr(expr: &str) -> Result<(), PackageError> {
 
 /// Parse a type tag, rejecting unknown tags.
 pub fn parse_type_tag(ty_tag: &str) -> Result<Type, PackageError> {
-    Type::parse_tag(ty_tag)
-        .ok_or_else(|| PackageError::UnknownType(ty_tag.to_string()))
+    Type::parse_tag(ty_tag).ok_or_else(|| PackageError::UnknownType(ty_tag.to_string()))
 }
 
 /// Validate that an init text parses to a value of the given type.
