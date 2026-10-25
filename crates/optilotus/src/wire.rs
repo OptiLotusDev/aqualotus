@@ -158,16 +158,25 @@ pub struct OkResponse {
 
 impl Default for OkResponse {
     fn default() -> Self {
-        Self { status: STATUS_OK, description: None }
+        Self {
+            status: STATUS_OK,
+            description: None,
+        }
     }
 }
 
 impl OkResponse {
     pub fn new_with_description(desc: String) -> Self {
-        Self { status: STATUS_OK, description: Some(desc) }
+        Self {
+            status: STATUS_OK,
+            description: Some(desc),
+        }
     }
     pub fn new_noop() -> Self {
-        Self { status: STATUS_OK, description: None }
+        Self {
+            status: STATUS_OK,
+            description: None,
+        }
     }
 }
 
