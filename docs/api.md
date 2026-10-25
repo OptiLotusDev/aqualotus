@@ -38,7 +38,7 @@ One type per response shape. Each carries a `status` discriminant.
 
 | Type | Shape | Used by |
 |---|---|---|
-| `OkResponse` | `{status:"ok"}` | `setEntry`, `setNext` |
+| `OkResponse` | `{status:"ok", description?}` | `setEntry`, `setNext`, `undo`, `redo` |
 | `IdleResponse` | `{status:"idle"}` | run queries with no session |
 | `CommandIdResponse` | `{status:"ok", id}` | command builders |
 | `DeletedResponse` | `{status:"ok", deleted}` | `deleteFunction`, `deleteCommand` |
@@ -239,6 +239,8 @@ the wire types above.
 - `optilotus_deleteFunction(id: number): string`
 - `optilotus_renameFunction(id: number, name: string): string`
 - `optilotus_clearPackage(): string`
+- `optilotus_undo(): string`
+- `optilotus_redo(): string`
 
 **Command builders** (all take `fid: number`)
 - `optilotus_declare(fid, name, ty: string, init?: string): string`
