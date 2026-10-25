@@ -147,8 +147,6 @@ impl Default for IdleResponse {
 
 /// `{"status":"ok"}` — a mutation with no payload to return.
 #[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
-#[cfg_attr(feature = "ts-bindings", ts(export))]
 pub struct OkResponse {
     #[cfg_attr(feature = "ts-bindings", ts(type = "\"ok\""))]
     pub status: &'static str,
