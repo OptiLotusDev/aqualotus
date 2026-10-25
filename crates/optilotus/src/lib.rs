@@ -1,9 +1,9 @@
 //! The bridge: DTOs, serialization and the JS/WASM boundary.
 //!
 //! This crate is the boundary only. The engine lives in
-//! `optilotus-core`, which sits on `optilotus-data`; every name the UI
-//! and existing consumers use is re-exported here so the layering is
-//! invisible to callers (refactor rule 10: the bridge API stays stable).
+//! `optilotus-core`; every name the UI and existing consumers use is
+//! re-exported here so the layering is invisible to callers (refactor
+//! rule 10: the bridge API stays stable).
 //!
 //! # Expression language
 //!

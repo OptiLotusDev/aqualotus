@@ -14,11 +14,17 @@ Program IR ──▶ Validation ──▶ Scheduler ──▶ Runtime
 The IR is the single source of truth. The editor (Aqualotus) is a
 projection; it never owns program semantics.
 
-## Module layout
+## Crate split
 
+Optilotus is two crates with a one-way dependency:
+
+```
+optilotus (boundary) ──depends on──> optilotus-core (engine)
+```
+
+`optilotus-core` owns the language meaning and execution:
 | Module | Responsibility |
 |--------|---------------|
-| `bridge` | UI/runtime boundary (version, health, JSON helpers, WASM exports) |
 | `types` | Scalar type tags (`Type` enum, parsing) |
 | `value` | Runtime values (`Value` enum, one variant per type) |
 | `ir` | Authoritative program model (`Program`/`Function`/`Command`, `entry`/`next`) |
@@ -28,6 +34,13 @@ projection; it never owns program semantics.
 | `sink` | Explicit effect boundary for `Print` |
 | `error` | Typed execution failures with source identity |
 | `package` | Owned single-package registry (many functions, stable `main`) |
+
+`optilotus` is the thin UI/WASM boundary. It re-exports everything above
+and adds:
+| Module | Responsibility |
+|--------|---------------|
+| `bridge` | UI/runtime boundary (version, health, JSON helpers, WASM exports) |
+| `wire` | JSON wire envelopes shared with the TypeScript UI |
 
 ## Expression language
 
