@@ -1,8 +1,8 @@
 //! The graph: nodes and the edges between them.
 //!
-//! This is a plain mutable store with no rules attached. `optilotus-core`
-//! decides which edges are legal and writes them through its own
-//! lowering step (refactor rule 3); this crate only keeps them.
+//! This is a plain mutable store with no rules attached. Consumers decide
+//! which edges are legal and write them through their own lowering step;
+//! this crate only keeps them.
 
 use std::collections::HashMap;
 

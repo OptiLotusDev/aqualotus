@@ -1,10 +1,7 @@
 //! Stable identities for the storage layer.
 //!
-//! These identify stored objects. The program-level ids
-//! ([`crate::ir::FunctionId`], [`crate::ir::CommandId`],
-//! [`crate::ir::ValueId`]) are defined by `ir`, because they are part of
-//! what a program *means*; the ones here identify graph storage, which
-//! has no notion of commands.
+//! These identify stored graph objects: nodes and edges. They belong to
+//! the data layer and know nothing about program meaning.
 
 use serde::{Deserialize, Serialize};
 
