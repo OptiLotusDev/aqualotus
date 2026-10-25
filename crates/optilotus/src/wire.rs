@@ -152,11 +152,22 @@ impl Default for IdleResponse {
 pub struct OkResponse {
     #[cfg_attr(feature = "ts-bindings", ts(type = "\"ok\""))]
     pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 impl Default for OkResponse {
     fn default() -> Self {
-        Self { status: STATUS_OK }
+        Self { status: STATUS_OK, description: None }
+    }
+}
+
+impl OkResponse {
+    pub fn new_with_description(desc: String) -> Self {
+        Self { status: STATUS_OK, description: Some(desc) }
+    }
+    pub fn new_noop() -> Self {
+        Self { status: STATUS_OK, description: None }
     }
 }
 
