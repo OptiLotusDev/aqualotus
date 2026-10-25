@@ -128,6 +128,7 @@ export type { CommandSummary } from "../wasm/optilotus/bindings/CommandSummary";
 export type { ErrorResponse as OptilotusError } from "../wasm/optilotus/bindings/ErrorResponse";
 export type { FunctionInfo } from "../wasm/optilotus/bindings/FunctionInfo";
 export type { FunctionSummary } from "../wasm/optilotus/bindings/FunctionSummary";
+export type { OkResponse } from "../wasm/optilotus/bindings/OkResponse";
 export type { RunOkResponse as RunOk } from "../wasm/optilotus/bindings/RunOkResponse";
 export type { Type as OptilotusType } from "../wasm/optilotus/bindings/Type";
 export type { Value } from "../wasm/optilotus/bindings/Value";
@@ -139,6 +140,7 @@ import type { CommandSummary } from "../wasm/optilotus/bindings/CommandSummary";
 import type { ErrorResponse as OptilotusError } from "../wasm/optilotus/bindings/ErrorResponse";
 import type { FunctionInfo } from "../wasm/optilotus/bindings/FunctionInfo";
 import type { FunctionSummary } from "../wasm/optilotus/bindings/FunctionSummary";
+import type { OkResponse } from "../wasm/optilotus/bindings/OkResponse";
 import type { RunOkResponse as RunOk } from "../wasm/optilotus/bindings/RunOkResponse";
 import type { Type as OptilotusType } from "../wasm/optilotus/bindings/Type";
 import type { WaitingInputResponse as PendingInput } from "../wasm/optilotus/bindings/WaitingInputResponse";
@@ -221,18 +223,12 @@ export function optilotus_renameFunction(
   return parseBridge(renameFunction_wasm(id, name));
 }
 
-export function optilotus_undo(): {
-  status: "ok";
-  description?: string;
-} {
+export function optilotus_undo(): OkResponse {
   assertReady();
   return parseBridge(undo_wasm());
 }
 
-export function optilotus_redo(): {
-  status: "ok";
-  description?: string;
-} {
+export function optilotus_redo(): OkResponse {
   assertReady();
   return parseBridge(redo_wasm());
 }
