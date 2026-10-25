@@ -14,6 +14,7 @@ import init, {
   optilotus_listCommands as listCommands_wasm,
   optilotus_listFunctions as listFunctions_wasm,
   optilotus_print as print_wasm,
+  optilotus_redo as redo_wasm,
   optilotus_renameFunction as renameFunction_wasm,
   optilotus_return as return_wasm,
   optilotus_runProgram as runProgram_wasm,
@@ -28,6 +29,7 @@ import init, {
   optilotus_runProgramWithInputs as runProgramWithInputs_wasm,
   optilotus_setEntry as setEntry_wasm,
   optilotus_setNext as setNext_wasm,
+  optilotus_undo as undo_wasm,
   optilotus_version as version_wasm,
   optilotus_debugMode as debugMode_wasm,
   optilotus_if as if_wasm,
@@ -217,6 +219,22 @@ export function optilotus_renameFunction(
   | OptilotusError {
   assertReady();
   return parseBridge(renameFunction_wasm(id, name));
+}
+
+export function optilotus_undo(): {
+  status: "ok";
+  description?: string;
+} {
+  assertReady();
+  return parseBridge(undo_wasm());
+}
+
+export function optilotus_redo(): {
+  status: "ok";
+  description?: string;
+} {
+  assertReady();
+  return parseBridge(redo_wasm());
 }
 
 export function optilotus_clearPackage(): {
