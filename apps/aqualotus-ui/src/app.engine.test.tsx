@@ -16,6 +16,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { resetRealEngine, useRealEngine } from "./test-support/realEngine";
 import { optilotus_listCommands } from "./lib/optilotus";
+import type { CommandSummary } from "./lib/optilotus";
 
 vi.mock("./components/StartIntro", async () => {
   const { useEffect } = await import("react");
@@ -305,19 +306,19 @@ describe("PARITY-022 — the whole app runs a real program", () => {
     expect(listed.status).toBe("ok");
     if (listed.status !== "ok") return;
     expect(
-      listed.commands.find((c) => c.kind === "declare" && c.var === "x"),
+      listed.commands.find((c: CommandSummary) => c.kind === "declare" && c.var === "x"),
     ).toMatchObject({ ty: "int32", expr: "5" });
     expect(
-      listed.commands.filter((c) => c.kind === "assign" && c.var === "x"),
+      listed.commands.filter((c: CommandSummary) => c.kind === "assign" && c.var === "x"),
     ).toHaveLength(1);
     expect(
-      listed.commands.find((c) => c.kind === "assign" && c.var === "x")?.expr,
+      listed.commands.find((c: CommandSummary) => c.kind === "assign" && c.var === "x")?.expr,
     ).toBe("5");
-    const casts = listed.commands.filter((c) => c.kind === "cast");
+    const casts = listed.commands.filter((c: CommandSummary) => c.kind === "cast");
     expect(casts).toHaveLength(1);
     expect(casts[0]).toMatchObject({ var: "x_f64", ty: "float64", expr: "{x}" });
     expect(
-      listed.commands.some((c) => c.kind === "cast" && c.ty === "int32"),
+      listed.commands.some((c: CommandSummary) => c.kind === "cast" && c.ty === "int32"),
     ).toBe(false);
 
     // Changing the target type after a conversion replaces the converted
@@ -332,18 +333,18 @@ describe("PARITY-022 — the whole app runs a real program", () => {
       expect(after.status).toBe("ok");
       if (after.status !== "ok") return;
       expect(
-        after.commands.find((c) => c.kind === "cast" && c.var === "x_u128"),
+        after.commands.find((c: CommandSummary) => c.kind === "cast" && c.var === "x_u128"),
       ).toMatchObject({ ty: "uint128" });
       // No duplicate or stale converted variable remains.
       expect(
-        after.commands.some((c) => (c.var ?? "") === "x_f64"),
+        after.commands.some((c: CommandSummary) => (c.var ?? "") === "x_f64"),
       ).toBe(false);
-      expect(after.commands.filter((c) => c.kind === "cast")).toHaveLength(1);
+      expect(after.commands.filter((c: CommandSummary) => c.kind === "cast")).toHaveLength(1);
       expect(
-        after.commands.find((c) => c.kind === "declare" && c.var === "x"),
+        after.commands.find((c: CommandSummary) => c.kind === "declare" && c.var === "x"),
       ).toMatchObject({ ty: "int32", expr: "5" });
       expect(
-        after.commands.filter((c) => c.kind === "assign" && c.var === "x"),
+        after.commands.filter((c: CommandSummary) => c.kind === "assign" && c.var === "x"),
       ).toHaveLength(1);
     });
     // The user's own print still names the old variable: the engine
