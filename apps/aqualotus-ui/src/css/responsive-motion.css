@@ -1,0 +1,213 @@
+/* ---------- Responsive ---------- */
+
+@media (max-width: 767px) {
+  .workspace {
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+  }
+  .only-compact {
+    display: inline-flex;
+  }
+  .appbar {
+    margin: 8px 8px 0;
+    padding: var(--space-3);
+  }
+  .pane-editor {
+    position: static;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .pane-body.editor-body {
+    padding: var(--space-3);
+  }
+  .board {
+    min-height: 46svh;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+  }
+  .canvas-toolbar {
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+  }
+  .canvas-title {
+    display: none;
+  }
+  .runner-inline {
+    display: block;
+    border-top: 1px solid var(--border);
+    padding: var(--space-4);
+    background: color-mix(in srgb, var(--color-bg) 60%, transparent);
+  }
+}
+
+/* Very small screens: keep the status dot, drop its text so the
+ * appbar controls stay reachable without horizontal scrolling. */
+@media (max-width: 400px) {
+  .appbar .status-dot {
+    font-size: 0;
+    gap: 0;
+  }
+  .appbar {
+    gap: var(--space-2);
+    padding: var(--space-3);
+  }
+}
+
+/* ---------- Motion ---------- */
+
+/* Coordinated entrance. The sequence follows the screen hierarchy:
+ * toolbar → status → heading → supporting copy → primary action →
+ * secondary metadata. The `translate` property is used instead of
+ * `transform` so elements that are centred with a transform (the
+ * canvas toolbar) keep their position while they fade in. */
+@keyframes enter-up {
+  from {
+    opacity: 0;
+    translate: 0 10px;
+  }
+  to {
+    opacity: 1;
+    translate: none;
+  }
+}
+
+@keyframes enter-down {
+  from {
+    opacity: 0;
+    translate: 0 -10px;
+  }
+  to {
+    opacity: 1;
+    translate: none;
+  }
+}
+
+@keyframes enter-panel {
+  from {
+    opacity: 0;
+    translate: 0 14px;
+    scale: 0.99;
+  }
+  to {
+    opacity: 1;
+    translate: none;
+    scale: 1;
+  }
+}
+
+.enter-up {
+  animation: enter-up var(--transition-entrance) var(--ease-out-expo) both;
+}
+
+.enter-down {
+  animation: enter-down var(--transition-entrance) var(--ease-out-expo) both;
+}
+
+.enter-panel {
+  animation: enter-panel var(--transition-fast) var(--ease-out-expo) both;
+}
+
+.enter-delay-toolbar {
+  animation-delay: 150ms;
+}
+
+.enter-delay-status {
+  animation-delay: 320ms;
+}
+
+.enter-delay-heading {
+  animation-delay: 480ms;
+}
+
+.enter-delay-action {
+  animation-delay: 1450ms;
+}
+
+.enter-delay-meta {
+  animation-delay: 1650ms;
+}
+
+/* A focused control must never be hidden by an entrance animation:
+ * keyboard users reach it before the sequence has finished. */
+.enter-up:focus-visible,
+.enter-down:focus-visible,
+.enter-panel:focus-visible {
+  animation: none;
+  opacity: 1;
+  translate: none;
+  scale: 1;
+}
+
+/* Word-by-word reveal for presentation text. The full text is in the
+ * DOM from the first paint, so assistive technology is unaffected. */
+.reveal-words {
+  display: inline;
+}
+
+.reveal-word {
+  display: inline-block;
+  opacity: 0;
+  animation: reveal-word 620ms var(--ease-out-expo) both;
+}
+
+@keyframes reveal-word {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+  to {
+    opacity: 1;
+    translate: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.vblock {
+  animation: rise var(--transition-fast) var(--ease-out-expo);
+}
+
+/* A block that appears fades in with a subtle scale — the same 150ms
+ * vocabulary the rest of the interface uses. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A block that was just deleted fades out where it stood. It is inert:
+ * the model already dropped it, the picture is only finishing its exit. */
+.vblock[data-exiting="true"] {
+  animation: block-out var(--transition-fast) ease-in forwards;
+  pointer-events: none;
+}
+
+@keyframes block-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+

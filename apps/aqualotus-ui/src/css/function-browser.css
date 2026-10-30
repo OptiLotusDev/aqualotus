@@ -1,0 +1,122 @@
+/* ---------- Function browser ---------- */
+
+.fn-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fn-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  animation: item-in var(--transition-fast) ease-out;
+}
+
+.fn-row .fn-item {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A new list row fades in with a subtle scale. */
+@keyframes item-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A removed row leaves the other way round: the state is already gone,
+ * only the picture fades out — same 150ms vocabulary. */
+@keyframes item-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* A function row that was just deleted fades out in place. */
+.fn-row[data-exiting="true"] {
+  animation: item-out var(--transition-fast) ease-in forwards;
+  pointer-events: none;
+}
+
+.fn-rename {
+  flex: none;
+}
+
+.fn-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  font-size: 13.5px;
+  transition:
+    background var(--transition-fast) ease,
+    border-color var(--transition-fast) ease,
+    color var(--transition-fast) ease,
+    transform var(--transition-fast) var(--ease-out-expo);
+}
+
+.fn-item:hover {
+  background: var(--accent-soft);
+  transform: translateX(2px);
+}
+
+.fn-item[aria-current="true"] {
+  background: var(--surface-selected);
+  border-color: var(--border-strong);
+}
+
+.fn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+
+.fn-item[data-main="true"] .fn-dot {
+  background: var(--color-primary);
+}
+
+.fn-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.main-badge {
+  font-family: var(--rounded);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  color: var(--color-primary);
+  flex: none;
+  transition:
+    background var(--transition-fast) ease,
+    border-color var(--transition-fast) ease,
+    color var(--transition-fast) ease;
+}
+

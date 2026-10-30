@@ -1,0 +1,444 @@
+/* ---------- Liquid glass utilities ----------
+ * Every container on the board shares these two layers: a body of
+ * translucent sapphire, and a stack of painted light (rim, sheen,
+ * inner shadow, drop shadow). Neither uses `backdrop-filter` — the
+ * fluid ink behind the glass still reads through the fill, and the
+ * board stays cheap to pan and drag on every target.
+ *
+ * NIGHT ONLY. The light theme is a separate, untouched surface system
+ * (solid `--surface` fills with a faint hairline); `:root` carries the
+ * glass tokens and light mode overrides them back at the end of this
+ * file, so a theme flip never inherits a midnight glass fill. */
+
+.glass {
+  position: relative;
+  background: var(--glass-fill);
+  border: none;
+  box-shadow: var(--glass-shadow);
+}
+
+/* The painted light. One pseudo-element, three stacked gradients plus
+ * the top specular line, so the rim never rasterizes over the text. */
+.glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    var(--glass-rim) top / 100% 14px no-repeat,
+    var(--glass-sheen);
+  pointer-events: none;
+}
+
+/* Deep-space neon palette. The category stripe keeps its hue family
+ * from the data model (identity/type/value), and the outline and the
+ * flow line bloom with the same hue — a block reads as one colour
+ * story rather than three unrelated accents. */
+.vblock[data-kind="declare"] { --neon: var(--neon-red); }
+.vblock[data-kind="assign"] { --neon: var(--neon-violet); }
+.vblock[data-kind="cast"] { --neon: var(--neon-violet); }
+.vblock[data-kind="print"],
+.vblock[data-kind="input"] { --neon: var(--neon-grey); }
+.vblock[data-kind="return"] { --neon: var(--neon-blue); }
+.vblock[data-kind="if"] { --neon: var(--neon-amber); }
+.vblock[data-kind="condition"] { --neon: var(--neon-amber); }
+.vblock[data-kind="flow"] { --neon: var(--neon-cyan); }
+
+/* Containers bloom in their hierarchy hue. */
+.pkg { --neon: var(--neon-magenta); }
+.structc { --neon: var(--neon-green); }
+.funcc { --neon: var(--neon-blue); }
+
+.vblock {
+  position: absolute;
+  width: 216px;
+  padding: 12px 14px 14px;
+  border-radius: 14px;
+  /* Command surface: a dark base softly TINTED by the command's own
+   * category hue, so each block carries its colour identity without a
+   * bright wash over the text. Glow stays soft and outward (below). */
+  background: color-mix(in srgb, var(--neon) 4%, rgba(6, 8, 20, 0.82));
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  box-shadow:
+    /* The hierarchy colour runs around the whole perimeter: a crisp
+     * inner rim plus a restrained outer bloom. The top-edge stripe
+     * below is an accent on top of it, never the only colour. */
+    inset 0 0 0 1px color-mix(in srgb, var(--neon) 20%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    inset 0 0 18px rgba(6, 10, 26, 0.62),
+    inset 0 -12px 24px rgba(8, 12, 30, 0.4),
+    0 12px 30px rgba(1, 3, 12, 0.56),
+    0 2px 8px rgba(1, 3, 12, 0.4),
+    /* The rim itself, on every side. */
+    0 0 0 1px color-mix(in srgb, var(--neon) 34%, transparent),
+    0 0 10px color-mix(in srgb, var(--neon) 12%, transparent);
+  transition:
+    box-shadow var(--transition-fast) var(--ease-out-expo),
+    transform var(--transition-fast) var(--ease-out-expo),
+    opacity var(--transition-fast) ease;
+  /* The ports sit half outside the block: they must not be clipped. */
+  overflow: visible;
+  animation: rise var(--transition-fast) var(--ease-out-expo);
+}
+
+/* Soft hue on the surface: a low-opacity wash of the command's own
+ * category colour so the block reads as tinted glass, plus a faint
+ * lit-from-above rim. Kept low so it never washes over the text. */
+.vblock::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.14) 0%,
+      rgba(255, 255, 255, 0.03) 22%,
+      transparent 46%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--neon) 12%, transparent) 0%,
+      color-mix(in srgb, var(--neon) 4%, transparent) 26%,
+      transparent 62%
+    );
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* The category stripe is now a soft bloom of colour at the top edge
+ * instead of a flat 4px bar — same hue, far more depth. */
+.vblock::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 10px;
+  right: 10px;
+  height: 3px;
+  border-radius: 0 0 999px 999px;
+  background: var(--neon);
+  box-shadow:
+    0 0 8px var(--neon),
+    0 0 16px color-mix(in srgb, var(--neon) 45%, transparent);
+  pointer-events: none;
+}
+
+.vblock:hover {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--neon) 34%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 0 26px rgba(6, 10, 26, 0.48),
+    inset 0 -16px 30px rgba(8, 12, 30, 0.36),
+    0 20px 44px rgba(1, 3, 12, 0.6),
+    0 4px 12px rgba(1, 3, 12, 0.42),
+    0 0 0 1px color-mix(in srgb, var(--neon) 48%, transparent),
+    0 0 26px color-mix(in srgb, var(--neon) 32%, transparent);
+}
+
+.vblock:active {
+  cursor: grabbing;
+}
+
+.vblock[data-selected="true"] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--neon) 46%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 0 24px rgba(6, 10, 26, 0.46),
+    inset 0 -16px 30px rgba(8, 12, 30, 0.34),
+    0 22px 48px rgba(1, 3, 12, 0.62),
+    var(--glow-ring);
+}
+
+/* Connecting: same luminous outline, quieter — the block is part of a
+ * wire, not the selection. */
+.vblock[data-connect-from="true"] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--neon) 40%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 0 24px rgba(6, 10, 26, 0.46),
+    inset 0 -16px 30px rgba(8, 12, 30, 0.34),
+    0 20px 44px rgba(1, 3, 12, 0.6),
+    var(--glow-ring-soft);
+}
+
+/* The join circle sourcing a wire lights the same quieter way — the
+ * dragged wire really does leave the pill's own right port. */
+.vjoin[data-connect-from="true"] {
+  border-color: color-mix(in srgb, var(--neon) 70%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 0 18px color-mix(in srgb, var(--neon) 55%, transparent);
+}
+
+.vblock[data-error="true"] {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 0 24px rgba(6, 10, 26, 0.46),
+    inset 0 -16px 30px rgba(8, 12, 30, 0.34),
+    0 20px 44px rgba(1, 3, 12, 0.6),
+    0 0 0 1px rgba(248, 113, 113, 0.75),
+    0 0 20px rgba(248, 113, 113, 0.4);
+}
+
+.vblock-kind {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--neon);
+  opacity: 0.95;
+}
+
+.vblock-main {
+  font-family: var(--sans);
+  font-size: 15px;
+  color: var(--color-fg);
+  overflow-wrap: anywhere;
+}
+
+/* Reference palette for declares: the identity line carries the block
+ * hue, types and values stay cool against the glass. */
+.vblock-var {
+  font-family: var(--sans);
+  font-size: 16px;
+  color: var(--color-fg);
+  overflow-wrap: anywhere;
+}
+
+.vblock-type {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--color-muted-fg);
+  overflow-wrap: anywhere;
+}
+
+.vblock-error {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--color-console-err);
+}
+
+/* Casting annotation: a small status plate above the upper-left corner
+ * of the Assign block, joined to it by a decorative inverted-L line
+ * (down from the plate, then right into the block). It is a child of the
+ * block, so block drags, pan/zoom, culling and selection-following need
+ * no extra geometry. Purely decorative: it adds no canvas edge. */
+.vblock-casting {
+  position: absolute;
+  left: 6px;
+  bottom: calc(100% + 12px);
+  z-index: 3;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 3px 10px 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--neon) 12%, rgba(6, 8, 20, 0.92));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--neon) 42%, transparent),
+    0 0 14px color-mix(in srgb, var(--neon) 20%, transparent);
+  color: color-mix(in srgb, var(--neon) 72%, var(--color-fg));
+  font-family: var(--sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Second plate line: the conversion's target type (e.g. `type:
+   float32`) — what the value becomes, not the destination's declared
+   type. Slightly smaller and quieter than the label line. */
+.vblock-casting-type {
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  opacity: 0.78;
+}
+
+.vblock-casting-link {
+  position: absolute;
+  left: 5px;
+  top: 100%;
+  width: 15px;
+  height: 12px;
+  border-left: 1.5px solid color-mix(in srgb, var(--neon) 68%, transparent);
+  border-bottom: 1.5px solid color-mix(in srgb, var(--neon) 68%, transparent);
+  border-bottom-left-radius: 3px;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--neon) 45%, transparent));
+  pointer-events: none;
+}
+
+/* Ports: hollow rings of glass. The output port fills with the flow
+ * colour and glows when it is the connection source. */
+.vport {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-canvas) 82%, var(--neon));
+  border: 1.5px solid var(--neon);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 0 10px color-mix(in srgb, var(--neon) 55%, transparent);
+  transition:
+    transform var(--transition-fast) var(--ease-out-expo),
+    background var(--transition-fast) ease,
+    box-shadow var(--transition-fast) ease;
+  z-index: 2;
+}
+
+/* Ports sit centered exactly on their block border: a 13px ring whose
+ * edge is 6.5px inside its side brings its centre onto the border line,
+ * so every drawn edge anchors the port's true centre (P3/P17). */
+.vport-left {
+  left: -6.5px;
+  top: 50%;
+  margin-top: -6.5px;
+}
+
+.vport-right {
+  right: -6.5px;
+  top: 50%;
+  margin-top: -6.5px;
+  cursor: crosshair;
+}
+
+/* Vertical member pair: the top in-port (branch entry) and the bottom
+ * out-port (column flow) share the card's horizontal centre. */
+.vport-top {
+  top: -6.5px;
+  left: 50%;
+  margin-left: -6.5px;
+  cursor: crosshair;
+}
+
+.vport-out-bottom {
+  bottom: -6.5px;
+  top: auto;
+  left: 50%;
+  margin-left: -6.5px;
+  margin-top: 0;
+  cursor: crosshair;
+}
+
+/* Vertical If/Else: the two branch ports sit on the card's BOTTOM edge
+ * at 30% (true) and 70% (false) width — the same fractions as
+ * `BRANCH_PORT_FRACTION` in src/lib/graph.ts, mirrored here so the
+ * ports and the derived wires anchor at the same points. The negative
+ * margin brings the ring's *centre* onto the fraction point, since the
+ * value would otherwise place the ring's left edge there. */
+.vport-bottom {
+  bottom: -6.5px;
+  top: auto;
+  margin-top: 0;
+  cursor: crosshair;
+}
+
+.vport-then.vport-bottom {
+  left: 30%;
+  margin-left: -6.5px;
+}
+
+.vport-else.vport-bottom {
+  left: 70%;
+  margin-left: -6.5px;
+}
+
+/* The old horizontal then/else side ports are gone: the vertical if
+ * card exposes both branches on its bottom edge via `.vport-bottom`
+ * (above), so no standalone `.vport-then`/`.vport-else` position rules
+ * remain — the classes only ever pair with `.vport-bottom` now. */
+
+.vport:hover {
+  transform: scale(1.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 0 16px var(--neon),
+    0 0 30px color-mix(in srgb, var(--neon) 65%, transparent);
+}
+
+.vblock[data-connect-from="true"] .vport-right,
+.vjoin[data-connect-from="true"] .vport-right {
+  background: var(--neon);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 0 14px var(--neon),
+    0 0 34px color-mix(in srgb, var(--neon) 70%, transparent);
+}
+
+.vblock[data-interactive="false"] {
+  cursor: pointer;
+}
+
+.vblock[data-interactive="false"] .vport {
+  display: none;
+}
+
+/* Vertical `if` card: taller than the rest so the two bottom branch
+ * ports and the condition line read clearly, and wide enough that the
+ * 30%/70% port fractions sit apart. */
+.vblock[data-kind="if"] {
+  min-height: 156px;
+  min-width: 188px;
+}
+
+/* Port labels: tiny "true"/"false" tags beside the if branch outputs
+ * (below the bottom branch ports on the vertical card). */
+.vport-label {
+  position: absolute;
+  right: 4px;
+  width: 36px;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.85;
+  transition: opacity var(--transition-fast) var(--ease-out-expo);
+  pointer-events: none;
+  user-select: none;
+}
+.vblock[data-kind="if"] .vport-label {
+  color: var(--neon-amber);
+}
+.vblock[data-connect-from="true"] .vport-label {
+  opacity: 1;
+}
+
+.vport-label-then {
+  top: 25%;
+  margin-top: -6px;
+}
+.vport-label-else {
+  top: 75%;
+  margin-top: -6px;
+}
+
+/* On the vertical `if` card the labels follow the bottom ports inward. */
+.vblock[data-kind="if"] .vport-label {
+  right: auto;
+  top: auto;
+  bottom: -30px;
+  width: 44px;
+}
+.vblock[data-kind="if"] .vport-label-then {
+  left: 30%;
+  margin-left: -22px;
+}
+.vblock[data-kind="if"] .vport-label-else {
+  left: 70%;
+  margin-left: -22px;
+}
+

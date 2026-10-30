@@ -1,0 +1,94 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(1200px 600px at 15% -5%, color-mix(in srgb, var(--color-accent) 14%, transparent), transparent 60%),
+    radial-gradient(1000px 500px at 90% 10%, color-mix(in srgb, var(--color-primary) 12%, transparent), transparent 60%),
+    linear-gradient(var(--night-1), var(--night-0));
+  background-attachment: fixed;
+  color: var(--text-primary);
+}
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  /* Sits above the atmospheric backdrop layer. */
+  position: relative;
+  z-index: 1;
+}
+
+/* ---------- Atmospheric backdrop ---------- */
+
+/* Decorative ink layer: colorful fluid drifting through dark water.
+ * It never receives pointer or touch events, so the editor's
+ * selection, dragging, wiring, and execution are untouched. The
+ * night atmosphere is the product default — light mode keeps the
+ * static gradient stack instead. */
+.fluid-backdrop {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* Behind every layer of the app, whatever its stacking context:
+   * the root element owns a stacking context of its own, so the
+   * backdrop can never paint over a screen. */
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  animation: fluid-in 1400ms ease-out forwards;
+}
+
+:root[data-theme="light"] .fluid-backdrop {
+  display: none;
+}
+
+@keyframes fluid-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Readable focus everywhere (keyboard navigation). */
+:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Base controls. */
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+input,
+select {
+  font: inherit;
+  color: var(--text-primary);
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+

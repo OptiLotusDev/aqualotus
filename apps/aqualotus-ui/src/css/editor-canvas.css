@@ -1,0 +1,302 @@
+/* ---------- Editor / canvas ---------- */
+
+.fn-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.fn-header h2 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.fn-header h2 .fn-call {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.fn-header .cmd-count {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.pane-editor {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.editor-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.runner-dock {
+  border-top: 1px solid var(--border);
+  padding: var(--space-4);
+  max-height: 38%;
+  overflow: auto;
+  background: color-mix(in srgb, var(--color-bg) 55%, transparent);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.left-stack {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.left-stack > section + section {
+  border-top: 1px solid var(--border);
+}
+
+/* Visual canvas */
+
+.canvas-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.canvas-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+}
+
+.canvas-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--rounded);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.canvas-title .cmd-count {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.canvas-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.toolbar-extra {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .toolbar-extra {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-left: auto;
+  }
+  .hide-compact {
+    display: none;
+  }
+}
+
+@media (min-width: 768px) {
+  .canvas-toolbar {
+    position: absolute;
+    top: 84px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 15;
+    padding: 6px 8px 6px 14px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    -webkit-backdrop-filter: blur(22px) saturate(1.4);
+    backdrop-filter: blur(22px) saturate(1.4);
+    box-shadow: var(--shadow-soft);
+    white-space: nowrap;
+  }
+}
+
+.canvas-hint {
+  font-size: 13px;
+  color: var(--color-console-warn);
+}
+
+.cull-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.board {
+  position: relative;
+  flex: 1;
+  min-height: 280px;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  /* The canvas is a sheet of deep glass over the fluid ink: no
+   * stroke, only a top-lit rim and a long soft shadow. */
+  border: none;
+  background-color: color-mix(in srgb, var(--color-canvas) 62%, transparent);
+  background-image: radial-gradient(
+    circle,
+    var(--color-dot) 1px,
+    transparent 1px
+  );
+  background-size: 20px 20px;
+/* The canvas is a sheet of deep glass over the fluid ink: no
+   * stroke, only a top-lit rim and a long soft shadow. The inset
+   * shadow must be painted on the board's own box (the world inside
+   * scrolls with the content, which would drag the shading along). */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 0 60px rgba(5, 8, 20, 0.5),
+    inset 0 -28px 56px rgba(6, 10, 24, 0.36),
+    0 24px 54px rgba(1, 3, 12, 0.45);
+  /* Canvas-only gestures: single-finger pans natively; browser
+   * pinch-zoom is excluded (not listed) so two-finger pinch reaches
+   * the board's own zoom handler instead of scaling the whole app. */
+  touch-action: pan-x pan-y;
+  overscroll-behavior: contain;
+}
+
+@media (min-width: 768px) {
+  .board {
+    border: none;
+    border-radius: 0;
+  }
+}
+
+.board-world {
+  position: relative;
+  transform-origin: 0 0;
+}
+
+.links {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.edge {
+  fill: none;
+  stroke: var(--edge-flow, var(--color-flow));
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  /* Selection and state changes cross-fade instead of snapping. */
+  transition:
+    stroke var(--transition-fast) ease,
+    stroke-width var(--transition-fast) ease,
+    filter var(--transition-fast) ease;
+}
+
+.edge-selected {
+  stroke: var(--edge-flow-selected, var(--color-flow-selected));
+  stroke-width: 2.6;
+  /* The neon line: a soft bloom around the connection so the flow reads
+   * as light travelling through the glass. */
+  filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.75))
+    drop-shadow(0 0 18px rgba(34, 211, 238, 0.4));
+}
+
+.edge-preview {
+  stroke: var(--color-flow-preview);
+  stroke-width: 2.2;
+  stroke-dasharray: 7 6;
+  filter: drop-shadow(0 0 5px rgba(79, 124, 255, 0.65));
+}
+
+/* A connection the engine accepted but cannot report (the edge into an
+ * `if`, whose hidden condition compute hides it). It is dashed, so a
+ * viewer can tell it apart from the connections the engine confirms. */
+.edge-planned {
+  stroke-dasharray: 5 5;
+  opacity: 0.85;
+}
+
+/* ---------- Connection stretch ---------- */
+
+/* A newly created connection draws itself in: the path is normalized
+ * with `pathLength="1"`, so one dash of the full length reveals it
+ * from source to destination without measuring anything. */
+.edge-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: edge-draw-in 110ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes edge-draw-in {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The arrowhead arrives with the end of the line: the marker lives on
+ * a copy of the path that shows nothing but its head. */
+.edge-draw-head {
+  fill: none;
+  stroke: none;
+  opacity: 0;
+  animation: edge-draw-head 110ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes edge-draw-head {
+  0%,
+  62% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* ---------- Execution flow travel ---------- */
+
+/* The travelling indicator of a run: a small luminous head riding the
+ * actual connection path, in the colour of that very connection (the
+ * same tokens the connection itself uses, so a selected connection glows
+ * in the selected colour and a dashed preview stays dashed). The
+ * connection underneath is never touched. */
+.flow-dot {
+  --glow-color: var(--edge-flow, var(--color-flow));
+  fill: var(--glow-color);
+  /* The head carries the bloom: execution is the one moment the board
+   * should glow hardest. */
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--glow-color) 80%, white))
+    drop-shadow(0 0 12px color-mix(in srgb, var(--glow-color) 50%, transparent));
+  transition: opacity 120ms ease-out;
+}
+
+.flow-dot.edge-selected {
+  --glow-color: var(--edge-flow-selected, var(--color-flow-selected));
+}
+
+/* The soft trail behind the head. */
+.flow-trail {
+  --glow-color: var(--edge-flow, var(--color-flow));
+  fill: var(--glow-color);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--glow-color) 45%, transparent));
+  transition: opacity 120ms ease-out;
+}
+
+.flow-trail.edge-selected {
+  --glow-color: var(--edge-flow-selected, var(--color-flow-selected));
+}
+
+.marker-flow {
+  fill: var(--color-flow);
+  /* The arrowhead glows with the line it belongs to. */
+  filter: drop-shadow(0 0 3px rgba(34, 211, 238, 0.7));
+}
+

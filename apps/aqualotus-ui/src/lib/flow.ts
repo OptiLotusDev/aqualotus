@@ -95,192 +95,207 @@ export function flowTimings(count: number): {
 export type RunPrinted = readonly string[];
 
 /** One `then`/`else` candidate for an `if`'s decision. */
-interface BranchCandidate {
+export interface BranchCandidate {
   readonly side: "then" | "else";
+  /** Visible members of the branch, in execution order. */
   readonly members: readonly CommandSummary[];
   /** Visible print members, in branch-list order. */
   readonly prints: readonly CommandSummary[];
 }
 
 /**
+ * Filter a branch body's raw ids to the visible commands the canvas can
+ * draw. The engine's branch list starts at the branch's first raw node
+ * (not always a drawable block), so only ids that also appear as
+ * commands are blocks.
+ */
+export function visibleBranchBody(
+  body: readonly number[] | null | undefined,
+  byId: Map<number, CommandSummary>,
+): CommandSummary[] {
+  const out: CommandSummary[] = [];
+  if (body === null || body === undefined) return out;
+  for (const id of body) {
+    const cmd = byId.get(id);
+    if (cmd !== undefined) out.push(cmd);
+  }
+  return out;
+}
+
+/** Quoted text without `{variables}`: the literal line the engine prints. */
+export function literalPrintLine(template: string | undefined): string | null {
+  if (template === undefined) return null;
+  const text = template.trim();
+  if (text.length < 2 || !text.startsWith('"') || !text.endsWith('"')) {
+    return null;
+  }
+  const inner = text.slice(1, -1);
+  if (inner.includes("{") || inner.includes("\\")) return null;
+  return inner;
+}
+
+/**
+ * Print lines the walk would cover on the chain that starts at `start`,
+ * stopping at the first downstream `if` (`null` = unknown: that `if`'s
+ * branch may print, which the count alone cannot bank). Cycle-safe.
+ */
+export function chainPrintCount(
+  start: number | null | undefined,
+  byId: Map<number, CommandSummary>,
+): number | null {
+  let count = 0;
+  const seen = new Set<number>();
+  let current: number | null = start ?? null;
+  while (current !== null && !seen.has(current)) {
+    seen.add(current);
+    const cmd = byId.get(current);
+    if (cmd === undefined) break;
+    if (cmd.kind === "if") return null;
+    if (cmd.kind === "print") count += 1;
+    const next = cmd.next;
+    if (next === null || next === undefined || !byId.has(next)) break;
+    current = next;
+  }
+  return count;
+}
+
+/**
+ * Build one `then`/`else` candidate: its visible members and the print
+ * members among them.
+ */
+export function branchCandidate(
+  side: "then" | "else",
+  body: readonly number[] | null | undefined,
+  byId: Map<number, CommandSummary>,
+): BranchCandidate {
+  const members = visibleBranchBody(body, byId);
+  return {
+    side,
+    members,
+    prints: members.filter((m) => m.kind === "print"),
+  };
+}
+
+/** `true` when a candidate's branch holds a nested `if`. The envelope
+ * cannot recover the nested walk order, so the outer decision stays
+ * open. */
+export function hasNestedIf(candidate: BranchCandidate): boolean {
+  return candidate.members.some((m) => m.kind === "if");
+}
+
+/** `true` when the printed window is consistent with this candidate:
+ * the join-side print count lines up, and every literal print reappears
+ * at the position the walk would print it. Variable templates are
+ * tolerated (they cannot be verified from the envelope). */
+export function candidateViable(
+  candidate: BranchCandidate,
+  offset: number,
+  printed: RunPrinted,
+  joinCount: number | null,
+): boolean {
+  if (joinCount !== null && printed.length !== offset + candidate.prints.length + joinCount) {
+    return false;
+  }
+  for (let i = 0; i < candidate.prints.length; i += 1) {
+    const line = literalPrintLine(candidate.prints[i]?.template);
+    if (line === null) continue;
+    if (printed[offset + i] !== line) return false;
+  }
+  return true;
+}
+
+/** `true` when every line of the candidate is verified: all its prints
+ * are literals that reappeared at the exact positions the walk prints
+ * them. A branch with no prints is never proven. */
+export function candidateProven(
+  candidate: BranchCandidate,
+  offset: number,
+  printed: RunPrinted,
+): boolean {
+  if (candidate.prints.length === 0) return false;
+  for (let i = 0; i < candidate.prints.length; i += 1) {
+    const line = literalPrintLine(candidate.prints[i]?.template);
+    if (line === null) return false;
+    if (printed[offset + i] !== line) return false;
+  }
+  return true;
+}
+
+/**
+ * Which branch the run took at one `if`, or null when the envelope
+ * cannot decide. `offset` is how many printed lines the walk passed
+ * before the `if`.
+ *
+ * Resolution order:
+ * 1. Nested `if` in either body → undecided (module limitation).
+ * 2. Exactly one viable candidate (count excludes the other) → decided.
+ * 3. Both viable: the proven candidate (all literal prints reappear)
+ *    beats the unverifiable one; a tie stays undecided.
+ * 4. Envelope exhausted: a literal condition the engine itself holds
+ *    names the branch — not a guess, but stated truth.
+ */
+export function decideBranch(
+  cmd: CommandSummary,
+  offset: number,
+  printed: RunPrinted,
+  byId: Map<number, CommandSummary>,
+  /**
+   * Literal conditions per `if` (`"true"` / `"false"` exactly, read from
+   * the engine's own `if_condition` at run freeze — nothing folded).
+   * Used only when the envelope cannot decide.
+   */
+  literalConditions?: ReadonlyMap<number, boolean>,
+): "then" | "else" | null {
+  const candidates = [
+    branchCandidate("then", cmd.then_body, byId),
+    branchCandidate("else", cmd.else_body, byId),
+  ];
+  if (candidates.some((c) => hasNestedIf(c))) {
+    return null;
+  }
+  const joinCount = chainPrintCount(cmd.next, byId);
+  const thenViable = candidateViable(candidates[0], offset, printed, joinCount);
+  const elseViable = candidateViable(candidates[1], offset, printed, joinCount);
+  if (thenViable !== elseViable) {
+    return thenViable ? "then" : "else";
+  }
+  const thenProven = candidateProven(candidates[0], offset, printed);
+  const elseProven = candidateProven(candidates[1], offset, printed);
+  if (thenProven !== elseProven) {
+    return thenProven ? "then" : "else";
+  }
+  const literal = literalConditions?.get(cmd.id);
+  if (literal !== undefined) {
+    return literal ? "then" : "else";
+  }
+  return null;
+}
+
+/** The first command of a branch, or undefined when it has none. */
+export function firstMember(members: readonly CommandSummary[]): CommandSummary | undefined {
+  return members.length === 0 ? undefined : members[0];
+}
+
+/**
  * The flows the run travelled, in execution order.
  *
  * The walk follows the engine's entry chain (its `next` edges plus the
- * planned edges into an `if` — see the module header). At an `if` the
- * resolver decides which branch the run took before it enters one:
- *
- * - each branch's print count comes from the projection's branch list
- *   (a branch carrying a nested `if` is a documented limitation: the
- *   nested walk order is unknowable from the envelope alone, so the
- *   outer `if` stays undecided);
- * - the window is consistent with exactly one candidate when the count
- *   of lines printed this run (`printed.length`) can only be produced
- *   by that branch; and when both counts fit, a branch whose prints are
- *   **pure literals** (quoted text without `{variable}` refs) must
- *   reappear at exactly the positions the run would print them — a
- *   matching branch is proven, a contradicting one is excluded;
- * - when both candidates are still possible, or when the window itself
- *   is empty (an error run has no envelope), the `if` stays undecided:
- *   the visualisation then travels the chain and the `if`'s own edge to
- *   the join and **never either branch** — the glow must not claim a
- *   branch the engine did not report;
- * - one honest exception: when every print-based reading fails but the
- *   `if`'s condition is a **literal** (`true` / `false`, reported by the
- *   engine's own `if_condition`), the branch follows the literal. The
- *   envelope alone cannot distinguish two branches that print identical
- *   lines (the default of the library on both sides, say); the engine,
- *   however, evaluated a constant condition, so which branch ran is not
- *   a guess — it is stated by the condition the engine itself holds.
- * Once one `if` cannot be decided, the number of lines it consumed is
- * no longer bankable, so every later `if` in the same run stays
- * undecided as well. Called functions' outputs and early `return`s are
- * equally unknowable from the envelope; they make the counts disagree
- * with every candidate and land in the same undecided path (chain plus
- * the `if`→join edge for the whole run).
+ * planned edges into an `if`). At an `if` the resolver decides which
+ * branch the run took before it enters one (see `decideBranch`).
+ * Once one `if` cannot be decided, every later `if` in the same run
+ * stays undecided as well: the walk then travels the chain and the
+ * `if`'s own edge to the join, never either branch.
  */
 export function resolveRunPath(
   cmds: readonly CommandSummary[],
   entry: number | null,
   fid: number,
   printed: RunPrinted,
-  /**
-   * Literal conditions per `if` (`"true"` / `"false"` exactly, read from
-   * the engine's own `if_condition` at run freeze — nothing folded).
-   * Used only when the envelope cannot decide (see the module header).
-   */
   literalConditions?: ReadonlyMap<number, boolean>,
 ): readonly FlowEdge[] {
   if (entry === null) return [];
   const byId = new Map<number, CommandSummary>();
   for (const cmd of cmds) byId.set(cmd.id, cmd);
-  /** Branch-body members the projection can draw, in list order. */
-  const visible = (
-    body: readonly number[] | null | undefined,
-  ): CommandSummary[] => {
-    if (body === null || body === undefined) return [];
-    const out: CommandSummary[] = [];
-    for (const id of body) {
-      const cmd = byId.get(id);
-      if (cmd !== undefined) out.push(cmd);
-    }
-    return out;
-  };
-
-  /**
-   * Prints the walk would cover on the chain that starts at `start`,
-   * stopping at the first downstream `if` (`null` = unknown: that
-   * `if`'s branch may print, which the count alone cannot bank).
-   */
-  const chainPrintCount = (start: number | null | undefined): number | null => {
-    let count = 0;
-    const seen = new Set<number>();
-    let current: number | null = start ?? null;
-    while (current !== null && !seen.has(current)) {
-      seen.add(current);
-      const cmd = byId.get(current);
-      if (cmd === undefined) break;
-      if (cmd.kind === "if") return null;
-      if (cmd.kind === "print") count += 1;
-      const next = cmd.next;
-      if (next === null || next === undefined || !byId.has(next)) break;
-      current = next;
-    }
-    return count;
-  };
-
-  /** Quoted text without `{variables}`: the line the engine prints. */
-  const printedLineOf = (
-    template: string | undefined,
-  ): string | null => {
-    if (template === undefined) return null;
-    const text = template.trim();
-    if (text.length < 2 || !text.startsWith('"') || !text.endsWith('"')) {
-      return null;
-    }
-    const inner = text.slice(1, -1);
-    if (inner.includes("{") || inner.includes("\\")) return null;
-    return inner;
-  };
-
-  /**
-   * Which branch the run took at one `if`, or null when the envelope
-   * cannot decide. `offset` is how many printed lines the walk passed
-   * before the `if`.
-   */
-  const decideBranch = (
-    cmd: CommandSummary,
-    offset: number,
-  ): "then" | "else" | null => {
-    const candidate = (
-      side: "then" | "else",
-      body: readonly number[] | null | undefined,
-    ): BranchCandidate => {
-      const members = visible(body);
-      return { side, members, prints: members.filter((m) => m.kind === "print") };
-    };
-    const candidates = [
-      candidate("then", cmd.then_body),
-      candidate("else", cmd.else_body),
-    ];
-    // Nested `if`s: the engine walks the taken branch's own branches by
-    // rules the envelope cannot recover; the outer decision stays open
-    // (see the module doc — pivot documented limitation).
-    if (
-      candidates.some((c) => c.members.some((m) => m.kind === "if"))
-    ) {
-      return null;
-    }
-    const joinCount = chainPrintCount(cmd.next);
-    const viable = (candidate: BranchCandidate): boolean => {
-      if (
-        joinCount !== null &&
-        printed.length !== offset + candidate.prints.length + joinCount
-      ) {
-        return false;
-      }
-      // A contradicting literal excludes the branch; unverifiable
-      // positions (variable templates) are tolerated.
-      for (let i = 0; i < candidate.prints.length; i += 1) {
-        const print = candidate.prints[i];
-        const line = printedLineOf(print?.template);
-        if (line === null) continue;
-        if (printed[offset + i] !== line) return false;
-      }
-      return true;
-    };
-    /** Every line verified: the branch is positively proven. */
-    const proven = (candidate: BranchCandidate): boolean => {
-      if (candidate.prints.length === 0) return false;
-      for (let i = 0; i < candidate.prints.length; i += 1) {
-        const print = candidate.prints[i];
-        if (printedLineOf(print?.template) === null) return false;
-        if (printed[offset + i] !== printedLineOf(print?.template)) {
-          return false;
-        }
-      }
-      return true;
-    };
-    const thenViable = viable(candidates[0]);
-    const elseViable = viable(candidates[1]);
-    if (thenViable !== elseViable) {
-      return thenViable ? "then" : "else";
-    }
-    // Both are still possible: a proven branch (all its literal prints
-    // reappeared in the window) beats an unverifiable one — and a tie
-    // (e.g. identical literals, or no print evidence) stays undecided.
-    const thenProven = proven(candidates[0]);
-    const elseProven = proven(candidates[1]);
-    if (thenProven !== elseProven) {
-      return thenProven ? "then" : "else";
-    }
-    // Envelope exhausted: a literal condition the engine itself holds is
-    // not a guess — it names the branch the run took (see module header).
-    const literal = literalConditions?.get(cmd.id);
-    if (literal !== undefined) {
-      return literal ? "then" : "else";
-    }
-    return null;
-  };
 
   const edges: FlowEdge[] = [];
   const seen = new Set<number>();
@@ -303,9 +318,12 @@ export function resolveRunPath(
     // no `if`→successor edge to follow. Handle the branch before the
     // terminal-chain break below so a terminal `if` is not skipped.
     if (cmd.kind === "if" && decidable) {
-      const taken = decideBranch(cmd, offset);
+      const taken = decideBranch(cmd, offset, printed, byId, literalConditions);
       if (taken !== null) {
-        const members = visible(taken === "then" ? cmd.then_body : cmd.else_body);
+        const members = visibleBranchBody(
+          taken === "then" ? cmd.then_body : cmd.else_body,
+          byId,
+        );
         // The decided branch: its wire into the first member, its
         // member→member column links, and, when there is a successor, the
         // engine's merge back into the join block (the branch tail exits
@@ -313,21 +331,22 @@ export function resolveRunPath(
         // member's chain there). A terminal `if` has no join, so no
         // merge edge is drawn — there is nothing to rejoin into.
         if (members.length > 0) {
+          const [head] = members;
           edges.push({
             fid,
             from: cmd.id,
-            to: members[0]!.id,
+            to: head.id,
             kind: "branch-head",
           });
           for (let i = 0; i + 1 < members.length; i += 1) {
             edges.push({
               fid,
-              from: members[i]!.id,
-              to: members[i + 1]!.id,
+              from: members[i].id,
+              to: members[i + 1].id,
               kind: "chain",
             });
           }
-          const tail = members[members.length - 1]!.id;
+          const tail = members[members.length - 1].id;
           const join = next;
           if (
             join !== null &&
@@ -370,21 +389,59 @@ export function resolveRunPath(
  * - the failed command is the head of the chain, so it never reached its
  *   own successor: no connection of the chain ran at all.
  */
+
+/**
+ * Path-aware truncation.
+ *
+ * The glow list is ordered in execution order but may contain more than
+ * one edge that targets (or originates from) the same command when an
+ * `if` has both a merge edge and its own chain edge into the join. Picking
+ * the first such edge by array position can cut a path that actually ran
+ * (or keep a redundant one). Walk the edges in execution order instead and
+ * stop at the edge that is reached on the actual travelled path.
+ */
 export function truncateFlow(
   state: FlowState,
   failedCommandId: number,
 ): FlowState {
-  const into = state.edges.findIndex((edge) => edge.to === failedCommandId);
-  if (into >= 0) {
-    const edges = state.edges.slice(0, into + 1);
-    if (edges.length === state.edges.length) return state;
-    return { ...state, edges };
+  const edges = state.edges;
+  // Index of the edge that enters the failed command along the travelled
+  // path (or -1 when the failed command is the head / unreachable).
+  let into = -1;
+  let current: number | null = null;
+  for (let i = 0; i < edges.length; i += 1) {
+    const edge = edges[i]!;
+    if (current === null || edge.from === current) {
+      if (edge.to === failedCommandId) {
+        into = i;
+        break;
+      }
+      current = edge.to;
+    }
   }
-  const out = state.edges.findIndex((edge) => edge.from === failedCommandId);
+  if (into >= 0) {
+    const next = edges.slice(0, into + 1);
+    if (next.length === edges.length) return state;
+    return { ...state, edges: next };
+  }
+  // Head of the chain (or a command whose outgoing edge is the first on
+  // the path): drop everything from its first outgoing edge onward.
+  let out = -1;
+  let currentOut: number | null = null;
+  for (let i = 0; i < edges.length; i += 1) {
+    const edge = edges[i]!;
+    if (currentOut === null || edge.from === currentOut) {
+      if (edge.from === failedCommandId) {
+        out = i;
+        break;
+      }
+      currentOut = edge.to;
+    }
+  }
   if (out >= 0) {
-    const edges = state.edges.slice(0, out);
-    if (edges.length === state.edges.length) return state;
-    return { ...state, edges };
+    const next = edges.slice(0, out);
+    if (next.length === edges.length) return state;
+    return { ...state, edges: next };
   }
   return state;
 }

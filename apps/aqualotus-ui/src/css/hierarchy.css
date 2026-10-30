@@ -1,0 +1,382 @@
+/* ---------- Program-model hierarchy (Package → Struct → Function) ----
+ * Liquid glass: no stroke, no wobble. Each container is a sheet of
+ * translucent sapphire whose only edges are a top-lit specular rim and
+ * its own coloured bloom, so the hierarchy still reads (cyan package,
+ * green struct, blue function) but nothing looks hand-drawn. Uniform
+ * radius — the old asymmetric `22px 70px 26px 64px / …` was the
+ * Excalidraw sketch tell and is gone. */
+
+.pkg-pos,
+.struct-pos {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.pkg {
+  position: absolute;
+  border: none;
+  border-radius: 26px;
+  background: transparent;
+  box-shadow:
+    0 0 0 1px rgba(168, 85, 247, 0.14),
+    0 0 14px rgba(168, 85, 247, 0.1),
+    0 0 32px rgba(168, 85, 247, 0.05);
+  overflow: visible;
+  cursor: grab;
+}
+
+/* Painted rim + bloom, never rasterized over the contents. */
+.pkg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--neon) 10%, transparent) 0%,
+      color-mix(in srgb, var(--neon) 3%, transparent) 30%,
+      transparent 60%
+    );
+  pointer-events: none;
+}
+
+.pkg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    0 0 0 1px rgba(168, 85, 247, 0.16),
+    0 0 12px rgba(168, 85, 247, 0.1),
+    0 0 28px rgba(168, 85, 247, 0.05);
+  pointer-events: none;
+}
+
+.pkg:active {
+  cursor: grabbing;
+}
+
+.pkg-head {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 18px;
+  /* The title sits on its own glass chip straddling the top edge, so
+   * the rim passes behind it like a real label plate. */
+  border-radius: var(--radius-full);
+  /* Opaque plate: the rim is interrupted under the chip, never drawn
+   * across the label. */
+  background: var(--chip-plate);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -6px 14px rgba(6, 10, 26, 0.5),
+    0 6px 18px rgba(1, 3, 12, 0.45),
+    0 0 4px rgba(168, 85, 247, 0.06);
+  white-space: nowrap;
+}
+
+.pkg-name {
+  font-family: var(--sans);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--color-fg);
+}
+
+.pkg-meta {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--color-muted-fg);
+}
+
+.pkg-body {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.structc {
+  position: absolute;
+  border: none;
+  border-radius: 22px;
+  background: transparent;
+  box-shadow:
+    0 0 0 1px rgba(52, 211, 153, 0.12),
+    0 0 12px rgba(52, 211, 153, 0.08),
+    0 0 26px rgba(52, 211, 153, 0.04);
+  overflow: visible;
+}
+
+.structc::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--neon) 8%, transparent) 0%,
+      color-mix(in srgb, var(--neon) 2%, transparent) 30%,
+      transparent 60%
+    );
+  pointer-events: none;
+}
+
+.structc::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.1), 0 0 8px rgba(52, 211, 153, 0.05);
+  pointer-events: none;
+}
+
+.structc-head {
+  position: absolute;
+  top: 0;
+  left: 28px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 14px;
+  border-radius: var(--radius-full);
+  /* Opaque plate: the rim is interrupted under the chip, never drawn
+   * across the label. */
+  background: var(--chip-plate);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.26),
+    inset 0 -6px 14px rgba(6, 10, 26, 0.5),
+    0 6px 18px rgba(1, 3, 12, 0.45),
+    0 0 4px rgba(52, 211, 153, 0.05);
+  white-space: nowrap;
+}
+
+.structc-name {
+  font-family: var(--sans);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-fg);
+}
+
+.preview-badge {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 1px 9px;
+  border-radius: 999px;
+  border: 1px dashed var(--color-line);
+  color: var(--color-muted-fg);
+}
+
+.structc-body {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* Function: the innermost glass sheet. It floats free of the struct
+ * above it rather than nesting a fourth set of borders. */
+.funcc {
+  position: absolute;
+  border: none;
+  border-radius: 18px;
+  background: transparent;
+  box-shadow:
+    0 0 0 1px rgba(90, 169, 230, 0.12),
+    0 0 12px rgba(90, 169, 230, 0.08),
+    0 0 26px rgba(90, 169, 230, 0.04);
+  overflow: visible;
+  transition: box-shadow var(--transition-fast) var(--ease-out-expo);
+}
+
+.funcc::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--neon) 8%, transparent) 0%,
+      color-mix(in srgb, var(--neon) 2%, transparent) 24%,
+      transparent 56%
+    );
+  pointer-events: none;
+}
+
+.funcc::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 1px rgba(90, 169, 230, 0.1), 0 0 8px rgba(90, 169, 230, 0.05);
+  pointer-events: none;
+  transition: box-shadow var(--transition-fast) ease;
+}
+
+.funcc[data-selected="true"]::after {
+  box-shadow:
+    0 0 0 1px rgba(90, 169, 230, 0.2),
+    0 0 6px rgba(90, 169, 230, 0.1);
+}
+
+.funcc-head {
+  position: absolute;
+  top: 0;
+  left: 22px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 14px;
+  border-radius: var(--radius-full);
+  /* Opaque plate: the rim is interrupted under the chip, never drawn
+   * across the label. */
+  background: var(--chip-plate);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -6px 14px rgba(6, 10, 26, 0.5),
+    0 6px 18px rgba(1, 3, 12, 0.45),
+    0 0 4px rgba(90, 169, 230, 0.05);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.funcc-name {
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-hierarchy-function-label);
+}
+
+.funcc-name .fn-call {
+  color: var(--color-muted-fg);
+  font-family: var(--mono);
+}
+
+.funcc-body {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.funcc-empty {
+  position: absolute;
+  left: 48px;
+  top: 36px;
+  right: 48px;
+  padding: var(--space-4);
+  /* Inset glass: a quiet depression inside the function's own sheet,
+   * no stroke. */
+  border: none;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-canvas) 44%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 2px 10px rgba(2, 5, 14, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+  color: var(--color-muted-fg);
+  font-family: var(--sans);
+  font-size: 14px;
+}
+
+.funcc-empty strong {
+  color: var(--color-fg);
+  font-weight: 400;
+}
+
+/* Relationship wires: thin light flow curves, dashed blue preview. */
+
+/* Breadcrumb crumbs in the canvas toolbar. */
+.crumb {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.crumb-strong {
+  color: var(--text-primary);
+}
+
+.crumb-sep {
+  color: var(--text-muted);
+  margin: 0 6px;
+}
+
+/* Project navigator tree. */
+.proj-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.proj-pkg,
+.proj-struct {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-inset);
+}
+
+.proj-struct {
+  margin-left: 16px;
+  border-color: color-mix(in srgb, var(--color-hierarchy-struct) 45%, transparent);
+}
+
+.proj-label {
+  font-family: var(--rounded);
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.proj-label-struct {
+  color: var(--color-hierarchy-struct-label);
+}
+
+.proj-name {
+  font-weight: 700;
+}
+
+.proj-path {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 2px 4px;
+  overflow-wrap: anywhere;
+}
+
+.proj-reset-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--color-console-err) 45%, transparent);
+  background: var(--error-soft);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.insp-path {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+

@@ -1,0 +1,134 @@
+/* ---------- Manual merge join ("End of If Block") ------------------- */
+
+/* The join point of an `if` with merge on: a small glass pill below the
+ * branch frames where both tails visibly rejoin. Draggable (presentation
+ * only: positions persist as UI state, never engine semantics), with a
+ * top port for the incoming tails and a right port for the
+ * continuation. */
+.vjoin {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 14px;
+  border: 1.5px solid color-mix(in srgb, var(--neon) 45%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-canvas) 78%, var(--neon) 18%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 0 12px color-mix(in srgb, var(--neon) 30%, transparent);
+  cursor: grab;
+  user-select: none;
+  z-index: 1;
+}
+
+.vjoin[data-dragging="true"] {
+  cursor: grabbing;
+}
+
+.vjoin-tag {
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--neon) 75%, var(--color-fg));
+  pointer-events: none;
+}
+
+/* ---------- Vertical If/Else body frames ---------------------------- */
+
+/* The drawn frames around the blocks an `if`'s branch runs. Derived
+ * from the engine's branch lists + the layout store; purely decorative
+ * containers (aria-hidden) — the branch's blocks stay the interactive
+ * elements. TRUE reads green (flow continues), FALSE reads red. The
+ * placeholder frame for a branch the engine reports without members is
+ * dashed and faint: a drop target, not a body. */
+.vbranch {
+  position: absolute;
+  border: 1.5px solid color-mix(in srgb, var(--branch) 42%, transparent);
+  border-radius: 16px 13px 15px 18px;
+  background: color-mix(in srgb, var(--branch) 6%, transparent);
+  box-shadow:
+    inset 0 0 14px color-mix(in srgb, var(--branch) 8%, transparent),
+    0 0 12px color-mix(in srgb, var(--branch) 10%, transparent);
+  z-index: 0;
+}
+.vbranch[data-if-branch="then"] {
+  --branch: var(--neon-green);
+}
+.vbranch[data-if-branch="else"] {
+  --branch: var(--neon-red);
+}
+.vbranch-empty {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--branch) 3%, transparent);
+  box-shadow: none;
+  opacity: 0.62;
+}
+
+/* The role tag rides the frame's top border, naming the branch — the
+ * same auto-derived word the branch ports carry (engine side names). */
+.vbranch-tag {
+  position: absolute;
+  top: -10px;
+  left: 12px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--branch);
+  background: var(--color-canvas);
+  border-radius: 6px;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* Merge rails: a branch body's tail running back into the block after
+ * the `if` (and the `if`'s own post-body continuation). Engine truth the
+ * summary cannot report as a member edge; drawn dashed so a viewer can
+ * tell the implied continuation from the engine's reported pointers. */
+.edge-merge {
+  stroke-dasharray: 6 5;
+  opacity: 0.78;
+}
+
+/* Library category dashes: toolbox chrome aids, not canvas semantics.
+ * Variables live at function level (blue); Output prints values
+ * (data green); Program holds toolbox actions (restrained violet). */
+.lib-item[data-category="Variables"] {
+  --cat: var(--color-hierarchy-function);
+}
+.lib-item[data-category="Output"] {
+  --cat: var(--color-data-value);
+}
+.lib-item[data-category="Program"] {
+  --cat: var(--color-accent);
+}
+
+.canvas-empty {
+  position: absolute;
+  top: 150px;
+  left: 24px;
+  right: 24px;
+  max-width: 340px;
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+  padding: var(--space-5);
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border-strong);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.canvas-empty strong {
+  color: var(--text-primary);
+}
+

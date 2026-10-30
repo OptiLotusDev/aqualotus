@@ -1,0 +1,406 @@
+/* ==========================================================================
+ * LIGHT THEME — the liquid-glass pass is night-only.
+ *
+ * Every rule below restores the light theme's original surfaces: solid
+ * fills with a faint hairline instead of translucent midnight glass,
+ * plain borders instead of the neon bloom, and the original flow
+ * colour for the connection lines. Nothing here is new styling; it is
+ * the light theme put back exactly as it was, so flipping the theme
+ * never inherits a night surface.
+ * ========================================================================== */
+
+:root[data-theme="light"] .board {
+  border: 1px solid var(--border);
+  background-color: color-mix(in srgb, var(--color-canvas) 78%, transparent);
+  background-size: 26px 26px;
+  box-shadow: none;
+}
+
+/* Blocks: original solid card, plain border, no neon rim or bloom. */
+:root[data-theme="light"] .vblock {
+  border-radius: 12px 28px 14px 26px / 26px 14px 28px 12px;
+  border: 1.5px solid var(--color-hierarchy-function);
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Keep light mode's block pseudo-elements exactly as before the
+ * night-only dimming pass: the original neon rim and stripe glow. */
+:root[data-theme="light"] .vblock::before {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--neon) 88%, #ffffff) 0%,
+    color-mix(in srgb, var(--neon) 46%, transparent) 8%,
+    color-mix(in srgb, var(--neon) 14%, transparent) 30%,
+    transparent 62%
+  );
+  opacity: 0.85;
+}
+
+:root[data-theme="light"] .vblock::after {
+  box-shadow:
+    0 0 10px var(--neon),
+    0 0 22px color-mix(in srgb, var(--neon) 70%, transparent);
+}
+
+:root[data-theme="light"] .vblock:hover {
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .vblock[data-selected="true"] {
+  border-color: var(--color-hierarchy-function-label);
+  box-shadow: 0 0 0 1px var(--color-hierarchy-function-label);
+}
+
+:root[data-theme="light"] .vblock[data-error="true"] {
+  border-color: var(--color-error);
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .vblock[data-connect-from="true"] {
+  border-color: var(--color-hierarchy-function-label);
+  box-shadow: none;
+}
+
+/* The join pill lights flat in light mode, like every other element. */
+:root[data-theme="light"] .vjoin[data-connect-from="true"] {
+  border-color: var(--color-hierarchy-function);
+}
+
+:root[data-theme="light"] .vblock-kind {
+  font-family: var(--hand);
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--color-muted-fg);
+}
+
+:root[data-theme="light"] .vblock-main {
+  font-family: var(--hand);
+}
+
+:root[data-theme="light"] .vblock-var {
+  font-family: var(--hand);
+  color: var(--color-data-identity);
+}
+
+:root[data-theme="light"] .vblock-type {
+  font-family: var(--hand);
+  font-size: 13px;
+  color: var(--color-data-value);
+}
+
+:root[data-theme="light"] .vblock-casting {
+  background: var(--color-canvas);
+  box-shadow: 0 0 0 1px var(--color-hierarchy-function);
+  color: var(--color-hierarchy-function-label);
+  font-family: var(--hand);
+  font-weight: 400;
+  letter-spacing: normal;
+}
+
+:root[data-theme="light"] .vblock-casting-link {
+  border-color: var(--color-hierarchy-function);
+  filter: none;
+}
+
+:root[data-theme="light"] .vblock-casting-type {
+  font-family: var(--hand);
+  letter-spacing: normal;
+  opacity: 0.85;
+}
+
+/* Ports: hollow rings, no neon outline or glow. */
+:root[data-theme="light"] .vport {
+  width: 12px;
+  height: 12px;
+  background: var(--color-canvas);
+  border: 2px solid var(--color-port-in);
+  box-shadow: none;
+  z-index: auto;
+}
+
+:root[data-theme="light"] .vport-left {
+  left: -6px;
+  top: 50%;
+  margin-top: -6px;
+}
+
+:root[data-theme="light"] .vport-right {
+  right: -6px;
+  top: 50%;
+  margin-top: -6px;
+  border-color: var(--color-port-out);
+}
+
+/* Light theme rings are 12px wide: −6px centres them on the border. */
+:root[data-theme="light"] .vport-top {
+  top: -6px;
+  left: 50%;
+  margin-left: -6px;
+}
+
+:root[data-theme="light"] .vport-out-bottom {
+  bottom: -6px;
+  left: 50%;
+  margin-left: -6px;
+}
+
+:root[data-theme="light"] .vport-else.vport-bottom {
+  margin-left: -6px;
+}
+
+:root[data-theme="light"] .vport:hover {
+  transform: scale(1.25);
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .vblock[data-connect-from="true"] .vport-right,
+:root[data-theme="light"] .vjoin[data-connect-from="true"] .vport-right {
+  background: var(--color-port-out);
+  box-shadow: none;
+}
+
+/* Vertical `if`: the bottom branch ports share the light hollow-ring
+ * look; the true/false pair carries its side's semantic colour (and the
+ * pair's own −6px centring, one rule per side so the light platforms
+ * match the dark ones). */
+:root[data-theme="light"] .vport-then.vport-bottom {
+  margin-left: -6px;
+  border-color: var(--color-success);
+}
+
+:root[data-theme="light"] .vport-else.vport-bottom {
+  margin-left: -6px;
+  border-color: var(--color-error);
+}
+
+/* Manual merge join: flat glass pill in light mode. */
+:root[data-theme="light"] .vjoin {
+  background: var(--color-canvas);
+  border-color: var(--color-hierarchy-function);
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .vjoin-tag {
+  color: var(--color-hierarchy-function-label);
+}
+
+:root[data-theme="light"] .vblock[data-kind="if"] .vport-label {
+  color: var(--color-warning);
+}
+
+/* Branch body frames: flat in light mode. The fixed neon-green/red of
+ * night becomes the semantic success/error pair, the tint and outline
+ * carry the true/false roles, and the glow is dropped. */
+:root[data-theme="light"] .vbranch {
+  border-color: color-mix(in srgb, var(--branch) 55%, transparent);
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .vbranch[data-if-branch="then"] {
+  --branch: var(--color-success);
+}
+
+:root[data-theme="light"] .vbranch[data-if-branch="else"] {
+  --branch: var(--color-error);
+}
+
+:root[data-theme="light"] .vbranch-tag {
+  background: var(--color-card);
+}
+
+/* Containers: the original sketch outlines. */
+:root[data-theme="light"] .pkg,
+:root[data-theme="light"] .structc,
+:root[data-theme="light"] .funcc {
+  border: none;
+  border-radius: 16px 48px 18px 44px / 44px 18px 48px 16px;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .pkg::before,
+:root[data-theme="light"] .structc::before,
+:root[data-theme="light"] .funcc::before {
+  background: none;
+  border-radius: inherit;
+  border: 1.5px solid currentColor;
+}
+
+:root[data-theme="light"] .pkg::before {
+  color: var(--color-hierarchy-package);
+}
+
+:root[data-theme="light"] .structc::before {
+  color: var(--color-hierarchy-struct);
+}
+
+:root[data-theme="light"] .funcc::before {
+  color: var(--color-hierarchy-function);
+}
+
+:root[data-theme="light"] .funcc[data-selected="true"]::before {
+  color: var(--color-hierarchy-function-label);
+}
+
+:root[data-theme="light"] .funcc::after,
+:root[data-theme="light"] .pkg::after,
+:root[data-theme="light"] .structc::after {
+  display: none;
+}
+
+/* Titles: back on the canvas, not on a glass chip. */
+:root[data-theme="light"] .pkg-head,
+:root[data-theme="light"] .structc-head,
+:root[data-theme="light"] .funcc-head {
+  border-radius: 0;
+  background: var(--color-canvas);
+  box-shadow: none;
+  padding: 2px 16px;
+}
+
+:root[data-theme="light"] .structc-head {
+  padding: 2px 12px;
+}
+
+:root[data-theme="light"] .funcc-head {
+  padding: 2px 10px;
+}
+
+:root[data-theme="light"] .pkg-name,
+:root[data-theme="light"] .pkg-meta {
+  font-family: var(--hand);
+}
+
+:root[data-theme="light"] .structc-name {
+  font-family: var(--hand);
+  color: var(--color-hierarchy-struct-label);
+}
+
+:root[data-theme="light"] .funcc-name {
+  font-family: var(--hand);
+}
+
+:root[data-theme="light"] .funcc-name .fn-call {
+  font-family: var(--hand);
+}
+
+:root[data-theme="light"] .funcc-empty {
+  border: 1.5px dashed var(--color-line);
+  border-radius: 12px 26px 14px 24px / 24px 14px 26px 12px;
+  background: transparent;
+  box-shadow: none;
+  font-family: var(--hand);
+}
+
+/* Connection lines: the original flow colour, no bloom. */
+:root[data-theme="light"] .edge,
+:root[data-theme="light"] .edge-selected,
+:root[data-theme="light"] .edge-preview {
+  stroke: var(--color-flow);
+  stroke-width: 1.5;
+  filter: none;
+}
+
+:root[data-theme="light"] .edge-selected {
+  stroke: var(--color-flow-selected);
+}
+
+:root[data-theme="light"] .edge-preview {
+  stroke: var(--color-flow-preview);
+  stroke-dasharray: 6 5;
+}
+
+:root[data-theme="light"] .marker-flow {
+  fill: var(--color-flow);
+  filter: none;
+}
+
+:root[data-theme="light"] .edge-flow,
+:root[data-theme="light"] .edge-flow-trail {
+  filter: none;
+}
+
+/* Chrome: the original faint hairline and highlight. */
+:root[data-theme="light"] .appbar,
+:root[data-theme="light"] .pane {
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-highlight);
+}
+
+:root[data-theme="light"] .btn {
+  border: 1px solid var(--glass-border);
+  background: var(--surface-elevated);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+  color: var(--text-primary);
+}
+
+:root[data-theme="light"] .btn:hover {
+  background: var(--surface-selected);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+
+:root[data-theme="light"] .btn-primary {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+
+:root[data-theme="light"] .btn-primary:hover {
+  background: color-mix(in srgb, var(--color-primary) 24%, transparent);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+
+:root[data-theme="light"] .btn-panel {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+}
+
+:root[data-theme="light"] .btn-panel:hover {
+  background: color-mix(in srgb, var(--danger) 24%, transparent);
+}
+
+:root[data-theme="light"] .field input,
+:root[data-theme="light"] .field select,
+:root[data-theme="light"] .glass-input {
+  border: 1px solid var(--border-strong);
+  background: var(--surface-inset);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.24);
+}
+
+:root[data-theme="light"] .field input:hover,
+:root[data-theme="light"] .field select:hover {
+  border-color: var(--glass-border);
+}
+
+:root[data-theme="light"] .field input:focus,
+:root[data-theme="light"] .field select:focus {
+  border-color: var(--accent-border);
+  background: color-mix(in srgb, var(--surface-inset) 70%, var(--accent-soft));
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.24);
+}
+
+:root[data-theme="light"] .field-check input[type="checkbox"] {
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .field-check input[type="checkbox"]:hover,
+:root[data-theme="light"] .field-check input[type="checkbox"]:focus,
+:root[data-theme="light"] .field-check input[type="checkbox"]:focus-visible {
+  border-color: transparent;
+  background: none;
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .status-dot {
+  border: 1px solid var(--border);
+  background: var(--surface-inset);
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .status-dot i {
+  box-shadow: none;
+}

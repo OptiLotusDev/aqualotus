@@ -1,0 +1,170 @@
+/* ---------- Empty / loading ---------- */
+
+.empty {
+  text-align: center;
+  padding: var(--space-5) var(--space-4);
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.empty strong {
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+.skeleton {
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    100deg,
+    var(--surface-elevated) 40%,
+    var(--surface-selected) 50%,
+    var(--surface-elevated) 60%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  min-height: 64px;
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* ---------- Overlays (small layouts) ---------- */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--color-bg) 60%, transparent);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  animation: fade-in var(--transition-fast) ease-out;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.sheet {
+  position: fixed;
+  z-index: 50;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 82svh;
+  overflow: auto;
+  background: var(--surface-elevated);
+  -webkit-backdrop-filter: blur(28px) saturate(1.5);
+  backdrop-filter: blur(28px) saturate(1.5);
+  border-top: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-lift), inset 0 1px 0 var(--glass-highlight);
+  padding: var(--space-4) var(--space-4) var(--space-6);
+  animation: sheet-in var(--transition-fast) var(--ease-out-expo);
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.sheet-grip {
+  width: 40px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--border-strong);
+  margin: 0 auto var(--space-4);
+}
+
+.drawer {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(320px, 86vw);
+  overflow: auto;
+  background: var(--surface-elevated);
+  -webkit-backdrop-filter: blur(28px) saturate(1.5);
+  backdrop-filter: blur(28px) saturate(1.5);
+  border-right: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-lift), inset 1px 0 0 var(--glass-highlight);
+  padding: var(--space-4);
+  animation: drawer-in var(--transition-fast) var(--ease-out-expo);
+}
+
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.only-compact {
+  display: none;
+}
+
+/* ---------- Boot / fatal states ---------- */
+
+.boot {
+  min-height: 100svh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+}
+
+.boot-card {
+  width: min(440px, 100%);
+  padding: var(--space-6);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-highlight);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  text-align: center;
+  align-items: center;
+}
+
+/* Engines without backdrop blur get a denser translucent fill: the
+ * separation survives, the unsupported effect is simply dropped. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .appbar,
+  .pane,
+  .float-pill,
+  .drawer,
+  .sheet,
+  .boot-card,
+  .lib-ghost {
+    background: var(--glass-fallback);
+  }
+
+  .btn:not(.btn-primary):not(.btn-panel):not(.btn-ghost) {
+    background: var(--glass-fallback);
+  }
+}
+
