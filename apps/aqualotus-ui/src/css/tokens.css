@@ -1,0 +1,311 @@
+/* Aqualotus design system — Night Mode + Liquid Glass.
+ * Single centralized token layer. Components consume these variables;
+ * no raw palette colors live in component code. */
+
+/* Aqualotus design system — Night Mode + Liquid Glass.
+ * Two token layers, one value source for colour:
+ * `--color-*` is the canonical semantic palette (hierarchy, data,
+ * ports, flow, status, foundation). The older glass-chrome names
+ * (`--surface`, `--text-*`, `--accent-*`, …) remain for the translucent
+ * Liquid Glass layer and point at semantic tokens wherever the spec
+ * governs the value. No raw palette hex lives outside this block. */
+
+:root {
+  color-scheme: dark;
+
+  /* ---- Semantic colour system: deep space (navy + cyan/purple glow) ---- */
+  --color-bg: #05070f;
+  --color-card: #0b1120;
+  --color-muted: #131a33;
+  --color-canvas: #070b18;
+  --color-line: #1e2348;
+  --color-fg: #eef3ff;
+  --color-muted-fg: #98a3d4;
+  --color-dot: #232c55;
+
+  /* ---- Actions and interaction ---- */
+  --color-primary: #22d3ee;
+  --color-accent: #8b5cf6;
+  --color-indigo: #6366f1;
+  --color-ring: #22d3ee;
+
+  /* ---- Program hierarchy: white → green → blue, outer to inner ---- */
+  --color-hierarchy-package: #e8e8e8;
+  --color-hierarchy-struct: #46a758;
+  --color-hierarchy-struct-label: #7ee2a8;
+  --color-hierarchy-function: #5aa9e6;
+  --color-hierarchy-function-label: #8fc2f5;
+
+  /* ---- Data semantics: red names identity, green types/values ---- */
+  --color-data-identity: #ff7b72;
+  --color-data-type: #7ee2a8;
+  --color-data-value: #7ee2a8;
+
+  /* ---- Ports and the single `next` flow relationship ---- */
+  --color-port-in: #7d8db0;
+  --color-port-out: #5aa9e6;
+  --color-flow: #9fb2d8;
+  --color-flow-selected: #5aa9e6;
+  --color-flow-preview: #5aa9e6;
+  /* The connection line. Brighter than the semantic `--color-flow`
+   * token so the wire reads at a glance against the glass; its glow
+   * lives in `.edge` (night only). */
+  --edge-flow: #dbe7ff;
+  --edge-flow-selected: #22d3ee;
+
+  /* ---- Runtime status (application-wide starting hues) ---- */
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  /* Softer console variants for dark-theme text/surfaces (same meaning,
+   * readable on charcoal; see accessibility rules). */
+  --color-console-ok: #5fd39a;
+  --color-console-warn: #e8c26a;
+  --color-console-err: #ff8f8f;
+
+  /* Night background stack (deep, never pure black). */
+  --night-0: var(--color-bg);
+  --night-1: #14101d;
+
+  /* Glass surfaces — translucent layers over the night background. */
+  --surface: rgba(22, 26, 38, 0.62);
+  --surface-elevated: rgba(32, 38, 56, 0.66);
+  --surface-selected: rgba(56, 68, 100, 0.55);
+  --surface-inset: rgba(7, 8, 13, 0.55);
+
+  /* ---- Liquid glass surface system (dark) ----
+   * The canvas and its containers read as solid glass: no stroke, no
+   * flat fill. Light does the work — a top-lit rim, a soft inner
+   * falloff, and a long shadow below. `--glass-blur` is honored by the
+   * fixed chrome only; the board, containers and blocks render without
+   * `backdrop-filter` so panning and drag stay cheap on every target
+   * (Tauri, Capacitor WebViews, low-end GPUs). */
+  --glass-border: transparent;
+  --glass-highlight: rgba(255, 255, 255, 0.9);
+  --glass-blur: 22px;
+  /* Fallback for engines without backdrop blur: a denser translucent
+   * fill keeps the same separation without the blur cost. */
+  --glass-fallback: rgba(15, 17, 28, 0.92);
+
+  /* The glass body itself. Deep sapphire, translucent so the fluid
+   * ink behind it tints the surface. */
+  --glass-fill: rgba(20, 26, 52, 0.34);
+  --glass-fill-strong: rgba(24, 30, 60, 0.46);
+  /* Top-lit specular edge: bright at the top, dissolving downward. */
+  --glass-rim: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.55) 0%,
+    rgba(255, 255, 255, 0.18) 22%,
+    rgba(255, 255, 255, 0.05) 55%,
+    transparent 100%
+  );
+  /* Sheen that sweeps the surface diagonally, like light across water. */
+  --glass-sheen: linear-gradient(
+    155deg,
+    rgba(255, 255, 255, 0.13) 0%,
+    rgba(255, 255, 255, 0.03) 28%,
+    transparent 46%,
+    rgba(140, 170, 255, 0.05) 74%,
+    transparent 100%
+  );
+  /* Inner shadows: light enters from above, the floor of the glass is
+   * darker, and the corners catch a cold blue bounce. */
+  --glass-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    inset 0 0 26px rgba(6, 10, 26, 0.55),
+    inset 0 -18px 34px rgba(8, 12, 30, 0.42),
+    inset 14px 0 34px rgba(6, 10, 26, 0.22),
+    inset -14px 0 34px rgba(6, 10, 26, 0.22),
+    0 18px 44px rgba(1, 3, 12, 0.58),
+    0 3px 10px rgba(1, 3, 12, 0.44);
+
+  /* Neon energy. The category stripe carries the hue; the outline and
+   * the flow lines bloom with it. */
+  --neon-cyan: #22d3ee;
+  --neon-violet: #8b5cf6;
+  --neon-magenta: #a855f7;
+  --neon-blue: #4f7cff;
+  --neon-green: #34d399;
+  --neon-amber: #fbbf24;
+  --neon-red: #f87171;
+  --neon-grey: #8a93c4;
+
+  /* Selected / connecting outline — luminous cyan, the depth cue that
+   * replaces a hard border everywhere. */
+  --glow-ring: 0 0 0 1px rgba(34, 211, 238, 0.72),
+    0 0 18px rgba(34, 211, 238, 0.45),
+    0 0 42px rgba(34, 211, 238, 0.2);
+  --glow-ring-soft: 0 0 0 1px rgba(34, 211, 238, 0.3),
+    0 0 14px rgba(34, 211, 238, 0.18);
+
+  /* Borders — subtle, with one stronger step. Retained for the few
+   * chrome elements that still want a hairline; the board, containers
+   * and blocks do not use them at all. */
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  /* Text — soft neutrals for calm readability on night layers. */
+  --text-primary: var(--color-fg);
+  --text-secondary: var(--color-muted-fg);
+  --text-muted: #6e7690;
+
+  /* Accent — follows the primary action token, kept translucent. */
+  --accent: var(--color-primary);
+  --accent-soft: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  --accent-border: color-mix(in srgb, var(--color-primary) 45%, transparent);
+
+  /* Danger — dark red, used sparingly for panel toggles. */
+  --danger: #c14b4b;
+  --danger-soft: rgba(193, 75, 75, 0.16);
+  --danger-border: rgba(193, 75, 75, 0.55);
+  --danger-text: #e89a9a;
+
+  /* Status — foundation hues; text uses the console variants. */
+  --success: var(--color-success);
+  --success-soft: color-mix(in srgb, var(--color-success) 13%, transparent);
+  --warning: var(--color-warning);
+  --warning-soft: color-mix(in srgb, var(--color-warning) 13%, transparent);
+  --error: var(--color-error);
+  --error-soft: color-mix(in srgb, var(--color-error) 12%, transparent);
+
+  /* Shape + depth. */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-full: 999px;
+  --shadow-soft: 0 8px 32px rgba(0, 0, 0, 0.38);
+  --shadow-lift: 0 16px 48px rgba(0, 0, 0, 0.5);
+
+  /* The title chips of the hierarchy containers. The plate is opaque on
+   * purpose: the container rim passes behind the chip, and an opaque
+   * plate is what interrupts that rim under the label instead of
+   * letting a line cross the text. */
+  --chip-plate: rgb(11, 15, 32);
+
+  /* Motion — one timing vocabulary for the whole shell. */
+  --transition-fast: 150ms;
+  --transition-entrance: 700ms;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Fluid backdrop — the atmospheric ink palette. Read by the canvas
+   * layer through the token layer, never hard-coded in components. */
+  --fluid-bg: #030512;
+  --fluid-cyan: #22d3ee;
+  --fluid-blue: #4f7cff;
+  --fluid-violet: #8b5cf6;
+  --fluid-magenta: #a855f7;
+
+  /* Type + spacing. */
+  --sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --hand: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --heading: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --rounded: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Responsive breakpoints (layout space, not devices). */
+  --bp-compact: 767px;
+  --bp-large: 1100px;
+
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+  background: var(--night-0);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Light mode: same token names, light glass values. Night stays the
+ * default; the theme hook flips `data-theme` on the root element. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Semantic palette: light counterparts, same meanings. */
+  --color-bg: #f3f1f8;
+  --color-card: #ffffff;
+  --color-muted: #e9e6f1;
+  --color-canvas: #ece8f4;
+  --color-line: rgba(30, 20, 60, 0.14);
+  --color-fg: #17131f;
+  --color-muted-fg: #5d566e;
+  --color-dot: rgba(60, 40, 110, 0.12);
+
+  /* The hierarchy title chips keep an opaque plate in light mode too,
+   * so the container rim never crosses a label. */
+  --chip-plate: #f7f5fc;
+
+  --color-primary: #2f6bff;
+  --color-accent: #7c5cf0;
+  --color-indigo: #5a67f0;
+  --color-ring: #2f6bff;
+
+  --color-hierarchy-package: #3c4358;
+  --color-hierarchy-struct: #1e9e62;
+  --color-hierarchy-struct-label: #177245;
+  --color-hierarchy-function: #2f6bff;
+  --color-hierarchy-function-label: #2f5fd0;
+
+  --color-data-identity: #c02c2c;
+  --color-data-type: #177245;
+  --color-data-value: #177245;
+
+  --color-port-in: #6e7690;
+  --color-port-out: #2f6bff;
+  --color-flow: rgba(70, 75, 105, 0.65);
+  --color-flow-selected: #2f6bff;
+  --color-flow-preview: #2f6bff;
+  /* Light mode keeps its original flow colour: the brighter night
+   * wire and its bloom are a night-only treatment. */
+  --edge-flow: var(--color-flow);
+  --edge-flow-selected: var(--color-flow-selected);
+
+  --color-success: #1e9e62;
+  --color-warning: #b45309;
+  --color-error: #c02c2c;
+  --color-console-ok: #1e9e62;
+  --color-console-warn: #b45309;
+  --color-console-err: #c02c2c;
+
+  --night-0: #e4e1ec;
+  --night-1: #f3f1f8;
+
+  --surface: rgba(255, 255, 255, 0.68);
+  --surface-elevated: rgba(255, 255, 255, 0.82);
+  --surface-selected: rgba(47, 107, 255, 0.12);
+  --surface-inset: rgba(255, 255, 255, 0.6);
+
+  /* Liquid Glass chrome — lighter values, same roles.
+   * Light mode is intentionally not part of the liquid-glass pass: its
+   * chrome keeps the original faint hairline + highlight, and its
+   * surfaces are the `--surface` fills. Night is the product default. */
+  --glass-border: rgba(20, 30, 60, 0.12);
+  --glass-highlight: rgba(255, 255, 255, 0.75);
+  --glass-fallback: rgba(238, 236, 246, 0.94);
+
+  --border: rgba(20, 30, 60, 0.1);
+  --border-strong: rgba(20, 30, 60, 0.2);
+
+  --text-primary: #161a26;
+  --text-secondary: #4a5268;
+  --text-muted: #7c86a0;
+
+  --danger-text: #a02c2c;
+
+  --shadow-soft: 0 8px 32px rgba(30, 40, 80, 0.12);
+  --shadow-lift: 0 16px 48px rgba(30, 40, 80, 0.18);
+  background: var(--night-0);
+}
+
+:root[data-theme="light"] body {
+  background:
+    radial-gradient(1200px 600px at 15% -5%, color-mix(in srgb, var(--color-primary) 8%, transparent), transparent 60%),
+    radial-gradient(1000px 500px at 90% 10%, color-mix(in srgb, var(--color-accent) 7%, transparent), transparent 60%),
+    linear-gradient(var(--night-1), var(--night-0));
+}

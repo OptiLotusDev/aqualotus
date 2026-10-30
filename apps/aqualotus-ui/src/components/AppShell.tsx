@@ -4,7 +4,6 @@ import { useInheritPosition } from "../hooks/useInheritPosition";
 import { useFlowGlow } from "../hooks/useFlowGlow";
 import { useLayout } from "../hooks/useLayout";
 import {
-  LIGHT_MODE_UNAVAILABLE_REASON,
   useTheme,
 } from "../hooks/useTheme";
 import type { RuntimeStatus } from "../hooks/useRuntime";
@@ -25,25 +24,11 @@ import { LAYOUT_ROW_Y, LAYOUT_START_X } from "../lib/layout";
 import type { CommandId, FunctionId, RunResult } from "../lib/optilotus";
 import Inspector from "./Inspector";
 import ProjectNavigator from "./ProjectNavigator";
-import RevealText from "./RevealText";
 import Runner from "./Runner";
 import VisualEditor from "./VisualEditor";
-import { breadcrumbPath } from "../lib/workspace";
-
-/**
- * Displayed app version: the live engine version once the bridge is
- * ready, else the build-time version read from the engine's
- * `Cargo.toml` — a `Cargo.toml` bump reaches the pill with no UI edit.
- */
-function displayVersion(runtimeVersion: string): string {
-  if (runtimeVersion !== "") return runtimeVersion;
-  try {
-    return __OPTILOTUS_VERSION__;
-  } catch {
-    return "?";
-  }
-}
-const APP_NAME = "OptiLotus";
+import { nextHelperName, pillState, runnerSummary } from "../lib/app_shell_helpers";
+import { AppToolbar } from "./AppToolbar";
+import { AppNavigation } from "./AppNavigation";
 
 interface AppShellProps {
   readonly runtime: RuntimeStatus;
@@ -86,34 +71,6 @@ interface AppShellProps {
   readonly onDismissError: () => void;
 }
 
-/** Default name for function blocks created from the library. */
-function nextHelperName(existing: readonly { name: string }[]): string {
-  if (!existing.some((f) => f.name === "helper")) return "helper";
-  let n = 1;
-  while (existing.some((f) => f.name === `helper${n}`)) {
-    n += 1;
-  }
-  return `helper${n}`;
-}
-
-/** Compact runner pill dot state for the collapsed dock. */
-function pillState(running: boolean, run: RunResult | null): string {
-  if (running) return "busy";
-  if (run === null) return "idle";
-  return run.status === "ok" ? "ready" : "error";
-}
-
-/** Compact runner pill text for the collapsed dock. */
-function runnerSummary(program: ProgramSnapshot): string {
-  if (program.running) return "Running…";
-  const run = program.run;
-  if (run === null) return "Runner";
-  if (run.status === "ok") {
-    const ms = program.durationMs;
-    return `Completed${ms !== null ? ` · ${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms` : ""}`;
-  }
-  return "Run failed";
-}
 
 /**
  * Full-bleed canvas shell: the black canvas fills the page while the
@@ -227,7 +184,6 @@ export default function AppShell(props: AppShellProps): ReactElement {
   // Drawer/sheet visibility derives from the viewport during render
   // (no sync effect): on desktop the compact overlays never show.
   const navVisible = compact && navOpen;
-  const sheetVisible = compact && sheetOpen;
 
   // Undo/redo is blocks-only: layout drags, pan, and zoom are visual
   // state with no undo entries — the buttons replay semantic history
@@ -745,155 +701,33 @@ export default function AppShell(props: AppShellProps): ReactElement {
     </div>
   );
 
-  const undoRedoTheme = (extraClass: string): ReactElement => (
-    <>
-      <button
-        type="button"
-        className={`btn btn-ghost btn-sm icon-btn ${extraClass}`}
-        disabled={!canUndoAll}
-        onClick={undoAll}
-        title={undoTitle}
-        aria-label={undoTitle}
-      >
-        ⮪
-      </button>
-      <button
-        type="button"
-        className={`btn btn-ghost btn-sm icon-btn ${extraClass}`}
-        disabled={!canRedoAll}
-        onClick={redoAll}
-        title={redoTitle}
-        aria-label={redoTitle}
-      >
-        ⮫
-      </button>
-      <button
-        type="button"
-        className={`btn btn-ghost btn-sm icon-btn ${extraClass}`}
-        aria-label={
-          lightModeAvailable
-            ? theme === "night"
-              ? "Switch to light mode"
-              : "Switch to night mode"
-            : LIGHT_MODE_UNAVAILABLE_REASON
-        }
-        aria-pressed={theme === "light"}
-        aria-disabled={lightModeAvailable ? undefined : true}
-        disabled={!lightModeAvailable}
-        onClick={toggleTheme}
-        title={
-          lightModeAvailable
-            ? theme === "night"
-              ? "Light mode"
-              : "Night mode"
-            : LIGHT_MODE_UNAVAILABLE_REASON
-        }
-      >
-        {theme === "night" ? "○" : "●"}
-      </button>
-    </>
-  );
-
   return (
     <div className="shell">
-      <header className="appbar enter-down enter-delay-toolbar">
-        {compact ? (
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm icon-btn"
-            aria-label="Open blocks panel"
-            onClick={() => setNavOpen(true)}
-          >
-            ☰
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-panel btn-sm"
-            aria-label="Toggle blocks panel"
-            aria-pressed={leftOpen}
-            onClick={() => setLeftOpen((v) => !v)}
-          >
-            ☰ Blocks
-          </button>
-        )}
-        <div style={{ minWidth: 0 }}>
-          <div className="appbar-title">
-            Aqualotus <span className="appbar-version">v{__AQUALOTUS_VERSION__}</span>
-          </div>
-          <div className="appbar-sub">
-            <RevealText
-              text={
-                program.selected !== null
-                  ? breadcrumbPath(program.selected.name)
-                  : "Visual programming"
-              }
-              delay={1150}
-              stagger={45}
-            />
-          </div>
-        </div>
-        <div className="appbar-spacer" />
-        <span
-          className="status-dot enter-up enter-delay-status"
-          data-state={runtime.phase === "ready" ? "ready" : "error"}
-          role="status"
-          title={
-            runtime.phase === "ready"
-              ? `Optilotus runtime ${runtime.version || "?"} · ${runtime.health || "?"}`
-              : undefined
-          }
-        >
-          <i aria-hidden="true" />
-          {runtime.phase === "ready"
-            ? `${APP_NAME} ${displayVersion(runtime.version)}`
-            : runtime.phase === "loading"
-              ? "Connecting…"
-              : "Runtime unavailable"}
-        </span>
-        {undoRedoTheme("hide-compact")}
-        {compact ? (
-          <>
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => setSheetOpen(true)}
-            >
-              Edit
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary btn-sm enter-up enter-delay-action"
-              disabled={program.busy || program.running || fid === null}
-              onClick={runAll}
-              aria-label="Run program"
-            >
-              ▶
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              type="button"
-              className="btn btn-panel btn-sm"
-              aria-label="Toggle inspector"
-              aria-pressed={inspOpen}
-              onClick={() => setInspOpen((v) => !v)}
-            >
-              Inspector ◧
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary btn-sm enter-up enter-delay-action"
-              disabled={program.busy || program.running || fid === null}
-              onClick={runAll}
-              title="Run (Ctrl/Cmd + Enter)"
-            >
-              ▶ Run
-            </button>
-          </>
-        )}
-      </header>
+      <AppToolbar
+        runtime={runtime}
+        selectedName={program.selected?.name ?? null}
+        theme={theme}
+        lightModeAvailable={lightModeAvailable}
+        canUndo={canUndoAll}
+        canRedo={canRedoAll}
+        undoTitle={undoTitle}
+        redoTitle={redoTitle}
+        onUndo={undoAll}
+        onRedo={redoAll}
+        onToggleTheme={toggleTheme}
+        onRun={runAll}
+        onToggleLeft={() => setLeftOpen((v) => !v)}
+        onToggleInsp={() => setInspOpen((v) => !v)}
+        onOpenNav={() => setNavOpen(true)}
+        onOpenSheet={() => setSheetOpen(true)}
+        isMobile={compact}
+        leftOpen={leftOpen}
+        inspOpen={inspOpen}
+        programBusy={program.busy}
+        programRunning={program.running}
+        selectedId={fid}
+        leftPanelLabel="Blocks"
+      />
 
       <div className="workspace">
         <section className="pane pane-editor" aria-label="Visual editor">
@@ -943,7 +777,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
                 onRegisterZoom={registerZoom}
                 conditionTextFor={props.onConditionText}
                 flow={flow}
-                toolbarExtra={undoRedoTheme("")}
+                toolbarExtra={null}
                 onRequestLibrary={() => {
                   if (compact) {
                     setNavOpen(true);
@@ -1032,61 +866,15 @@ export default function AppShell(props: AppShellProps): ReactElement {
       </div>
 
       {navVisible ? (
-        <>
-          <div
-            className="scrim"
-            onClick={() => setNavOpen(false)}
-            aria-hidden="true"
-          />
-          <nav className="drawer" aria-label="Blocks and functions">
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                marginBottom: 12,
-              }}
-            >
-              <h2 className="pane-title">Blocks</h2>
-              <div className="appbar-spacer" />
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setNavOpen(false)}
-                aria-label="Close block library"
-              >
-                ✕
-              </button>
-            </div>
-            <div style={{ marginBottom: 4 }}>{leftPanel}</div>
-          </nav>
-        </>
-      ) : null}
-
-      {sheetVisible ? (
-        <>
-          <div
-            className="scrim"
-            onClick={() => setSheetOpen(false)}
-            aria-hidden="true"
-          />
-          <div
-            className="sheet"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Inspector"
-          >
-            <div className="sheet-grip" aria-hidden="true" />
-            {inspector}
-            <button
-              type="button"
-              className="btn"
-              style={{ marginTop: 16, width: "100%" }}
-              onClick={() => setSheetOpen(false)}
-            >
-              Done
-            </button>
-          </div>
-        </>
+        <AppNavigation
+          isMobile={compact}
+          navOpen={navOpen}
+          sheetOpen={sheetOpen}
+          onNavClose={() => setNavOpen(false)}
+          onSheetClose={() => setSheetOpen(false)}
+          leftPanel={leftPanel}
+          inspector={inspector}
+        />
       ) : null}
     </div>
   );

@@ -30,13 +30,13 @@ export const FLUID_BLOB_COUNT = 9;
 export const FLUID_BURST_SECONDS = 1.4;
 
 /** Drift speed in normalized screen units per second (slow, continuous). */
-const DRIFT = 0.028;
+export const FLUID_DRIFT = 0.028;
 
 /** Pointer influence radius, in normalized screen units. */
-const POINTER_REACH = 0.5;
+export const FLUID_POINTER_REACH = 0.5;
 
 /** Pointer attraction strength, in normalized screen units per second. */
-const POINTER_PULL = 0.05;
+export const FLUID_POINTER_PULL = 0.05;
 
 /** One ink blob: position, motion, and its place in the palette. */
 export interface FluidBlob {
@@ -83,7 +83,7 @@ function mulberry32(seed: number): () => number {
 }
 
 /** Distance from the centre that stays clear of ink (normalized). */
-const CLEAR_CENTER = 0.3;
+export const FLUID_CLEAR_CENTER = 0.3;
 
 /**
  * Initial blob layout. Blobs start near the periphery: the centre of
@@ -102,8 +102,8 @@ export function createFluidBlobs(
     const dx = x - 0.5;
     const dy = y - 0.5;
     const distance = Math.hypot(dx, dy);
-    if (distance < CLEAR_CENTER) {
-      const scale = distance < 1e-4 ? 0 : CLEAR_CENTER / distance;
+    if (distance < FLUID_CLEAR_CENTER) {
+      const scale = distance < 1e-4 ? 0 : FLUID_CLEAR_CENTER / distance;
       x = 0.5 + dx * scale;
       y = 0.5 + dy * scale;
     }
@@ -145,8 +145,8 @@ export function stepFluidBlobs(
 ): readonly FluidBlob[] {
   // Pairwise soft repulsion so flowers never magnetise toward each other:
   // each one keeps its own space and drifts independently.
-  const REPULSE_REACH = 0.22;
-  const REPULSE_STRENGTH = 0.06;
+  const FLUID_REPULSE_REACH = 0.22;
+  const FLUID_REPULSE_STRENGTH = 0.06;
   return blobs.map((blob, i) => {
     const ax =
       Math.sin(blob.y * 3.3 + time * 0.21 + blob.phase) * 0.6 +
@@ -154,8 +154,8 @@ export function stepFluidBlobs(
     const ay =
       Math.cos(blob.x * 2.9 - time * 0.18 + blob.phase * 0.7) * 0.6 -
       Math.sin(blob.y * 3.6 + time * 0.12) * 0.5;
-    let vx = ax * DRIFT;
-    let vy = ay * DRIFT;
+    let vx = ax * FLUID_DRIFT;
+    let vy = ay * FLUID_DRIFT;
 
     for (let j = 0; j < blobs.length; j += 1) {
       if (j === i) continue;
@@ -164,9 +164,9 @@ export function stepFluidBlobs(
       const dx = blob.x - other.x;
       const dy = blob.y - other.y;
       const dist = Math.hypot(dx, dy);
-      if (dist < REPULSE_REACH && dist > 1e-4) {
-        const falloff = (1 - dist / REPULSE_REACH) ** 2;
-        const push = falloff * REPULSE_STRENGTH;
+      if (dist < FLUID_REPULSE_REACH && dist > 1e-4) {
+        const falloff = (1 - dist / FLUID_REPULSE_REACH) ** 2;
+        const push = falloff * FLUID_REPULSE_STRENGTH;
         vx += (dx / dist) * push;
         vy += (dy / dist) * push;
       }
@@ -176,9 +176,9 @@ export function stepFluidBlobs(
       const dx = pointer.x - blob.x;
       const dy = pointer.y - blob.y;
       const dist = Math.hypot(dx, dy);
-      if (dist < POINTER_REACH && dist > 1e-4) {
-        const falloff = (1 - dist / POINTER_REACH) ** 2;
-        const pull = falloff * POINTER_PULL;
+      if (dist < FLUID_POINTER_REACH && dist > 1e-4) {
+        const falloff = (1 - dist / FLUID_POINTER_REACH) ** 2;
+        const pull = falloff * FLUID_POINTER_PULL;
         const ux = dx / dist;
         const uy = dy / dist;
         vx += ux * pull - uy * pull * 0.6;

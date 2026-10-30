@@ -1,0 +1,177 @@
+/* ---------- Inspector ---------- */
+
+.props {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.props > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  font-size: 13.5px;
+  animation: item-in var(--transition-fast) ease-out;
+}
+
+.props > div + div {
+  border-top: 1px solid var(--border);
+}
+
+.props dt {
+  color: var(--text-muted);
+}
+
+.props dd {
+  margin: 0;
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+/* ---------- Runner ---------- */
+
+.run-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.run-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.run-duration {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.status-dot[data-state="idle"] i {
+  background: var(--text-muted);
+}
+
+.status-dot[data-state="busy"] i {
+  background: var(--warning);
+}
+
+/* ---------- Output ---------- */
+
+.output-pre {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+  animation: notice-in var(--transition-fast) ease-out;
+}
+
+.notice {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-elevated);
+  font-size: 14px;
+  color: var(--text-secondary);
+  animation: notice-in var(--transition-fast) ease-out;
+}
+
+/* Notices and printed output arrive with the interface's standard
+ * 150ms settle. */
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.notice-error {
+  border-color: color-mix(in srgb, var(--color-console-err) 45%, transparent);
+  background: var(--error-soft);
+  color: var(--text-primary);
+}
+
+.notice-error .notice-title {
+  color: var(--color-console-err);
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.notice-ok {
+  border-color: color-mix(in srgb, var(--color-console-ok) 40%, transparent);
+}
+
+.run-meta {
+  display: flex;
+  gap: var(--space-4);
+  font-size: 13px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+
+.run-meta strong {
+  color: var(--text-primary);
+}
+
+/* ---------- Status ---------- */
+
+.status-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--surface-inset) 84%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -4px 10px rgba(6, 10, 26, 0.5),
+    0 4px 12px rgba(1, 3, 12, 0.34);
+  white-space: nowrap;
+  transition:
+    background var(--transition-fast) ease,
+    box-shadow var(--transition-fast) ease,
+    color var(--transition-fast) ease;
+}
+
+.status-dot i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+  /* A clean status light: a solid dot, no neon bloom around it. */
+  box-shadow: none;
+  color: var(--warning);
+  flex: none;
+  transition: background var(--transition-fast) ease;
+}
+
+.status-dot[data-state="ready"] i {
+  background: var(--success);
+}
+
+.status-dot[data-state="error"] i {
+  background: var(--error);
+}
+
