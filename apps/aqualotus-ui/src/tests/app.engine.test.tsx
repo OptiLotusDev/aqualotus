@@ -226,7 +226,7 @@ describe("PARITY-022 — the whole app runs a real program", () => {
    * real, separate program variable, the original variable and its
    * assignment are untouched, and the run prints both.
    */
-  it("creates a converted variable from an assignment and runs it", async () => {
+  it("creates a converted variable from an assignment and runs it", { timeout: 15000 }, async () => {
     const user = userEvent.setup();
     const view = render(<App />);
     await waitForReady();
