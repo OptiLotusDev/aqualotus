@@ -12,7 +12,7 @@ import {
   type FlowState,
 } from "../lib/flow";
 
-/** Entry command of a function, read from the engine (read-only). */
+/** The engine's entry command of a function, read from the engine (read-only). */
 function entryOf(fid: number): number | null {
   try {
     const info = optilotus_getFunction(fid);
@@ -21,6 +21,14 @@ function entryOf(fid: number): number | null {
     // The runtime is not ready (or the call failed): no chain, no glow.
     return null;
   }
+}
+
+/** Infer the entry for visualization when the engine doesn't report one.
+ * The engine runs from the first command by default, but may not report
+ * the entry explicitly. For flow visualization we mirror this default. */
+function inferEntry(cmds: readonly CommandSummary[]): number | null {
+  if (cmds.length === 0) return null;
+  return cmds[0].id;
 }
 
 /** The graph the run froze at its start: uneditable by later edits. */
@@ -69,7 +77,7 @@ export function useFlowGlow(program: ProgramSnapshot): {
   }, [program]);
 
   /** Freeze the walked graph and its run id; the sweep derives later. */
-  const startFlow = useCallback((): void => {
+const startFlow = useCallback((): void => {
     const snapshot = programRef.current;
     const main = snapshot.functions.find((fn) => fn.isMain);
     if (main === undefined) {
@@ -93,12 +101,17 @@ export function useFlowGlow(program: ProgramSnapshot): {
     }
     // The engine's entry can point at a hidden node (an `if`'s condition
     // compute): resolve it to the block the chain starts at.
+    // If the engine doesn't report an entry, infer it for visualization.
+    const engineEntry = entryOf(main.id);
+    const entry = engineEntry !== null
+      ? resolveEntry(cmds, engineEntry)
+      : inferEntry(cmds);
     runIdRef.current += 1;
     setFrozen({
       runId: runIdRef.current,
       fid: main.id,
       cmds,
-      entry: resolveEntry(cmds, entryOf(main.id)),
+      entry,
       literals,
     });
   }, []);
@@ -136,11 +149,17 @@ export function useFlowGlow(program: ProgramSnapshot): {
   // to their normal appearance and nothing is left animating.
   useEffect(() => {
     if (flow === null) return;
+    // Ensure a minimum visible duration so the sweep is perceptible even
+    // for very short chains. The design guide specifies 300ms per link,
+    // but we enforce a floor of 1500ms total to account for the time
+    // between startFlow() and the first paint of the travelling dot.
+    const minDuration = 1500;
+    const duration = Math.max(flowDuration(flow), minDuration);
     const timer = window.setTimeout(() => {
       setFrozen((prev) =>
         prev !== null && prev.runId === flow.runId ? null : prev,
       );
-    }, flowDuration(flow));
+    }, duration);
     return () => window.clearTimeout(timer);
   }, [flow]);
 

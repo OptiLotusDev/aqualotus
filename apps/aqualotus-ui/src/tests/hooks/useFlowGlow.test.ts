@@ -237,7 +237,8 @@ describe("useFlowGlow", () => {
     });
     expect(result.current.flow).not.toBeNull();
     act(() => {
-      vi.advanceTimersByTime(2 * FLOW_LINK_MS + 50);
+      // The sweep has a minimum duration of 1500ms (see useFlowGlow)
+      vi.advanceTimersByTime(1550);
     });
     // Nothing is left animating when the sweep is over.
     expect(result.current.flow).toBeNull();

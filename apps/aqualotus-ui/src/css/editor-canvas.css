@@ -263,40 +263,18 @@
 
 /* ---------- Execution flow travel ---------- */
 
-/* The travelling indicator of a run: a small luminous head riding the
- * actual connection path, in the colour of that very connection (the
- * same tokens the connection itself uses, so a selected connection glows
- * in the selected colour and a dashed preview stays dashed). The
- * connection underneath is never touched. */
+/* Simple solid white travelling dot. No glow, no trail. */
 .flow-dot {
-  --glow-color: var(--edge-flow, var(--color-flow));
-  fill: var(--glow-color);
-  /* The head carries the bloom: execution is the one moment the board
-   * should glow hardest. */
-  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--glow-color) 80%, white))
-    drop-shadow(0 0 12px color-mix(in srgb, var(--glow-color) 50%, transparent));
-  transition: opacity 120ms ease-out;
+  fill: #ffffff;
+  opacity: 0;
 }
 
-.flow-dot.edge-selected {
-  --glow-color: var(--edge-flow-selected, var(--color-flow-selected));
-}
-
-/* The soft trail behind the head. */
+/* Kept for selector compatibility (unused in current impl). */
 .flow-trail {
-  --glow-color: var(--edge-flow, var(--color-flow));
-  fill: var(--glow-color);
-  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--glow-color) 45%, transparent));
-  transition: opacity 120ms ease-out;
-}
-
-.flow-trail.edge-selected {
-  --glow-color: var(--edge-flow-selected, var(--color-flow-selected));
+  display: none;
 }
 
 .marker-flow {
   fill: var(--color-flow);
-  /* The arrowhead glows with the line it belongs to. */
-  filter: drop-shadow(0 0 3px rgba(34, 211, 238, 0.7));
 }
 

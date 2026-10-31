@@ -305,7 +305,7 @@ describe("VisualEditor rendering", () => {
     };
     const { container } = render(<VisualEditor {...baseProps()} flow={flow} />);
     expect(container.querySelectorAll("circle.flow-dot").length).toBe(2);
-    expect(container.querySelectorAll("circle.flow-trail").length).toBe(2);
+    expect(container.querySelectorAll("circle.flow-trail").length).toBe(0);
     const edges = container.querySelectorAll("path.edge:not(.edge-preview)");
     expect(edges.length).toBe(3);
     for (const edge of edges) {

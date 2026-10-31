@@ -63,6 +63,10 @@ function head(container: HTMLElement, index: number): SVGCircleElement {
   return dot as SVGCircleElement;
 }
 
+function getOpacity(dot: SVGCircleElement): string {
+  return dot.style.opacity || dot.getAttribute("opacity") || "0";
+}
+
 describe("FlowTravel", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -83,7 +87,7 @@ describe("FlowTravel", () => {
 
     // The indicator starts at the beginning of the path.
     advance(16);
-    expect(dot.getAttribute("opacity")).toBe("1");
+    expect(getOpacity(dot)).toBe("1");
     expect(Number(dot.getAttribute("cx"))).toBeLessThan(PATH_LEN / 2);
 
     // Halfway through the link it is halfway along the path.
@@ -106,7 +110,7 @@ describe("FlowTravel", () => {
     );
     const dot = head(container, 0);
     advance(LINK_MS + 100);
-    expect(dot.getAttribute("opacity")).toBe("0");
+    expect(getOpacity(dot)).toBe("0");
   });
 
   it("travels the links one after another, in order", () => {
@@ -124,17 +128,17 @@ describe("FlowTravel", () => {
 
     // The second link waits for the first one.
     advance(LINK_MS / 2);
-    expect(first.getAttribute("opacity")).toBe("1");
-    expect(second.getAttribute("opacity")).toBe("0");
+    expect(getOpacity(first)).toBe("1");
+    expect(getOpacity(second)).toBe("0");
 
     // Now the second link travels.
     advance(LINK_MS / 2 + 32);
-    expect(first.getAttribute("opacity")).toBe("0");
-    expect(second.getAttribute("opacity")).toBe("1");
+    expect(getOpacity(first)).toBe("0");
+    expect(getOpacity(second)).toBe("1");
     expect(Number(second.getAttribute("cx"))).toBeGreaterThan(0);
   });
 
-  it("wears the colour of the connection it rides", () => {
+  it("renders a solid white dot for each connection", () => {
     const { container } = render(
       <Harness
         edges={[
@@ -144,13 +148,11 @@ describe("FlowTravel", () => {
         paths={pathsOf(["e1", "e2"])}
       />,
     );
-    // The selected connection keeps its own (selected) colour token.
-    expect(head(container, 0).getAttribute("class")).toBe("flow-dot");
-    expect(head(container, 1).getAttribute("class")).toBe(
-      "flow-dot edge-selected",
-    );
-    const trail = container.querySelectorAll("circle.flow-trail")[1];
-    expect(trail?.getAttribute("class")).toBe("flow-trail edge-selected");
+    // Both connections get a simple white dot, no trail, no selected class.
+    expect(container.querySelectorAll("circle.flow-dot").length).toBe(2);
+    expect(container.querySelectorAll("circle.flow-trail").length).toBe(0);
+    expect(head(container, 0).getAttribute("fill")).toBe("#ffffff");
+    expect(head(container, 1).getAttribute("fill")).toBe("#ffffff");
   });
 
   it("drops the travel under reduced motion", () => {
@@ -164,7 +166,7 @@ describe("FlowTravel", () => {
     const dot = head(container, 0);
     advance(LINK_MS * 2);
     // Nothing moves: the fades stay, the travel goes.
-    expect(dot.getAttribute("opacity")).toBe("0");
+    expect(getOpacity(dot)).toBe("0");
     expect(dot.getAttribute("cx")).toBeNull();
   });
 
@@ -198,7 +200,7 @@ describe("FlowTravel", () => {
     );
     advance(LINK_MS / 2);
     const dot = head(container, 0);
-    expect(dot.getAttribute("opacity")).toBe("1");
+    expect(getOpacity(dot)).toBe("1");
 
     // A new run starts the travel from the beginning again.
     rerender(
@@ -210,7 +212,7 @@ describe("FlowTravel", () => {
     );
     advance(16);
     expect(Number(dot.getAttribute("cx"))).toBeLessThan(PATH_LEN / 2);
-    expect(dot.getAttribute("opacity")).toBe("1");
+    expect(getOpacity(dot)).toBe("1");
   });
 
   it("leaves the connection itself untouched", () => {

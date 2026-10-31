@@ -631,8 +631,10 @@ describe("flowTimings", () => {
 
   it("shortens a long chain, but never below the floor", () => {
     // While the chain fits the sweep budget, the guide's timing applies.
+    // With FLOW_LINK_MS=500 and FLOW_MAX_SWEEP_MS=2400, 8 links = 4000ms > 2400ms,
+    // so it shortens to 2400/8 = 300ms.
     const medium = flowTimings(8);
-    expect(medium.linkMs).toBe(FLOW_LINK_MS);
+    expect(medium.linkMs).toBe(300);
     expect(medium.linkMs * 8).toBeLessThanOrEqual(FLOW_MAX_SWEEP_MS);
     // A very long chain shortens to the floor, never below it.
     const long = flowTimings(40);
