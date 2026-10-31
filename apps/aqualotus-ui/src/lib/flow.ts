@@ -348,16 +348,25 @@ export function resolveRunPath(
           }
           const tail = members[members.length - 1].id;
           const join = next;
-          if (
-            join !== null &&
-            join !== undefined &&
-            byId.has(join) &&
-            cmd.next !== null
-          ) {
+          // Add merge edge for both classic and manual-merge modes.
+          // In classic mode (join off), join = cmd.next (the block after the if).
+          // In manual-merge mode (join on), join = cmd.next when there's a continuation,
+          // or the if's own id (representing the join circle) when there's no continuation.
+          // The canvas travel edges will expand this into tail→join and join→continuation.
+          if (join !== null && join !== undefined && byId.has(join)) {
             edges.push({
               fid,
               from: tail,
               to: join,
+              kind: "merge",
+            });
+          } else if (join === null || join === undefined) {
+            // Terminal if with no successor: in manual-merge mode the branch
+            // flows into the if's join circle. Use the if's own id as the target.
+            edges.push({
+              fid,
+              from: tail,
+              to: cmd.id,
               kind: "merge",
             });
           }

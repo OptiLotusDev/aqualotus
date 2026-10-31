@@ -8,7 +8,7 @@ import type { ReactElement } from "react";
 import type { CommandSummary } from "../../lib/optilotus";
 import type { Pos } from "../../lib/layout";
 import type { CanvasDrawnEdge } from "../../lib/canvas_edges";
-import type { TravelEdge } from "../../hooks/canvas/useCanvasConnections";
+import type { TravelEdge } from "../../hooks/canvas/useCanvasTravelEdges";
 import type { IfShape, BranchSide } from "../../lib/graph";
 import PackageContainer from "../PackageContainer";
 import StructContainer from "../StructContainer";
@@ -55,6 +55,11 @@ interface CanvasWorkspaceProps {
   readonly dragEffectivePos: (fid: number, cmd: CommandSummary, index: number) => Pos;
   readonly memberSideOf: (fid: number, id: number) => BranchSide | undefined;
   readonly onJoinRef: (el: HTMLDivElement | null, fid: number, ifId: number) => void;
+  readonly onBlockRef?: (el: HTMLDivElement | null, fid: number, cmdId: number) => void;
+  /** Source of an in-flight connection drag, or null. Drives the
+   * "connecting from this block/join" highlight so the source port and
+   * the dragged wire read as one stroke. */
+  readonly connectSource: { readonly fid: number; readonly sourceId: number } | null;
   readonly edges: readonly CanvasDrawnEdge[];
   readonly travelEdges: readonly TravelEdge[];
   readonly drawing: ReadonlySet<string>;
@@ -103,6 +108,7 @@ export default function CanvasWorkspace(
     dragEffectivePos,
     memberSideOf,
     onJoinRef,
+    connectSource,
     edges,
     travelEdges,
     drawing,
@@ -121,6 +127,7 @@ export default function CanvasWorkspace(
     onBoardKeyDown,
     onPointerCancel,
   } = props;
+  const onBlockRef = props.onBlockRef ?? (() => {});
 
   const {
     pkgPos, pkgW, pkgH, structW, structH, worldW, worldH,
@@ -194,6 +201,7 @@ export default function CanvasWorkspace(
                             joinDrag={joinDrag}
                             sizes={sizes}
                             funcOrigin={funcOrigin}
+                            connectSource={connectSource}
                             onJoinRef={onJoinRef}
                           />
                           <CanvasBlocks
@@ -210,7 +218,9 @@ export default function CanvasWorkspace(
                             blockPositions={blockPositions}
                             dragEffectivePos={dragEffectivePos}
                             memberSideOf={memberSideOf}
+                            connectSource={connectSource}
                             onRequestLibrary={onRequestLibrary}
+                            onBlockRef={onBlockRef}
                           />
                         </FunctionContainer>
                       );
@@ -236,7 +246,7 @@ export default function CanvasWorkspace(
             />
             {emptyWorkspace ? (
               <CanvasEmptyState
-                selectedFunc={selectedFunc as { readonly name: string | null } | null}
+                selectedFunc={selectedFunc}
                 onRequestLibrary={onRequestLibrary}
               />
             ) : null}

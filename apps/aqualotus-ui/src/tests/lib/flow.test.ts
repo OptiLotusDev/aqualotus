@@ -327,6 +327,7 @@ describe("resolveRunPath", () => {
     expect(edges).toEqual([
       { fid: 0, from: 1, to: 2, kind: "chain" },
       { fid: 0, from: 2, to: 3, kind: "branch-head" },
+      { fid: 0, from: 3, to: 2, kind: "merge" },
     ]);
   });
 
@@ -576,7 +577,10 @@ describe("resolveRunPath ambiguous / boundary cases", () => {
       { id: 3, kind: "print", next: null, template: '"a"' },
     );
     const edges = resolveRunPath(graph, 1, 0, ["a"]);
-    expect(edges).toEqual([{ fid: 0, from: 1, to: 3, kind: "branch-head" }]);
+    expect(edges).toEqual([
+      { fid: 0, from: 1, to: 3, kind: "branch-head" },
+      { fid: 0, from: 3, to: 1, kind: "merge" },
+    ]);
   });
 
   it("an undecided if with no successor drops its edges entirely", () => {

@@ -6,20 +6,24 @@
  */
 
 import { useCallback, useRef, useState } from "react";
+import type { ReactElement } from "react";
 import type { BlockSide } from "../../lib/graph_geometry";
 import type { BranchSide } from "../../lib/graph_topology";
 import type { CommandSummary } from "../../lib/optilotus";
 import type { Pos, LayoutMap } from "../../lib/layout";
+import { branchDropPos } from "../../lib/layout";
 import type { IfShape } from "../../lib/graph";
 import type { Size } from "../../components/visualEditor_constants";
-import type { ReactElement } from "react";
+import {
+  BLOCK_MIN_Y,
+  FALLBACK_SIZE,
+  fallbackPos,
+} from "../../components/visualEditor_constants";
 import type { CanvasDrawnEdge } from "../../lib/canvas_edges";
-import type { FlowState } from "../../lib/flow";
-import { BLOCK_MIN_Y } from "../../components/visualEditor_constants";
 import { clampBlockPos } from "../../lib/canvas_geometry";
 import { useCanvasBlockDrag } from "./useCanvasBlockDrag";
 import { useCanvasConnections } from "./useCanvasConnections";
-import { useCanvasBranchLayout } from "./useCanvasBranchLayout";
+import { useCanvasBranchLayout, type BranchFrame } from "./useCanvasBranchLayout";
 
 export type CanvasGesture =
   | { kind: "block"; fid: number; id: number; startX: number; startY: number; orig: Pos }
@@ -66,17 +70,9 @@ interface UseCanvasGesturesArgs {
   readonly onMoveJoin?: (ifId: number, pos: Pos) => void;
   readonly setPkgOff: (next: Pos) => void;
   readonly pkgOff: Pos;
-  readonly flashHint: (text: string) => void;
   readonly setZoom: (z: number) => void;
   readonly zoomBy: (factor: number) => void;
   readonly edges: readonly CanvasDrawnEdge[];
-  readonly flow: FlowState | null;
-  readonly placeBranchMember: (
-    fid: number,
-    ifId: number,
-    branch: BranchSide,
-    blockId: number,
-  ) => void;
 }
 
 interface UseCanvasGesturesResult {
@@ -99,6 +95,16 @@ interface UseCanvasGesturesResult {
   readonly joinBasePos: (fid: number, ifId: number) => Pos | null;
   readonly previewNode: () => ReactElement | null;
   readonly drawing: ReadonlySet<string>;
+  readonly branchFrames: (
+    fid: number,
+    viewport: { readonly x: number; readonly y: number; readonly w: number; readonly h: number } | null,
+  ) => readonly BranchFrame[];
+  readonly placeBranchMember: (
+    fid: number,
+    ifId: number,
+    branch: BranchSide,
+    blockId: number,
+  ) => void;
 }
 
 export function useCanvasGestures(args: UseCanvasGesturesArgs): UseCanvasGesturesResult {
@@ -125,8 +131,6 @@ export function useCanvasGestures(args: UseCanvasGesturesArgs): UseCanvasGesture
     pkgOff,
     setZoom,
     edges,
-    flow,
-    placeBranchMember,
   } = args;
 
   // Shared gesture state
@@ -146,11 +150,76 @@ export function useCanvasGestures(args: UseCanvasGesturesArgs): UseCanvasGesture
     hintTimer.current = window.setTimeout(() => setHint(""), 2600);
   }, []);
 
-  // Sub-hooks
+  /**
+   * Auto-place a freshly appended branch member: under the last member of
+   * its own body column, or anchored to the frame's empty-branch spot.
+   * Called from the connection-drop resolution and, after its own
+   * pre-gain frame gate, from the off-gesture auto-place effect (the gate
+   * belongs there, not here — a wire released on a frame's blank area
+   * reads the canvas before the props list the new member, so anchoring
+   * below *itself* (its stale stored spot) would push later members ever
+   * further down the canvas).
+   */
+  const placeBranchMember = useCallback(
+    (fid: number, ifId: number, branch: BranchSide, blockId: number): void => {
+      if (branch !== "then" && branch !== "else") return;
+      const cmds = commandsByFunction[fid] ?? [];
+      const byIndex = new Map<number, number>(
+        cmds.map((c, i) => [c.id, i] as const),
+      );
+      const ifIndex = byIndex.get(ifId);
+      const ifCmd = ifIndex === undefined ? undefined : cmds[ifIndex];
+      if (ifCmd === undefined || ifIndex === undefined) return;
+      const store = layoutStore[fid];
+      const ifPos = store?.[ifId] ?? fallbackPos(ifIndex);
+      const ifSize = sizes.get(`${fid}:${ifId}`) ?? FALLBACK_SIZE;
+      const shape = (ifShapesByFunction.get(fid) ?? []).find(
+        (s) => s.ifId === ifId,
+      );
+      const memberIds =
+        branch === "then"
+          ? (shape?.then ?? [])
+          : (shape?.else ?? []);
+      const memberRects: (readonly [number, number])[] = [];
+      for (const id of memberIds) {
+        // The block being placed anchors below the members the engine
+        // listed *before* it — its own stale spot is not an anchor.
+        if (id === blockId) continue;
+        const index = byIndex.get(id) ?? -1;
+        const cmd = cmds[index];
+        if (cmd === undefined) continue;
+        const p = store?.[cmd.id] ?? fallbackPos(index);
+        const s = sizes.get(`${fid}:${cmd.id}`) ?? FALLBACK_SIZE;
+        memberRects.push([p.y, s.h] as const);
+      }
+      onMoveBlock(
+        fid,
+        blockId,
+        branchDropPos({
+          branch,
+          ifRect: { x: ifPos.x, y: ifPos.y, w: ifSize.w, h: ifSize.h },
+          memberRects,
+        }),
+      );
+    },
+    [commandsByFunction, layoutStore, sizes, ifShapesByFunction, onMoveBlock],
+  );
+
+  // Sub-hooks. Branch layout is created before connections so the
+  // connection drop resolution can auto-place appended branch members
+  // through the one shared placement implementation.
   const blockDrag = useCanvasBlockDrag({
     onMoveBlock,
     pkgOff,
     setPkgOff,
+  });
+
+  const branchLayout = useCanvasBranchLayout({
+    ifShapesByFunction,
+    mergeJoins,
+    funcOrigin,
+    onMoveBlock,
+    onMoveJoin,
   });
 
   const connections = useCanvasConnections({
@@ -159,28 +228,11 @@ export function useCanvasGestures(args: UseCanvasGesturesArgs): UseCanvasGesture
     blockWorld,
     funcOrigin,
     sizes,
-    selectedFunctionId,
-    selectedCommandId,
     mergeJoins,
     ifShapesByFunction,
     edges,
-    flow,
     flashHint: flashHintInternal,
     placeBranchMember,
-  });
-
-  const branchLayout = useCanvasBranchLayout({
-    ifShapesByFunction,
-    layoutStore,
-    layout: {
-      funcOrigin,
-      posOf,
-    },
-    sizes,
-    mergeJoins,
-    onMoveBlock,
-    onMoveJoin,
-    commandsByFunction,
   });
 
   const pinnedBlocks = new Set<number>();
@@ -630,5 +682,7 @@ export function useCanvasGestures(args: UseCanvasGesturesArgs): UseCanvasGesture
     joinBasePos: branchLayout.joinBasePos,
     previewNode: connections.previewNode,
     drawing: connections.drawing,
+    branchFrames: branchLayout.branchFrames,
+    placeBranchMember,
   };
 }

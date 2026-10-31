@@ -1,15 +1,16 @@
 /**
- * Canvas "camera": zoom level, package pan offset, viewport, and the view
- * transform helpers. Extracted from `VisualEditor` so the editor stays
- * focused on orchestration while the camera logic is isolated and
- * independently testable. The editor drives the camera through the
- * returned handlers and reads `zoom` for rendering.
+ * Canvas "camera": zoom level, package pan offset, and the view transform
+ * helpers. Extracted from `VisualEditor` so the editor stays focused on
+ * orchestration while the camera logic is isolated and independently
+ * testable. The editor drives the camera through the returned handlers
+ * and reads `zoom` for rendering. The visible-world rect lives with the
+ * viewport subscription in `useCanvasViewport`, not here — one authority
+ * per piece of view state.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Pos } from "../lib/layout";
 import { anchorScroll, clampZoom, screenToWorld } from "../lib/history";
-import type { ViewRect } from "../lib/history";
 
 interface ViewCameraArgs {
   readonly boardRef: React.RefObject<HTMLDivElement | null>;
@@ -24,17 +25,11 @@ interface ViewCameraArgs {
   readonly onZoomSettled?: (before: number, after: number) => void;
 }
 
-/** One camera: zoom, pan, viewport, and the view transform. */
+/** One camera: zoom, pan, and the view transform. */
 export function useCanvasView(args: ViewCameraArgs) {
   const { boardRef, layout, onRegisterZoom, onZoomSettled } = args;
   const [zoom, setZoom] = useState<number>(1);
   const zoomRef = useRef<number>(1);
-  const [viewport, setViewport] = useState<ViewRect | null>(null);
-
-  const wheelBurstRef = useRef<{ start: number; timer: number | null }>({
-    start: 1,
-    timer: null,
-  });
 
   useEffect(() => {
     zoomRef.current = zoom;
@@ -181,9 +176,6 @@ export function useCanvasView(args: ViewCameraArgs) {
     zoom,
     setZoom,
     zoomRef,
-    wheelBurstRef,
-    viewport,
-    setViewport,
     commitZoom,
     zoomBy,
     zoomTo,

@@ -24,7 +24,15 @@ export function useCanvasTravelEdges(args: UseCanvasTravelEdgesArgs): readonly T
 
   return useMemo(() => {
     if (flow === null || flow === undefined) return [];
-    const byEnds = new Map(edges.map((e) => [`${e.fid}:${e.from}:${e.to}`, e]));
+    // Build lookup by the actual drawn edge keys
+    const byKey = new Map(edges.map((e) => [e.key, e]));
+    // Also build lookup by from/to for branch-head edges
+    const branchEdgesByEnds = new Map<string, CanvasDrawnEdge>();
+    for (const e of edges) {
+      if (e.key.includes(":branch:")) {
+        branchEdgesByEnds.set(`${e.fid}:${e.from}:${e.to}`, e);
+      }
+    }
     const joinOutAfter = new Map<number, string>();
     for (const e of edges) {
       if (e.joinTail === true && e.joinIfId !== undefined) {
@@ -47,7 +55,17 @@ export function useCanvasTravelEdges(args: UseCanvasTravelEdgesArgs): readonly T
         if (joinOut !== undefined) push(joinOut, selected);
         return;
       }
-      const drawn = byEnds.get(`${edge.fid}:${edge.from}:${edge.to}`);
+      if (edge.kind === "branch-head") {
+        // Branch head edge: match by from/to to find the correct branch edge key
+        const branchEdge = branchEdgesByEnds.get(`${edge.fid}:${edge.from}:${edge.to}`);
+        if (branchEdge !== undefined) {
+          push(branchEdge.key, selected);
+        }
+        return;
+      }
+      // Chain edge: key is ${fid}:${from}
+      const chainKey = `${edge.fid}:${edge.from}`;
+      const drawn = byKey.get(chainKey);
       if (drawn === undefined) return;
       push(drawn.key, selected);
     });

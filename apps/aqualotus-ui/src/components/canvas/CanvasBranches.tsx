@@ -33,6 +33,8 @@ interface CanvasBranchesProps {
   readonly sizes: ReadonlyMap<string, { readonly w: number; readonly h: number }>;
   readonly funcOrigin: (fid: number) => { readonly x: number; readonly y: number };
   readonly onJoinRef: (el: HTMLDivElement | null, fid: number, ifId: number) => void;
+  /** Source of an in-flight connection drag, or null. */
+  readonly connectSource: { readonly fid: number; readonly sourceId: number } | null;
 }
 
 export default function CanvasBranches(
@@ -45,6 +47,7 @@ export default function CanvasBranches(
     mergeJoins,
     joinLivePos,
     joinDrag,
+    connectSource,
     onJoinRef,
   } = props;
 
@@ -88,7 +91,11 @@ export default function CanvasBranches(
             data-fid={fid}
             data-dragging={dragging ? "true" : undefined}
             data-connect-from={
-              undefined
+              connectSource !== null &&
+              connectSource.fid === fid &&
+              connectSource.sourceId === shape.ifId
+                ? "true"
+                : undefined
             }
             ref={(el) => onJoinRef(el, fid, shape.ifId)}
             style={{ left: pos.x, top: pos.y }}

@@ -7,7 +7,7 @@
 
 import { Fragment, type ReactElement } from "react";
 import type { CanvasDrawnEdge } from "../../lib/canvas_edges";
-import type { TravelEdge } from "../../hooks/canvas/useCanvasConnections";
+import type { TravelEdge } from "../../hooks/canvas/useCanvasTravelEdges";
 import FlowTravel from "../FlowTravel";
 
 interface CanvasEdgesProps {

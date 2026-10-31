@@ -5,6 +5,7 @@
 
 import { useEffect, useRef } from "react";
 import { isTauriShell } from "../../lib/env";
+import { clampZoom } from "../../lib/history";
 
 interface UseCanvasStartupFitArgs {
   readonly boardRef: React.RefObject<HTMLDivElement | null>;
@@ -48,7 +49,12 @@ export function useCanvasStartupFit(args: UseCanvasStartupFitArgs): void {
         board.scrollTop = Math.max(0, py - 170);
         return;
       }
-      const next = Math.min(vw / (layout.pkgW + 160), vh / (layout.pkgH + 160));
+      // Tauri startup fits the package like the Fit button (centered).
+      // At cold start the package is by definition not on screen yet, so
+      // this centers rather than anchor-preserves.
+      const next = clampZoom(
+        Math.min(vw / (layout.pkgW + 160), vh / (layout.pkgH + 160)),
+      );
       setZoom(next);
       const cx = layout.pkgPos.x + layout.pkgW / 2;
       const cy = layout.pkgPos.y + layout.pkgH / 2;
