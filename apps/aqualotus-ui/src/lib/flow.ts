@@ -55,7 +55,7 @@ export interface FlowState {
  * Travel time of a single connection, in milliseconds. The OptiLotus
  * design guide sets the travelling indicator at 300ms per link.
  */
-export const FLOW_LINK_MS = 300;
+export const FLOW_LINK_MS = 500;
 
 /**
  * Floor for the per-connection travel time: a long chain keeps every

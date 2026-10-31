@@ -317,8 +317,7 @@
   filter: none;
 }
 
-:root[data-theme="light"] .edge-flow,
-:root[data-theme="light"] .edge-flow-trail {
+:root[data-theme="light"] .edge-flow {
   filter: none;
 }
 
