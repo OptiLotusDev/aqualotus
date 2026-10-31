@@ -19,8 +19,6 @@ import {
 } from "../lib/optilotus";
 import type { CommandDraft } from "../lib/program";
 import { isOptilotusError } from "../lib/program";
-import { collapseCasting } from "../lib/casting";
-import { chainTailOf, resolveEntry } from "../lib/graph";
 import {
   createDetached,
   deleteVisibleCommand,
@@ -28,7 +26,7 @@ import {
   readLinks,
   slotOf,
 } from "./program_editing";
-import { plannedLinksOf, forgetPlannedLink, setPlannedLink } from "./program_links";
+import { plannedLinksOf, forgetPlannedLink } from "./program_links";
 import type { ProgramMutationContext } from "./program_ops";
 import { setBusy, setSnapshotFailThrown, setSnapshotFailCommand, setSnapshotSel } from "./program_ctx_helpers";
 
@@ -40,28 +38,12 @@ export function addCommand(
   const { load, pushHistory } = ctx;
   try {
     setBusy(ctx);
-    const before = optilotus_listCommands(fid);
-    const beforeInfo = optilotus_getFunction(fid);
-    const beforeEntry =
-      !isOptilotusError(beforeInfo) && beforeInfo.entry !== undefined
-        ? beforeInfo.entry
-        : null;
-    const collapsed = isOptilotusError(before)
-      ? { commands: [] }
-      : collapseCasting(before.commands);
-    const tail = isOptilotusError(before)
-      ? null
-      : chainTailOf(
-          collapsed.commands,
-          resolveEntry(collapsed.commands, beforeEntry),
-        );
+    optilotus_listCommands(fid);
+    optilotus_getFunction(fid);
     const createdId = createDetached(ctx, fid, draft);
     if (createdId === null) {
       load(fid);
       return;
-    }
-    if (draft.kind === "if" && tail !== null) {
-      setPlannedLink(ctx.plannedRef.current, fid, tail, createdId);
     }
     const box = { id: createdId };
     load(fid);
