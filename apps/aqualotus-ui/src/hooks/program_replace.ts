@@ -17,8 +17,9 @@ import type { CommandDraft } from "../lib/program";
 import {
   isOptilotusError,
   summaryToDraft,
-  declareEditAffected,
+  variableEditAffected,
   renameRefs,
+  draftVarName,
 } from "../lib/program";
 import { collapseCasting, type CastingInfo, resolveCastingEntry } from "../lib/casting";
 import { resolveEntry } from "../lib/graph";
@@ -105,9 +106,10 @@ export function replaceCommand(
       return;
     }
 
-    const isDeclareToDeclare =
-      draft.kind === "declare" && slot.draft.kind === "declare";
-    if (isDeclareToDeclare) {
+    const oldVarName = draftVarName(slot.draft);
+    const newVarName = draftVarName(draft);
+    const isVariableEdit = oldVarName !== null && newVarName !== null;
+    if (isVariableEdit) {
       handleDeclareToDeclare(ctx, fid, oldId, draft, slot);
       return;
     }
@@ -184,21 +186,25 @@ function handleDeclareToDeclare(
   },
 ): void {
   const { load, pushHistory, snapshot, remapRef } = ctx;
-  if (draft.kind !== "declare" || slot.draft.kind !== "declare") return;
+  // Handle any variable-introducing edit (declare or named input).
   const oldDraft = slot.draft;
   const oldKind = slot.kind;
+  const ordered = snapshot.commands;
+  const slotBranch = branchOwnerOf(ordered).get(oldId) ?? null;
   const dependents: {
     id: CommandId;
     oldDraft: CommandDraft;
     newDraft: CommandDraft;
+    branch: { ifId: CommandId; branch: "then" | "else" } | null;
   }[] = [];
-  if (oldDraft.kind === "declare" && draft.kind === "declare") {
-    const oldName = oldDraft.name.trim();
-    const nextName = draft.name.trim();
+  const oldName = draftVarName(oldDraft);
+  const nextName = draftVarName(draft);
+  if (oldName !== null && nextName !== null) {
     const renamed = nextName !== oldName;
     const ordered = snapshot.commands;
+    const branchOwners = branchOwnerOf(ordered);
     const affected = new Set(
-      declareEditAffected(ordered, oldId, draft.name),
+      variableEditAffected(ordered, oldId, nextName),
     );
     for (const c of ordered) {
       if (c.id === oldId || !affected.has(c.id)) continue;
@@ -207,6 +213,7 @@ function handleDeclareToDeclare(
         if (rebuilt.kind !== "assign") continue;
         dependents.push({
           id: c.id,
+          branch: branchOwners.get(c.id) ?? null,
           oldDraft: rebuilt,
           newDraft: {
             ...rebuilt,
@@ -223,6 +230,7 @@ function handleDeclareToDeclare(
         if (expr !== rebuilt.expr) {
           dependents.push({
             id: c.id,
+            branch: branchOwners.get(c.id) ?? null,
             oldDraft: rebuilt,
             newDraft: { ...rebuilt, expr },
           });
@@ -232,6 +240,7 @@ function handleDeclareToDeclare(
         if (template !== rebuilt.template) {
           dependents.push({
             id: c.id,
+            branch: branchOwners.get(c.id) ?? null,
             oldDraft: rebuilt,
             newDraft: { ...rebuilt, template },
           });
@@ -241,6 +250,7 @@ function handleDeclareToDeclare(
         if (expr !== rebuilt.expr) {
           dependents.push({
             id: c.id,
+            branch: branchOwners.get(c.id) ?? null,
             oldDraft: rebuilt,
             newDraft: { ...rebuilt, expr },
           });
@@ -250,10 +260,10 @@ function handleDeclareToDeclare(
   }
   const before = readLinks(fid, plannedLinksOf(ctx.plannedRef.current, fid));
   let candidate: number | null = null;
-  const isSameNameDeclare =
-    draft.name.trim() !== "" &&
-    draft.name.trim() === slot.draft.name.trim();
-  if (isSameNameDeclare) {
+  const isSameNameVariable =
+    draftVarName(draft) !== null &&
+    draftVarName(draft) === draftVarName(slot.draft);
+  if (isSameNameVariable) {
     if (!deleteVisibleCommand(ctx, fid, oldId)) {
       load(fid);
       return;
@@ -308,7 +318,17 @@ function handleDeclareToDeclare(
     load(fid);
     return;
   }
+  // The engine drops a deleted id from its branch list, and no user-level
+  // edge points at a member, so a branch-resident rebuild must re-append.
+  if (
+    slotBranch !== null &&
+    !appendIntoBranch(ctx, fid, slotBranch.ifId, slotBranch.branch, candidate, false)
+  ) {
+    load(fid);
+    return;
+  }
   const newAssignIds: CommandId[] = [];
+  const depBranches = dependents.map((dep) => dep.branch);
   for (const dep of dependents) {
     const listed = optilotus_listCommands(fid);
     if (isOptilotusError(listed)) {
@@ -390,6 +410,13 @@ function handleDeclareToDeclare(
       }
       remap.track(boxD.id, nidD);
       boxD.id = nidD;
+      if (
+        slotBranch !== null &&
+        !appendIntoBranch(ctx, fid, slotBranch.ifId, slotBranch.branch, nidD, false)
+      ) {
+        load(fid);
+        return false;
+      }
       for (let i = 0; i < oldAssignDrafts.length; i += 1) {
         const item = oldAssignDrafts[i];
         const target = boxA[i];
@@ -404,6 +431,15 @@ function handleDeclareToDeclare(
         }
         remap.track(target.id, nid);
         target.id = nid;
+        const depBranchUndo = depBranches[i];
+        if (
+          depBranchUndo !== null &&
+          depBranchUndo !== undefined &&
+          !appendIntoBranch(ctx, fid, depBranchUndo.ifId, depBranchUndo.branch, nid, false)
+        ) {
+          load(fid);
+          return false;
+        }
       }
       if (before !== null) {
         if (!ctx.restoreLinks(fid, before.links, before.entry, false)) {
@@ -430,6 +466,13 @@ function handleDeclareToDeclare(
       }
       remap.track(boxD.id, nidD);
       boxD.id = nidD;
+      if (
+        slotBranch !== null &&
+        !appendIntoBranch(ctx, fid, slotBranch.ifId, slotBranch.branch, nidD, false)
+      ) {
+        load(fid);
+        return false;
+      }
       for (let i = 0; i < newAssignDrafts.length; i += 1) {
         const item = newAssignDrafts[i];
         const target = boxA[i];
@@ -444,6 +487,15 @@ function handleDeclareToDeclare(
         }
         remap.track(target.id, nid);
         target.id = nid;
+        const depBranchRedo = depBranches[i];
+        if (
+          depBranchRedo !== null &&
+          depBranchRedo !== undefined &&
+          !appendIntoBranch(ctx, fid, depBranchRedo.ifId, depBranchRedo.branch, nid, false)
+        ) {
+          load(fid);
+          return false;
+        }
       }
       if (after !== null) {
         if (!ctx.restoreLinks(fid, after.links, after.entry, false)) {

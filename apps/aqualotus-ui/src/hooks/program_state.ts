@@ -14,7 +14,9 @@ import type {
   FunctionInfo,
   FunctionSummary,
   OptilotusError,
+  OptilotusType,
   RunResult,
+  RunStatus,
 } from "../lib/optilotus";
 import { isOptilotusError, errorMessage, type UiCommand } from "../lib/program";
 import {
@@ -47,6 +49,14 @@ export interface ProgramSnapshot {
   readonly selectedCommandId: CommandId | null;
   readonly run: RunResult | null;
   readonly running: boolean;
+  /**
+   * The paused resumable run: the input command it waits on and the
+   * type it expects. `null` when no run waits for input.
+   */
+  readonly pendingInput: {
+    readonly command: CommandId;
+    readonly ty: OptilotusType;
+  } | null;
   /** UI-measured bridge round-trip of the last run (not runtime CPU time). */
   readonly durationMs: number | null;
   readonly busy: boolean;
@@ -94,6 +104,7 @@ export const EMPTY: ProgramSnapshot = {
   selectedCommandId: null,
   run: null,
   running: false,
+  pendingInput: null,
   durationMs: null,
   busy: false,
   actionError: "",
@@ -208,5 +219,41 @@ export function castingValidationError(message: string): OptilotusError {
     kind: "PackageError",
     command: null,
     message,
+  };
+}
+
+
+/** Apply a resumable run status to the snapshot. */
+export function applyRunStatus(
+  snapshot: ProgramSnapshot,
+  status: RunStatus,
+  durationMs: number,
+): ProgramSnapshot {
+  if (status.status === "waiting_input") {
+    return {
+      ...clearFailure(snapshot),
+      running: false,
+      pendingInput: { command: status.command, ty: status.ty },
+      durationMs: null,
+      recoveryVar: null,
+    };
+  }
+  if (status.status === "error") {
+    return {
+      ...withFailure(snapshot, status, errorMessage(status)),
+      running: false,
+      pendingInput: null,
+      run: status,
+      durationMs,
+      recoveryVar: null,
+    };
+  }
+  return {
+    ...clearFailure(snapshot),
+    running: false,
+    pendingInput: null,
+    run: status,
+    durationMs,
+    recoveryVar: null,
   };
 }

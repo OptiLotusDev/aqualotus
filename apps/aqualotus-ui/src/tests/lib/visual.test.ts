@@ -45,7 +45,16 @@ describe("filterBlocks", () => {
   it("lists exactly the api.md surface — nothing invented", () => {
     const kinds = BLOCKS.map((b) => b.kind).sort();
     expect(kinds).toEqual(
-      ["assign", "call", "declare", "function", "if", "print", "return"].sort(),
+      [
+        "assign",
+        "call",
+        "declare",
+        "function",
+        "if",
+        "input",
+        "print",
+        "return",
+      ].sort(),
     );
   });
 });
@@ -56,6 +65,7 @@ describe("findAvailableBlock", () => {
       "declare",
       "assign",
       "print",
+      "input",
       "return",
       "call",
       "function",

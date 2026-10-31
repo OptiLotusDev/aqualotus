@@ -89,6 +89,8 @@ function App(): ReactElement {
             onClearEntry={program.clearEntry}
             onClearPackage={program.clearPackage}
             onRun={program.run}
+            onProvideInput={program.provideInput}
+            onCancelRun={program.cancelRun}
             onDismissError={program.dismissError}
           />
         )}

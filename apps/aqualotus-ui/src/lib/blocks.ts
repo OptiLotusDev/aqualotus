@@ -4,10 +4,10 @@ import type { CommandDraft } from "./program";
 /**
  * Block library vocabulary (P17/P24). UI vocabulary only — never program
  * semantics. This list contains EXACTLY what `docs/api.md` supports: the
- * four commands (`declare`, `assign`, `print`, `return`), function
- * creation, and calls (which the engine expresses as `name()` inside an
- * `assign` expression). Nothing here is invented: every entry maps to a
- * real `optilotus_*` bridge operation.
+ * five commands (`declare`, `assign`, `print`, `return`, `input`),
+ * function creation, and calls (which the engine expresses as `name()`
+ * inside an `assign` expression). Nothing here is invented: every entry
+ * maps to a real `optilotus_*` bridge operation.
  */
 export interface BlockDefinition {
   readonly kind: string;
@@ -85,6 +85,18 @@ export const BLOCKS: readonly BlockDefinition[] = [
     description: "Update a declared variable with an expression.",
     aliases: ["assign", "set", "="],
     draft: { kind: "assign", name: "", expr: "" },
+  },
+  {
+    kind: "input",
+    label: "Input / Read Input",
+    category: "Variables",
+    description:
+      "Read one typed value from the run's input and store it in a new variable.",
+    aliases: ["input", "read", "scan"],
+    // Lean: no name yet. The shell fills a fresh variable name so a
+    // click-to-add block is immediately usable; a blank name in the
+    // inspector replays as the historical plain `input`.
+    draft: { kind: "input", ty: optilotus_type.int32 },
   },
   {
     kind: "print",

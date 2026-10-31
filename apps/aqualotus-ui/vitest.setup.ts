@@ -1,9 +1,15 @@
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach } from "vitest";
 
 afterEach(() => {
   cleanup();
 });
+
+// The engine integration tests render the real app against the real
+// WASM artifact. While every test file runs in its own worker, the
+// machine can be busy enough that the first projection needs more than
+// the 1 s default for `waitFor`/`findBy`.
+configure({ asyncUtilTimeout: 5_000 });
 
 /**
  * jsdom implements no SVG geometry, but the travelling indicator reads

@@ -105,11 +105,6 @@ describe("parity inventory — the block library", () => {
   const NOT_CREATABLE_FROM_THE_LIBRARY: Readonly<
     Record<string, string>
   > = {
-    // The engine reads a value from the input, but it binds it to a
-    // `ValueId` and never to a variable name, so no expression can
-    // read it back: a block would create dead code.
-    input:
-      "the engine's input op binds no variable name, so its value is unreachable",
     // The engine supports cast execution, but casting is configured
     // through the Assign Variable Inspector rather than a standalone
     // library block. The bridge's `optilotus_cast` remains available
@@ -126,9 +121,14 @@ describe("parity inventory — the block library", () => {
     // The `call` block is an assign that carries a call expression.
     creatable.add("assign");
     const expected = new Set(
-      (["declare", "assign", "print", "return", "if"] as CommandKind[]).map(
-        (k) => k,
-      ),
+      ([
+        "declare",
+        "assign",
+        "print",
+        "input",
+        "return",
+        "if",
+      ] as CommandKind[]).map((k) => k),
     );
     for (const kind of expected) {
       if (!creatable.has(kind)) {

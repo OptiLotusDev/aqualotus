@@ -3,8 +3,8 @@ import {
   commandDraftEqual,
   commandMainLine,
   commandSubLine,
-  declareEditAffected,
   displayDeclareValue,
+  draftVarName,
   errorMessage,
   freshName,
   isOptilotusError,
@@ -12,6 +12,7 @@ import {
   renameRefs,
   summaryToDraft,
   validateDeclareValue,
+  variableEditAffected,
 } from "../../lib/program";
 import type { CommandSummary } from "../../lib/optilotus";
 
@@ -188,6 +189,17 @@ describe("summaryToDraft", () => {
     expect(
       summaryToDraft({ id: 5, kind: "input", next: null, ty: "int32" }),
     ).toEqual({ kind: "input", ty: "int32" });
+    // `input_into` summaries carry the bound variable, so undo restores
+    // the block that reads *into* a variable instead of downgrading it.
+    expect(
+      summaryToDraft({
+        id: 8,
+        kind: "input",
+        next: null,
+        var: "n",
+        ty: "int32",
+      }),
+    ).toEqual({ kind: "input", ty: "int32", name: "n" });
     expect(
       summaryToDraft({
         id: 6,
@@ -352,7 +364,23 @@ describe("renameRefs", () => {
   });
 });
 
-describe("declareEditAffected", () => {
+describe("draftVarName", () => {
+  it("names a declare, a named input, and no plain input", () => {
+    expect(
+      draftVarName({ kind: "declare", name: " x ", ty: "int32", init: "" }),
+    ).toBe("x");
+    expect(
+      draftVarName({ kind: "input", name: " n ", ty: "int32" }),
+    ).toBe("n");
+    expect(draftVarName({ kind: "input", ty: "int32" })).toBeNull();
+    expect(
+      draftVarName({ kind: "input", name: "   ", ty: "int32" }),
+    ).toBeNull();
+    expect(draftVarName({ kind: "print", template: '"x"' })).toBeNull();
+  });
+});
+
+describe("variableEditAffected", () => {
   const cmds: CommandSummary[] = [
     { id: 1, kind: "declare", next: 2, var: "x", ty: "int32", expr: "1" },
     { id: 2, kind: "assign", next: 3, var: "x", expr: "{x} + 1" },
@@ -360,11 +388,30 @@ describe("declareEditAffected", () => {
   ];
 
   it("covers the declare plus bound assigns on a type change", () => {
-    expect(declareEditAffected(cmds, 1, "x")).toEqual([1, 2]);
+    expect(variableEditAffected(cmds, 1, "x")).toEqual([1, 2]);
   });
 
   it("also covers ref-holding blocks on a rename", () => {
-    expect(declareEditAffected(cmds, 1, "y")).toEqual([1, 2, 3]);
+    expect(variableEditAffected(cmds, 1, "y")).toEqual([1, 2, 3]);
+  });
+
+  it("treats a named input as a declaration", () => {
+    const withInput: CommandSummary[] = [
+      { id: 1, kind: "input", next: 2, var: "n", ty: "int32" },
+      { id: 2, kind: "assign", next: 3, var: "n", expr: "{n} + 1" },
+      { id: 3, kind: "print", next: null, template: '"{n}"' },
+    ];
+    // Same name: the input and its bound assign follow the new type.
+    expect(variableEditAffected(withInput, 1, "n")).toEqual([1, 2]);
+    // Rename: text references follow too.
+    expect(variableEditAffected(withInput, 1, "count")).toEqual([1, 2, 3]);
+  });
+
+  it("recreates only the block for a plain input", () => {
+    const plain: CommandSummary[] = [
+      { id: 1, kind: "input", next: null, ty: "int32" },
+    ];
+    expect(variableEditAffected(plain, 1, "")).toEqual([1]);
   });
 
   it("ignores unrelated blocks and unknown ids", () => {
@@ -372,10 +419,8 @@ describe("declareEditAffected", () => {
       ...cmds,
       { id: 4, kind: "print", next: null, template: '"fixed"' },
     ];
-    expect(declareEditAffected(extended, 1, "y")).toEqual([1, 2, 3]);
-    expect(declareEditAffected(extended, 9, "y")).toEqual([]);
-    expect(
-      declareEditAffected(extended, 4, "whatever"),
-    ).toEqual([]);
+    expect(variableEditAffected(extended, 1, "y")).toEqual([1, 2, 3]);
+    expect(variableEditAffected(extended, 9, "y")).toEqual([]);
+    expect(variableEditAffected(extended, 4, "whatever")).toEqual([]);
   });
 });

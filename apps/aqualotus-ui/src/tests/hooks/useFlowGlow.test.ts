@@ -49,6 +49,7 @@ function snapshot(
     selectedCommandId: null,
     run: null,
     running: false,
+    pendingInput: null,
     durationMs: null,
     busy: false,
     actionError: "",

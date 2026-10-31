@@ -207,26 +207,57 @@ impl Package {
         Ok(head.id)
     }
 
-    /// Build the raw `Input` command for an `input` and push it into the
-    /// function's command list (not yet linked). Returns the command as
-    /// both head and tail (single-command group).
+    /// Build the raw `Input` (and optional hidden `Set`) group for an
+    /// `input` / `input_into` and push it into the function's command
+    /// list (not yet linked). Returns `(head, tail)` where `tail` is
+    /// `Some` only for the `input_into` shape.
     pub(crate) fn input_group(
         &mut self,
         fid: FunctionId,
+        var: Option<&str>,
         ty: Type,
-    ) -> Result<(Command, Command), PackageError> {
+    ) -> Result<(Command, Option<Command>), PackageError> {
         let vid = self.alloc_value_id();
         let head_id = self.alloc_command_id();
-        let head = Command {
-            id: head_id,
-            op: Op::Input { ty },
-            inputs: vec![],
-            outputs: vec![vid],
-            next: None,
+        let (head, tail) = match var {
+            Some(name) => {
+                let tail_id = self.alloc_command_id();
+                let head = Command {
+                    id: head_id,
+                    op: Op::Input { ty },
+                    inputs: vec![],
+                    outputs: vec![vid],
+                    next: Some(tail_id),
+                };
+                let tail = Command {
+                    id: tail_id,
+                    op: Op::Set {
+                        var: name.to_string(),
+                        ty,
+                    },
+                    inputs: vec![vid],
+                    outputs: vec![],
+                    next: None,
+                };
+                (head, Some(tail))
+            }
+            None => {
+                let head = Command {
+                    id: head_id,
+                    op: Op::Input { ty },
+                    inputs: vec![],
+                    outputs: vec![vid],
+                    next: None,
+                };
+                (head, None)
+            }
         };
         let func = self.function_mut(fid)?;
         func.commands.push(head.clone());
-        Ok((head.clone(), head))
+        if let Some(t) = &tail {
+            func.commands.push(t.clone());
+        }
+        Ok((head, tail))
     }
 
     /// `input(ty)`: single `Op::Input` producing one typed value.
@@ -239,7 +270,7 @@ impl Package {
             ));
         }
         let old_entry = self.function(fid).and_then(|f| f.entry);
-        let (head, tail) = self.input_group(fid, ty)?;
+        let (head, _tail) = self.input_group(fid, None, ty)?;
         self.link_chain(fid, head.id)?;
         let summary = CommandSummary {
             ty: Some(ty),
@@ -251,6 +282,46 @@ impl Package {
             head_id: head.id,
             kind: CommandKind::Input,
             var: None,
+            commands: vec![head.clone()],
+            summary,
+            old_entry,
+        });
+        Ok(head.id)
+    }
+
+    /// `input_into(name, ty)`: read one typed value straight into a new
+    /// variable. Expands to `Input` -> `Set`, so the value is reachable
+    /// through `name` instead of only through a hidden `ValueId`.
+    pub fn input_into(
+        &mut self,
+        fid: FunctionId,
+        name: &str,
+        ty_tag: &str,
+    ) -> Result<CommandId, PackageError> {
+        let var = check_var_name(name).map_err(|e| PackageError::InvalidName(e.to_string()))?;
+        let ty = validation::parse_type_tag(ty_tag)?;
+        if ty == Type::Void {
+            return Err(PackageError::InvalidCommand(
+                "cannot read a value of type void".to_string(),
+            ));
+        }
+        validation::validate_function_exists(self, fid)?;
+        validation::validate_var_not_declared(self, fid, &var)?;
+        let old_entry = self.function(fid).and_then(|f| f.entry);
+        let (head, tail) = self.input_group(fid, Some(&var), ty)?;
+        let tail = tail.expect("input_into builds a tail");
+        self.link_chain(fid, head.id)?;
+        let summary = CommandSummary {
+            var: Some(var.clone()),
+            ty: Some(ty),
+            ..CommandSummary::blank(head.id, CommandKind::Input)
+        };
+        self.meta_mut(fid)?.insert(head.id, summary.clone());
+        self.record(Commit::CommandAdded {
+            fid,
+            head_id: head.id,
+            kind: CommandKind::Input,
+            var: Some(var),
             commands: vec![head.clone(), tail],
             summary,
             old_entry,

@@ -162,8 +162,10 @@ impl Package {
         self.meta.get(&fid).and_then(|m| {
             m.values().find_map(|s| {
                 // Both `declare` and `cast` introduce a variable.
-                if matches!(s.kind, CommandKind::Declare | CommandKind::Cast)
-                    && s.var.as_deref() == Some(var)
+                if matches!(
+                    s.kind,
+                    CommandKind::Declare | CommandKind::Cast | CommandKind::Input
+                ) && s.var.as_deref() == Some(var)
                 {
                     s.ty
                 } else {

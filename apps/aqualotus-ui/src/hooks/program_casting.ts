@@ -20,6 +20,7 @@ import {
   optilotus_getFunction,
   optilotus_if,
   optilotus_input,
+  optilotus_inputInto,
   optilotus_listCommands,
   optilotus_print,
   optilotus_return,
@@ -247,8 +248,12 @@ export function runBuilder(
       return optilotus_assign(fid, draft.name, draft.expr);
     case "print":
       return optilotus_print(fid, draft.template);
-    case "input":
-      return optilotus_input(fid, draft.ty);
+    case "input": {
+      const name = draft.name?.trim() ?? "";
+      return name === ""
+        ? optilotus_input(fid, draft.ty)
+        : optilotus_inputInto(fid, name, draft.ty);
+    }
     case "cast":
       return optilotus_cast(fid, draft.name, draft.to, draft.expr);
     case "return":
