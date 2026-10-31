@@ -33,6 +33,9 @@ interface CanvasBlocksProps {
   readonly dragEffectivePos: (fid: number, cmd: CommandSummary, index: number) => Pos;
   readonly memberSideOf: (fid: number, id: number) => "then" | "else" | undefined;
   readonly onRequestLibrary: () => void;
+  readonly onBlockRef?: (el: HTMLDivElement | null, fid: number, cmdId: number) => void;
+  /** Source of an in-flight connection drag, or null. */
+  readonly connectSource: { readonly fid: number; readonly sourceId: number } | null;
 }
 
 export default function CanvasBlocks(
@@ -53,6 +56,8 @@ export default function CanvasBlocks(
     dragEffectivePos,
     memberSideOf,
     onRequestLibrary,
+    onBlockRef,
+    connectSource,
   } = props;
 
   return (
@@ -65,8 +70,10 @@ export default function CanvasBlocks(
               if (el !== null) {
                 const inner = el.querySelector(".vblock");
                 if (inner instanceof HTMLDivElement) {
-                  // ref callback is used by parent for blockEls map
+                  onBlockRef?.(inner, fid, cmd.id);
                 }
+              } else {
+                onBlockRef?.(null, fid, cmd.id);
               }
             }}
           >
@@ -78,7 +85,11 @@ export default function CanvasBlocks(
               position={dragEffectivePos(fid, cmd, index)}
               selected={cmd.id === selectedCommandId && fid === selectedFunctionId}
               failed={cmd.id === errorId && (errorFunctionId === null || fid === errorFunctionId)}
-              connectFrom={false}
+              connectFrom={
+                connectSource !== null &&
+                connectSource.fid === fid &&
+                connectSource.sourceId === cmd.id
+              }
               conditionText={
                 cmd.kind === "if" && conditionTextFor !== undefined
                   ? conditionTextFor(fid, cmd.id)

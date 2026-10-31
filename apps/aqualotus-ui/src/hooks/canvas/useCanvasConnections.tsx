@@ -6,12 +6,11 @@
  * the engine's.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CommandSummary } from "../../lib/optilotus";
 import type { BlockSide } from "../../lib/graph_geometry";
 import type { BranchSide } from "../../lib/graph_topology";
 import type { Pos } from "../../lib/layout";
-import type { FlowState } from "../../lib/flow";
 import type { MergeJoin, IfShape } from "../../lib/graph";
 import type { Size } from "../../components/visualEditor_constants";
 import { resolveBranchConnect } from "../../lib/branching";
@@ -23,7 +22,7 @@ import {
   EMPTY_EDGE_KEYS,
   EDGE_DRAW_MS,
 } from "../../components/visualEditor_constants";
-import { JOIN_FALLBACK_SIZE } from "../../lib/graph";
+import { JOIN_FALLBACK_SIZE, joinDefaultPos } from "../../lib/graph";
 
 export interface ConnectionPreview {
   readonly fid: number;
@@ -31,11 +30,6 @@ export interface ConnectionPreview {
   readonly side: BlockSide;
   readonly x: number;
   readonly y: number;
-}
-
-export interface TravelEdge {
-  readonly key: string;
-  readonly selected: boolean;
 }
 
 interface UseCanvasConnectionsArgs {
@@ -50,12 +44,9 @@ interface UseCanvasConnectionsArgs {
   readonly blockWorld: (fid: number, cmd: CommandSummary, index: number) => Pos;
   readonly funcOrigin: (fid: number) => Pos;
   readonly sizes: ReadonlyMap<string, Size>;
-  readonly selectedFunctionId: number | null;
-  readonly selectedCommandId: number | null;
   readonly mergeJoins?: Readonly<Record<number, MergeJoin>>;
   readonly ifShapesByFunction: ReadonlyMap<number, readonly IfShape[]>;
   readonly edges: readonly CanvasDrawnEdge[];
-  readonly flow: FlowState | null;
   readonly flashHint: (text: string) => void;
   readonly placeBranchMember: (
     fid: number,
@@ -83,7 +74,6 @@ interface UseCanvasConnectionsResult {
     gesture: { readonly fid: number; readonly sourceId: number; readonly side: BlockSide },
     moved: boolean,
   ) => void;
-  readonly travelEdges: readonly TravelEdge[];
   readonly previewNode: () => React.ReactElement | null;
 }
 
@@ -94,12 +84,9 @@ export function useCanvasConnections(args: UseCanvasConnectionsArgs): UseCanvasC
     blockWorld,
     funcOrigin,
     sizes,
-    selectedFunctionId,
-    selectedCommandId,
     mergeJoins,
     ifShapesByFunction,
     edges,
-    flow,
     flashHint,
     placeBranchMember,
   } = args;
@@ -107,7 +94,13 @@ export function useCanvasConnections(args: UseCanvasConnectionsArgs): UseCanvasC
   const [drawing, setDrawing] = useState<ReadonlySet<string>>(EMPTY_EDGE_KEYS);
   const knownEdges = useRef<ReadonlyMap<string, number> | null>(null);
   const drawTimer = useRef<number | null>(null);
+  const edgesRef = useRef<readonly CanvasDrawnEdge[]>(edges);
   const [preview, setPreview] = useState<ConnectionPreview | null>(null);
+
+  // Track edges changes without relying on array reference stability
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
 
   // Edge draw animation: newly created/rewired connections stretch into
   // place over EDGE_DRAW_MS.
@@ -131,41 +124,7 @@ export function useCanvasConnections(args: UseCanvasConnectionsArgs): UseCanvasC
     return () => {
       if (drawTimer.current !== null) window.clearTimeout(drawTimer.current);
     };
-  }, [edges]);
-
-  // Travel edges: match flow edges to drawn edges for the travelling
-  // indicator.
-  const travelEdges = useMemo((): readonly TravelEdge[] => {
-    if (flow === null || flow === undefined) return [];
-    const byEnds = new Map(edges.map((e) => [`${e.fid}:${e.from}:${e.to}`, e]));
-    const joinOutAfter = new Map<number, string>();
-    for (const e of edges) {
-      if (e.joinTail === true && e.joinIfId !== undefined) {
-        joinOutAfter.set(e.from, `${e.fid}:jo:${e.joinIfId}`);
-      }
-    }
-    const travelSeen = new Set<string>();
-    const out: TravelEdge[] = [];
-    const push = (key: string, selected: boolean): void => {
-      if (travelSeen.has(key)) return;
-      travelSeen.add(key);
-      out.push({ key, selected });
-    };
-    flow.edges.forEach((edge) => {
-      const selected =
-        edge.from === selectedCommandId && edge.fid === selectedFunctionId;
-      if (edge.kind === "merge") {
-        push(`${edge.fid}:merge:${edge.from}`, selected);
-        const joinOut = joinOutAfter.get(edge.from);
-        if (joinOut !== undefined) push(joinOut, selected);
-        return;
-      }
-      const drawn = byEnds.get(`${edge.fid}:${edge.from}:${edge.to}`);
-      if (drawn === undefined) return;
-      push(drawn.key, selected);
-    });
-    return out;
-  }, [edges, flow, selectedCommandId, selectedFunctionId]);
+  }, [edges.length]); // Use length as stable indicator of edge changes
 
   const applyConnectMove = useCallback(
     (
@@ -354,7 +313,10 @@ export function useCanvasConnections(args: UseCanvasConnectionsArgs): UseCanvasC
         ? (() => {
             const base = mergeJoins?.[preview.sourceId];
             if (base === undefined || !base.on) return null;
-            const pos = base.pos ?? null;
+            const shape = (ifShapesByFunction.get(preview.fid) ?? []).find(
+              (s) => s.ifId === preview.sourceId,
+            );
+            const pos = base.pos ?? joinDefaultPos(shape?.frames ?? []);
             if (pos === null) return null;
             const s2 = sizes.get(`${preview.fid}:join:${preview.sourceId}`) ?? JOIN_FALLBACK_SIZE;
             const f = funcOrigin(preview.fid);
@@ -398,7 +360,6 @@ export function useCanvasConnections(args: UseCanvasConnectionsArgs): UseCanvasC
     setPreview,
     applyConnectMove,
     endConnect,
-    travelEdges,
     previewNode,
   };
 }

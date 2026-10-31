@@ -8,7 +8,6 @@
  */
 
 import {
-  useCallback,
   useMemo,
   useRef,
   useState,
@@ -23,7 +22,7 @@ import type {
 } from "../lib/optilotus";
 import type { FlowState } from "../lib/flow";
 import type { LayoutMap, Pos } from "../lib/layout";
-import type { BlockSide, BranchSide, MergeJoin } from "../lib/graph";
+import type { BlockSide, MergeJoin } from "../lib/graph";
 import { useReducedMotion } from "../hooks/useReducedMotion";
 import { useCanvasView } from "../hooks/useCanvasView";
 import { useCanvasViewport } from "../hooks/canvas/useCanvasViewport";
@@ -31,7 +30,6 @@ import { useCanvasGestures } from "../hooks/canvas/useCanvasGestures";
 import { useCanvasIfShapes } from "../hooks/canvas/useCanvasIfShapes";
 import { useCanvasEdges } from "../hooks/canvas/useCanvasEdges";
 import { useCanvasTravelEdges } from "../hooks/canvas/useCanvasTravelEdges";
-import { useCanvasViewportSync } from "../hooks/canvas/useCanvasViewportSync";
 import { useCanvasGesturesSetup } from "../hooks/canvas/useCanvasGesturesSetup";
 import { useCanvasResizeObserver } from "../hooks/canvas/useCanvasResizeObserver";
 import { useCanvasLibraryDrop } from "../hooks/canvas/useCanvasLibraryDrop";
@@ -40,11 +38,7 @@ import { usePinnedBlocks, useVisibleCmdsGetter, useCulledBlocks } from "../hooks
 import { useCanvasBlocks } from "../hooks/canvas/useCanvasBlocks";
 import { useCanvasStartupFit } from "../hooks/canvas/useCanvasStartupFit";
 import { computeCanvasLayout } from "../lib/canvas_layout";
-import {
-  FALLBACK_SIZE,
-  VIEW_OVERSCAN,
-  type Size,
-} from "./visualEditor_constants";
+import type { Size } from "./visualEditor_constants";
 import CanvasToolbar from "./canvas/CanvasToolbar";
 import CanvasWorkspace from "./canvas/CanvasWorkspace";
 
@@ -169,15 +163,13 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     onZoomSettled,
   });
 
-  // Viewport
-  const { viewport, setViewport } = useCanvasViewport({
+  // Viewport: one subscription owns the visible-world rect (scroll,
+  // resize, and zoom refreshes). Culling and the edges overlay read it.
+  const { viewport } = useCanvasViewport({
     boardRef,
     zoom,
     zoomRef,
   });
-
-  // Viewport sync effects
-  useCanvasViewportSync({ boardRef, zoom, zoomRef, setViewport });
 
   // Startup fit effect
   useCanvasStartupFit({ boardRef, layout, functions, setZoom, viewport });
@@ -192,8 +184,10 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     zoomAtCursor,
   });
 
-  // Resize observer for block geometry
-  useCanvasResizeObserver({ blockEls, setSizes });
+  // Resize observer for block geometry. The returned `register` is fed
+  // from the block/join element ref callbacks, so every element —
+  // however late it enters the tree — is measured and observed.
+  const registerSizeKey = useCanvasResizeObserver({ blockEls, setSizes });
 
   // Library ghost drops
   useCanvasLibraryDrop({
@@ -226,67 +220,14 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     selectedFunctionId,
   });
 
-  // placeBranchMember: auto-place a freshly wired branch member
-  const placeBranchMember = useCallback(
-    (fid: number, ifId: number, branch: BranchSide, blockId: number): void => {
-      if (branch !== "then" && branch !== "else") return;
-      const cmds = commandsByFunction[fid] ?? [];
-      const byIndex = new Map<number, number>(
-        cmds.map((c, i) => [c.id, i] as const),
-      );
-      const ifIndex = byIndex.get(ifId);
-      const ifCmd = ifIndex === undefined ? undefined : cmds[ifIndex];
-      if (ifCmd === undefined || ifIndex === undefined) return;
-      const store = layoutStore[fid];
-      const ifPos = store?.[ifId] ?? { x: 48, y: 36 + ifIndex * 264 };
-      const ifSize = sizes.get(`${fid}:${ifId}`) ?? FALLBACK_SIZE;
-      const shape = (ifShapesByFunction.get(fid) ?? []).find(
-        (s) => s.ifId === ifId,
-      );
-      const memberIds =
-        branch === "then"
-          ? (shape?.then ?? [])
-          : (shape?.else ?? []);
-      const memberRects: (readonly [number, number])[] = [];
-      for (const id of memberIds) {
-        if (id === blockId) continue;
-        const index = byIndex.get(id) ?? -1;
-        const cmd = cmds[index];
-        if (cmd === undefined) continue;
-        const p = store?.[cmd.id] ?? { x: 48, y: 36 + index * 264 };
-        const s = sizes.get(`${fid}:${cmd.id}`) ?? FALLBACK_SIZE;
-        memberRects.push([p.y, s.h] as const);
-      }
-      onMoveBlock(
-        fid,
-        blockId,
-        {
-          x: branch === "then" ? ifPos.x : ifPos.x + ifSize.w + 24,
-          y: memberRects.length === 0
-            ? ifPos.y + ifSize.h + 40
-            : memberRects[memberRects.length - 1][0] + memberRects[memberRects.length - 1][1] + 24,
-        },
-      );
-    },
-    [commandsByFunction, layoutStore, sizes, ifShapesByFunction, onMoveBlock],
-  );
-
-  // Branch auto-place
-  useCanvasBranchAutoPlace({
-    functions,
-    commandsByFunction,
-    ifShapesByFunction,
-    layoutStore,
-    sizes,
-    busy,
-    placeBranchMember,
-  });
-
   // We need to use refs for preview and dragPos since they come from gestures
   const previewRef = useRef<{ readonly fid: number; readonly sourceId: number; readonly side: string; readonly x: number; readonly y: number } | null>(null);
   const dragPosRef = useRef<{ readonly fid: number; readonly id: number; readonly pos: Pos } | null>(null);
 
-  // Gestures
+  // Gestures. The gesture hook owns branch placement (one
+  // `placeBranchMember` implementation shared by the connection drop
+  // resolution and the off-gesture auto-place effect below) and the
+  // branch frame derivation (`branchFrames`) used by the workspace.
   const gestures = useCanvasGestures({
     boardRef,
     busy,
@@ -313,17 +254,25 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
     onMoveJoin,
     setPkgOff,
     pkgOff,
-    flashHint: () => {},
     setZoom,
     zoomBy,
     edges,
-    flow,
-    placeBranchMember,
   });
 
   // Update refs from gestures
   previewRef.current = gestures.preview;
   dragPosRef.current = gestures.dragPos;
+
+  // Branch auto-place
+  useCanvasBranchAutoPlace({
+    functions,
+    commandsByFunction,
+    ifShapesByFunction,
+    layoutStore,
+    sizes,
+    busy,
+    placeBranchMember: gestures.placeBranchMember,
+  });
 
   // Culling with gesture refs
   const pinnedBlocksWithGestures = usePinnedBlocks({
@@ -406,44 +355,7 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
         onRequestLibrary={onRequestLibrary}
         ifShapesByFunction={ifShapesByFunction}
         mergeJoins={mergeJoins}
-        branchFrames={(fid, vp) => {
-          const f = layout.funcOrigin(fid);
-          const overscan = vp === null ? null : {
-            x: vp.x - VIEW_OVERSCAN,
-            y: vp.y - VIEW_OVERSCAN,
-            w: vp.w + VIEW_OVERSCAN * 2,
-            h: vp.h + VIEW_OVERSCAN * 2,
-          };
-          const frames: { ifId: number; branch: BranchSide; rect: { x: number; y: number; w: number; h: number }; empty: boolean }[] = [];
-          for (const shape of ifShapesByFunction.get(fid) ?? []) {
-            for (const frame of shape.frames) {
-              let rect = frame.rect;
-              const drag = gestures.branchDrag !== null &&
-                gestures.branchDrag.fid === fid &&
-                gestures.branchDrag.ifId === shape.ifId &&
-                gestures.branchDrag.branch === frame.branch
-                ? gestures.branchDrag
-                : null;
-              if (drag !== null) {
-                rect = { x: rect.x + drag.dx, y: rect.y + drag.dy, w: rect.w, h: rect.h };
-              }
-              if (overscan !== null) {
-                const world = { x: f.x + rect.x, y: f.y + rect.y, w: rect.w, h: rect.h };
-                if (
-                  world.x < overscan.x + overscan.w &&
-                  world.x + world.w > overscan.x &&
-                  world.y < overscan.y + overscan.h &&
-                  world.y + world.h > overscan.y
-                ) {
-                  frames.push({ ...frame, rect, ifId: shape.ifId, empty: frame.empty });
-                }
-              } else {
-                frames.push({ ...frame, rect, ifId: shape.ifId, empty: frame.empty });
-              }
-            }
-          }
-          return frames;
-        }}
+        branchFrames={gestures.branchFrames}
         joinLivePos={gestures.joinLivePos}
         joinDrag={gestures.joinDrag}
         sizes={sizes}
@@ -453,12 +365,10 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
         dragEffectivePos={gestures.dragEffectivePos}
         memberSideOf={gestures.memberSideOf}
         onJoinRef={(el, fid, ifId) => {
-          const key = `${fid}:join:${ifId}`;
-          if (el !== null) {
-            blockEls.current.set(key, el);
-          } else {
-            blockEls.current.delete(key);
-          }
+          registerSizeKey(el, `${fid}:join:${ifId}`);
+        }}
+        onBlockRef={(el, fid, cmdId) => {
+          registerSizeKey(el, `${fid}:${cmdId}`);
         }}
         edges={edges}
         travelEdges={travelEdges}
@@ -476,8 +386,9 @@ export default function VisualEditor(props: VisualEditorProps): ReactElement {
         onBoardPointerUp={gestures.onBoardPointerUp}
         onBoardClick={gestures.onBoardClick}
         onBoardKeyDown={gestures.onBoardKeyDown}
-        onPointerCancel={gestures.onPointerCancel}
-      />
+         onPointerCancel={gestures.onPointerCancel}
+         connectSource={gestures.preview ?? null}
+       />
     </div>
   );
 }

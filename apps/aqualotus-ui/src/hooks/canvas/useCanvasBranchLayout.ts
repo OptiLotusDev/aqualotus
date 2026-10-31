@@ -1,21 +1,17 @@
 /**
  * Canvas branch layout: branch membership, branch frame derivation,
  * branch layout, branch member placement, branch drag offsets, branch
- * membership changes, automatic placement of newly joined branch
- * members, and manual merge join positioning. Presentation only — the
- * engine owns branch semantics.
+ * membership changes, and automatic placement of newly joined branch
+ * members. Presentation only — the engine owns branch semantics.
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { CommandSummary } from "../../lib/optilotus";
 import type { BlockRect } from "../../lib/graph_geometry";
 import type { BranchSide } from "../../lib/graph_topology";
-import type { Pos, LayoutMap } from "../../lib/layout";
-import type { Size } from "../../components/visualEditor_constants";
+import type { Pos } from "../../lib/layout";
+import { VIEW_OVERSCAN, BLOCK_MIN_Y } from "../../components/visualEditor_constants";
 import type { IfShape, MergeJoin } from "../../lib/graph";
-import { buildIfShapes, joinDefaultPos, JOIN_FALLBACK_SIZE } from "../../lib/graph";
-import { branchDropPos } from "../../lib/layout";
-import { BLOCK_MIN_Y, FALLBACK_SIZE } from "../../components/visualEditor_constants";
+import { joinDefaultPos } from "../../lib/graph";
 import { clampBlockPos } from "../../lib/canvas_geometry";
 
 export interface BranchDragState {
@@ -51,16 +47,10 @@ export interface BranchDragOffsets {
 
 interface UseCanvasBranchLayoutArgs {
   readonly ifShapesByFunction: ReadonlyMap<number, readonly IfShape[]>;
-  readonly layoutStore: Readonly<Record<number, LayoutMap>>;
-  readonly layout: {
-    readonly funcOrigin: (fid: number) => Pos;
-    readonly posOf: (fid: number, cmd: CommandSummary, index: number) => Pos;
-  };
-  readonly sizes: ReadonlyMap<string, Size>;
   readonly mergeJoins?: Readonly<Record<number, MergeJoin>>;
+  readonly funcOrigin: (fid: number) => Pos;
   readonly onMoveBlock: (fid: number, id: number, pos: Pos) => void;
   readonly onMoveJoin?: (ifId: number, pos: Pos) => void;
-  readonly commandsByFunction: Readonly<Record<number, readonly CommandSummary[]>>;
 }
 
 interface UseCanvasBranchLayoutResult {
@@ -104,7 +94,6 @@ interface UseCanvasBranchLayoutResult {
   ) => void;
   readonly endJoinDrag: (moved: boolean) => void;
   readonly joinBasePos: (fid: number, ifId: number) => Pos | null;
-  readonly joinWorldRect: (fid: number, ifId: number) => BlockRect | null;
   readonly joinLivePos: (fid: number, ifId: number) => Pos | null;
   readonly memberSideOf: (fid: number, id: number) => BranchSide | undefined;
   readonly branchFrames: (
@@ -112,24 +101,15 @@ interface UseCanvasBranchLayoutResult {
     viewport: { readonly x: number; readonly y: number; readonly w: number; readonly h: number } | null,
   ) => readonly BranchFrame[];
   readonly branchDragOffsets: BranchDragOffsets | null;
-  readonly placeBranchMember: (
-    fid: number,
-    ifId: number,
-    branch: BranchSide,
-    blockId: number,
-  ) => void;
 }
 
 export function useCanvasBranchLayout(args: UseCanvasBranchLayoutArgs): UseCanvasBranchLayoutResult {
   const {
     ifShapesByFunction,
-    layoutStore,
-    layout,
-    sizes,
     mergeJoins,
+    funcOrigin,
     onMoveBlock,
     onMoveJoin,
-    commandsByFunction,
   } = args;
 
   const [branchDrag, setBranchDrag] = useState<BranchDragState | null>(null);
@@ -276,17 +256,6 @@ export function useCanvasBranchLayout(args: UseCanvasBranchLayoutArgs): UseCanva
     [ifShapesByFunction, mergeJoins],
   );
 
-  const joinWorldRect = useCallback(
-    (fid: number, ifId: number): BlockRect | null => {
-      const base = joinBasePos(fid, ifId);
-      if (base === null) return null;
-      const s = sizes.get(`${fid}:join:${ifId}`) ?? JOIN_FALLBACK_SIZE;
-      const f = layout.funcOrigin(fid);
-      return { x: f.x + base.x, y: f.y + base.y, w: s.w, h: s.h };
-    },
-    [joinBasePos, sizes, layout],
-  );
-
   const joinLivePos = useCallback(
     (fid: number, ifId: number): Pos | null => {
       const base = joinBasePos(fid, ifId);
@@ -315,13 +284,13 @@ export function useCanvasBranchLayout(args: UseCanvasBranchLayoutArgs): UseCanva
       fid: number,
       viewport: { readonly x: number; readonly y: number; readonly w: number; readonly h: number } | null,
     ): readonly BranchFrame[] => {
-      const f = layout.funcOrigin(fid);
+      const f = funcOrigin(fid);
       const overscan =
         viewport === null ? null : {
-          x: viewport.x - 800,
-          y: viewport.y - 800,
-          w: viewport.w + 1600,
-          h: viewport.h + 1600,
+          x: viewport.x - VIEW_OVERSCAN,
+          y: viewport.y - VIEW_OVERSCAN,
+          w: viewport.w + VIEW_OVERSCAN * 2,
+          h: viewport.h + VIEW_OVERSCAN * 2,
         };
       const frames: BranchFrame[] = [];
       for (const shape of ifShapesByFunction.get(fid) ?? []) {
@@ -364,7 +333,7 @@ export function useCanvasBranchLayout(args: UseCanvasBranchLayoutArgs): UseCanva
       }
       return frames;
     },
-    [branchDrag, ifShapesByFunction, layout],
+    [branchDrag, ifShapesByFunction, funcOrigin],
   );
 
   const branchDragOffsets = useMemo((): BranchDragOffsets | null => {
@@ -378,78 +347,6 @@ export function useCanvasBranchLayout(args: UseCanvasBranchLayoutArgs): UseCanva
     }
     return { fid: drag.fid, map };
   }, [branchDrag, ifShapesByFunction]);
-
-  const placeBranchMember = useCallback(
-    (fid: number, ifId: number, branch: BranchSide, blockId: number): void => {
-      if (branch !== "then" && branch !== "else") return;
-      const cmds = commandsByFunction[fid] ?? [];
-      const byIndex = new Map<number, number>(
-        cmds.map((c, i) => [c.id, i] as const),
-      );
-      const ifIndex = byIndex.get(ifId);
-      const ifCmd = ifIndex === undefined ? undefined : cmds[ifIndex];
-      if (ifCmd === undefined || ifIndex === undefined) return;
-      const store = layoutStore[fid];
-      const ifPos = store?.[ifId] ?? { x: 48, y: 36 + ifIndex * 264 };
-      const ifSize = sizes.get(`${fid}:${ifId}`) ?? FALLBACK_SIZE;
-      const shape = (ifShapesByFunction.get(fid) ?? []).find(
-        (s) => s.ifId === ifId,
-      );
-      const memberIds =
-        branch === "then"
-          ? (shape?.then ?? [])
-          : (shape?.else ?? []);
-      const memberRects: (readonly [number, number])[] = [];
-      for (const id of memberIds) {
-        if (id === blockId) continue;
-        const index = byIndex.get(id) ?? -1;
-        const cmd = cmds[index];
-        if (cmd === undefined) continue;
-        const p = store?.[cmd.id] ?? { x: 48, y: 36 + index * 264 };
-        const s = sizes.get(`${fid}:${cmd.id}`) ?? FALLBACK_SIZE;
-        memberRects.push([p.y, s.h] as const);
-      }
-      const rectOf = (id: number): BlockRect | undefined => {
-        const idx = byIndex.get(id);
-        const command = idx === undefined ? undefined : cmds[idx];
-        if (command === undefined || idx === undefined) return undefined;
-        const p = store?.[command.id] ?? { x: 48, y: 36 + idx * 264 };
-        const s = sizes.get(`${fid}:${command.id}`) ?? FALLBACK_SIZE;
-        return { x: p.x, y: p.y, w: s.w, h: s.h };
-      };
-      const preFrame = buildIfShapes(
-        cmds.map((c) => {
-          if (!(c.id === ifId && c.kind === "if")) return c;
-          if (branch === "then") {
-            return { ...c, then_body: [] };
-          }
-          return { ...c, else_body: [] };
-        }),
-        rectOf,
-        rectOf,
-      )
-        .find((s) => s.ifId === ifId)
-        ?.frames.find((f) => f.branch === branch)?.rect;
-      const p =
-        store?.[blockId] ?? { x: 48, y: 36 + (byIndex.get(blockId) ?? -1) * 264 };
-      if (
-        preFrame !== undefined &&
-        p.x >= preFrame.x &&
-        p.x <= preFrame.x + preFrame.w &&
-        p.y >= preFrame.y &&
-        p.y <= preFrame.y + preFrame.h
-      ) {
-        return;
-      }
-      const dropPos = branchDropPos({
-        branch,
-        ifRect: { x: ifPos.x, y: ifPos.y, w: ifSize.w, h: ifSize.h },
-        memberRects,
-      });
-      onMoveBlock(fid, blockId, dropPos);
-    },
-    [commandsByFunction, layoutStore, sizes, ifShapesByFunction, onMoveBlock],
-  );
 
   return {
     branchDrag,
@@ -467,11 +364,9 @@ export function useCanvasBranchLayout(args: UseCanvasBranchLayoutArgs): UseCanva
     applyJoinDragMove,
     endJoinDrag,
     joinBasePos,
-    joinWorldRect,
     joinLivePos,
     memberSideOf,
     branchFrames,
     branchDragOffsets,
-    placeBranchMember,
   };
 }
