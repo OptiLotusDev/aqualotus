@@ -27,12 +27,16 @@ import {
   optilotus_if_condition,
   optilotus_listCommands,
   optilotus_listFunctions,
+  optilotus_runProgramCancel,
+  optilotus_runProgramProvideInput,
+  optilotus_runProgramStart,
   optilotus_setEntry,
 } from "../lib/optilotus";
 import { HistoryIdMap, type HistoryEntry } from "../lib/history";
 import type { ProgramSnapshot } from "./program_state";
 import {
   EMPTY,
+  applyRunStatus,
   clearFailure,
   failCommand,
   failThrown,
@@ -66,7 +70,7 @@ import {
   deleteCommand as deleteCommandOp,
 } from "./program_commands";
 import { replaceCommand as replaceCommandOp } from "./program_replace";
-import { run as runOp, clearRun as clearRunOp, dismissError as dismissErrorOp } from "./program_execution";
+import { dismissError as dismissErrorOp } from "./program_execution";
 import { clearPackage as clearPackageOp } from "./program_package";
 import type { ProgramMutationContext } from "./program_ops";
 
@@ -103,6 +107,10 @@ export function useProgram(
   clearEntry: (fid: FunctionId) => void;
   clearPackage: () => void;
   run: () => void;
+  /** Feed a line to the paused run; no-op when nothing waits. */
+  provideInput: (value: string) => void;
+  /** Cancel the paused run (the run itself, not its output). */
+  cancelRun: () => void;
   clearRun: () => void;
   dismissError: () => void;
   canUndo: boolean;
@@ -156,6 +164,13 @@ export function useProgram(
     });
   }, []);
 
+  /**
+   * `true` while the engine holds a paused (resumable) session for this
+   * hook. The projection owns the only session, so a refresh cancels it
+   * rather than leaving a stale program paused behind the UI.
+   */
+  const sessionActiveRef = useRef(false);
+
   useEffect(() => {
     selectedIdRef.current = snapshot.selectedId;
   }, [snapshot.selectedId]);
@@ -166,6 +181,12 @@ export function useProgram(
 
   const load = useCallback(
     (selectedId: FunctionId | null): void => {
+      // A projection refresh invalidates any session paused on the old
+      // program: cancel it before the UI forgets the prompt.
+      if (sessionActiveRef.current) {
+        optilotus_runProgramCancel();
+        sessionActiveRef.current = false;
+      }
       try {
         const listed = optilotus_listFunctions();
         const functions = listed.functions;
@@ -219,6 +240,7 @@ export function useProgram(
                   : null,
               busy: false,
               run: null,
+              pendingInput: null,
               durationMs: null,
             }),
           );
@@ -259,6 +281,7 @@ export function useProgram(
         ...prev,
         selectedCommandId: null,
         run: null,
+        pendingInput: null,
       }));
       load(id);
     },
@@ -535,8 +558,81 @@ export function useProgram(
 
   const clearPackage = useCallback((): void => clearPackageOp(ctxRef.current!), []);
 
-  const run = useCallback((): void => runOp(ctxRef.current!), []);
-  const clearRun = useCallback((): void => clearRunOp(ctxRef.current!), []);
+  const run = useCallback((): void => {
+    try {
+      if (sessionActiveRef.current) {
+        optilotus_runProgramCancel();
+        sessionActiveRef.current = false;
+      }
+      setSnapshot((prev) => ({
+        ...clearFailure(prev),
+        running: true,
+        pendingInput: null,
+        run: null,
+        durationMs: null,
+      }));
+      const started =
+        typeof performance !== "undefined" ? performance.now() : 0;
+      const result = optilotus_runProgramStart();
+      const durationMs =
+        typeof performance !== "undefined"
+          ? Math.max(0, performance.now() - started)
+          : 0;
+      sessionActiveRef.current = result.status === "waiting_input";
+      setSnapshot((prev) => applyRunStatus(prev, result, durationMs));
+    } catch (e: unknown) {
+      sessionActiveRef.current = false;
+      setSnapshot((prev) => failThrown(prev, e));
+    }
+  }, []);
+
+  const provideInput = useCallback((value: string): void => {
+    if (!sessionActiveRef.current) return;
+    try {
+      setSnapshot((prev) => ({
+        ...clearFailure(prev),
+        running: true,
+      }));
+      const started =
+        typeof performance !== "undefined" ? performance.now() : 0;
+      const result = optilotus_runProgramProvideInput(value);
+      const durationMs =
+        typeof performance !== "undefined"
+          ? Math.max(0, performance.now() - started)
+          : 0;
+      sessionActiveRef.current = result.status === "waiting_input";
+      setSnapshot((prev) => applyRunStatus(prev, result, durationMs));
+    } catch (e: unknown) {
+      sessionActiveRef.current = false;
+      setSnapshot((prev) => failThrown(prev, e));
+    }
+  }, []);
+
+  const cancelRun = useCallback((): void => {
+    if (sessionActiveRef.current) {
+      optilotus_runProgramCancel();
+      sessionActiveRef.current = false;
+    }
+    setSnapshot((prev) => ({
+      ...prev,
+      running: false,
+      pendingInput: null,
+    }));
+  }, []);
+
+  const clearRun = useCallback((): void => {
+    if (sessionActiveRef.current) {
+      optilotus_runProgramCancel();
+      sessionActiveRef.current = false;
+    }
+    setSnapshot((prev) => ({
+      ...prev,
+      run: null,
+      durationMs: null,
+      pendingInput: null,
+    }));
+  }, []);
+
   const dismissError = useCallback((): void => dismissErrorOp(ctxRef.current!), []);
 
   return {
@@ -557,6 +653,8 @@ export function useProgram(
     clearEntry,
     clearPackage,
     run,
+    provideInput,
+    cancelRun,
     clearRun,
     dismissError,
     canUndo: tops.canUndo,

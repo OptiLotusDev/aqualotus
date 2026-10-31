@@ -128,11 +128,31 @@ impl Package {
             .ok_or(PackageError::UnknownFunction(fid))?;
         let summary = meta.get(&head).ok_or(PackageError::UnknownCommand(head))?;
         match summary.kind {
-            CommandKind::Return
-            | CommandKind::If
-            | CommandKind::Input
-            | CommandKind::Cast
-            | CommandKind::Unknown => Ok(head),
+            CommandKind::Return | CommandKind::If | CommandKind::Cast | CommandKind::Unknown => {
+                Ok(head)
+            }
+            CommandKind::Input => {
+                // Plain `input` is a single command; `input_into` is a
+                // hidden Input -> Set pair.
+                let is_into = self
+                    .meta
+                    .get(&fid)
+                    .and_then(|m| m.get(&head))
+                    .map(|s| s.var.is_some())
+                    .unwrap_or(false);
+                if is_into {
+                    let func = self
+                        .functions
+                        .get(&fid)
+                        .ok_or(PackageError::UnknownFunction(fid))?;
+                    let head_cmd = func
+                        .find_command(head)
+                        .ok_or(PackageError::UnknownCommand(head))?;
+                    head_cmd.next.ok_or(PackageError::UnknownCommand(head))
+                } else {
+                    Ok(head)
+                }
+            }
             CommandKind::Declare | CommandKind::Assign | CommandKind::Print => {
                 let func = self
                     .functions

@@ -78,7 +78,16 @@ export type CommandDraft =
       casting?: CastingDraft;
     }
   | { kind: "print"; template: string }
-  | { kind: "input"; ty: OptilotusType }
+  | {
+      kind: "input";
+      ty: OptilotusType;
+      /**
+       * Optional variable the read value is stored in (`input_into`).
+       * Absent means the historical plain `input`, whose value is not
+       * reachable from later commands.
+       */
+      name?: string;
+    }
   | { kind: "cast"; name: string; to: OptilotusType; expr: string }
   | { kind: "return"; expr: string }
   | {
@@ -148,6 +157,9 @@ export function summaryToDraft(cmd: CommandSummary): CommandDraft {
       return {
         kind: "input",
         ty: (cmd.ty ?? optilotus_type.int32) as OptilotusType,
+        // `input_into` summaries carry the bound variable; a plain
+        // `input` has none and replays as a bare read.
+        ...(cmd.var !== undefined && cmd.var !== null ? { name: cmd.var } : {}),
       };
     case "cast":
       // A projected converted variable (the native-cast shape) is an
@@ -251,7 +263,12 @@ export function commandDraftEqual(
     case "print":
       return next.kind === "print" && next.template === current.template;
     case "input":
-      return next.kind === "input" && next.ty === current.ty;
+      return (
+        next.kind === "input" &&
+        next.ty === current.ty &&
+        // An absent/blank name both mean the plain read.
+        (next.name?.trim() ?? "") === (current.name?.trim() ?? "")
+      );
     case "cast":
       return (
         next.kind === "cast" &&
@@ -356,7 +373,9 @@ export function commandMainLine(cmd: CommandSummary): string {
     case "print":
       return cmd.template ?? "";
     case "input":
-      return `input ${cmd.ty ?? "?"}`;
+      return cmd.var !== undefined && cmd.var !== null
+        ? `${cmd.var}: ${cmd.ty ?? "?"} = input`
+        : `input ${cmd.ty ?? "?"}`;
     case "cast":
       return `${cmd.var ?? "?"} = cast(${cmd.expr ?? ""}, ${cmd.ty ?? "?"})`;
     case "return":
@@ -389,7 +408,9 @@ export function commandSubLine(cmd: CommandSummary): string {
     case "print":
       return "print to output";
     case "input":
-      return "read from input";
+      return cmd.var !== undefined && cmd.var !== null
+        ? `read from input into ${cmd.var}`
+        : "read from input";
     case "cast": {
       const casting = (cmd as CommandSummary & { casting?: CastingInfo })
         .casting;
@@ -506,21 +527,43 @@ export function freshName(
 }
 
 /**
- * Which command ids a declare-to-declare edit recreates (P3: pure
- * projection of bridge data). Always the declare itself; plus bound
- * assigns (their baked-in engine type follows the declaration); plus,
- * on a rename, every block whose expression/template text references
+ * The variable a draft declares, or `null` when it declares none.
+ * `declare` always names one; `input` names one only when the optional
+ * *Store in variable* field is non-blank (otherwise it is the historical
+ * plain read). Trims, so a whitespace-only field means "no variable",
+ * matching what the bridge receives.
+ */
+export function draftVarName(draft: CommandDraft): string | null {
+  if (draft.kind === "declare") return draft.name.trim();
+  if (draft.kind === "input") {
+    const name = draft.name?.trim() ?? "";
+    return name === "" ? null : name;
+  }
+  return null;
+}
+
+/**
+ * Which command ids a variable-declaration edit recreates (P3: pure
+ * projection of bridge data). A declaration is a `declare` or a named
+ * `input_into` read. Always the declaration itself; plus bound assigns
+ * (their baked-in engine type follows the declaration); plus, on a
+ * rename, every block whose expression/template text references
  * `{old}`. Shared by the mutation (`useProgram`) and the position
  * capture (`AppShell`) so the two always agree. Order follows `cmds`.
  */
-export function declareEditAffected(
+export function variableEditAffected(
   cmds: readonly CommandSummary[],
   oldId: number,
   newName: string,
 ): readonly number[] {
   const old = cmds.find((c) => c.id === oldId);
-  if (old === undefined || old.kind !== "declare") return [];
+  if (old === undefined || (old.kind !== "declare" && old.kind !== "input")) {
+    return [];
+  }
   const oldName = (old.var ?? "").trim();
+  // A plain input introduces no variable, so only the block itself is
+  // recreated (and no name can be referenced).
+  if (oldName === "") return [oldId];
   const renamed = newName.trim() !== "" && newName.trim() !== oldName;
   const out: number[] = [];
   for (const c of cmds) {

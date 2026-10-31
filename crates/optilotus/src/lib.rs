@@ -65,10 +65,10 @@ pub use optilotus_core::{Type, Value};
 pub use bridge::{
     health_check, package_assign, package_clear, package_create_function, package_declare,
     package_delete_command, package_delete_function, package_get_function, package_input,
-    package_list_commands, package_list_functions, package_print, package_rename_function,
-    package_return, package_set_entry, package_set_next, run_program, run_program_cancel,
-    run_program_provide_input, run_program_start, run_program_status, run_program_with_inputs,
-    version, VERSION,
+    package_input_into, package_list_commands, package_list_functions, package_print,
+    package_rename_function, package_return, package_set_entry, package_set_next, run_program,
+    run_program_cancel, run_program_provide_input, run_program_start, run_program_status,
+    run_program_with_inputs, version, VERSION,
 };
 
 // The boundary modules address the engine through its historical module

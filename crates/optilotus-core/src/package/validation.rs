@@ -71,6 +71,9 @@ pub fn validate_spec(spec: &CommandSpec) -> Result<(), PackageError> {
         }
         CommandKind::Print => Ok(()),
         CommandKind::Input => {
+            if let Some(var) = spec.var.as_deref() {
+                check_var_name(var).map_err(|e| PackageError::InvalidName(e.to_string()))?;
+            }
             let Some(ty) = spec.ty else {
                 return Err(PackageError::InvalidCommand(
                     "input spec needs a type".to_string(),

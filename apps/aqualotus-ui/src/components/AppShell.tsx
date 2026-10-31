@@ -9,7 +9,7 @@ import {
 import type { RuntimeStatus } from "../hooks/useRuntime";
 import type { ProgramSnapshot } from "../hooks/useProgram";
 import type { CommandDraft } from "../lib/program";
-import { declareEditAffected, freshName } from "../lib/program";
+import { draftVarName, freshName, variableEditAffected } from "../lib/program";
 import type { LinkPlan } from "../lib/graph";
 import {
   countUnconnectedBlocks,
@@ -68,6 +68,8 @@ interface AppShellProps {
   readonly onClearEntry: (fid: FunctionId) => void;
   readonly onClearPackage: () => void;
   readonly onRun: () => void;
+  readonly onProvideInput: (value: string) => void;
+  readonly onCancelRun: () => void;
   readonly onDismissError: () => void;
 }
 
@@ -127,19 +129,22 @@ export default function AppShell(props: AppShellProps): ReactElement {
     draft: CommandDraft,
   ): void {
     const cmds = program.commandsByFunction[target] ?? [];
-    // A declare type/name edit also rebuilds its dependent assigns (same
-    // variable: their engine types must follow the declaration), so every
-    // affected block hands its spot to its own recreation, in order.
+    // A variable-declaration edit (declare or named input) also rebuilds
+    // its dependent assigns (same variable: their engine types must
+    // follow the declaration), so every affected block hands its spot to
+    // its own recreation, in order.
     const oldCmd = cmds.find((c) => c.id === oldId) ?? null;
-    // A declare-to-declare edit recreates exactly `declareEditAffected`
-    // (the declare, its bound assigns, ref-holding blocks on rename), so
+    // Such an edit recreates exactly `variableEditAffected` (the
+    // declaration, its bound assigns, ref-holding blocks on rename), so
     // capture spots for that same set, in command order. Anything not
-    // recreated simply never consumes its spot.
+    // recreated simply never consumes its spot. A plain input has no
+    // variable and keeps the generic one-block edit.
+    const nextVarName = draftVarName(draft);
     const affectedIds =
       oldCmd !== null &&
-      oldCmd.kind === "declare" &&
-      draft.kind === "declare"
-        ? declareEditAffected(cmds, oldId, draft.name)
+      nextVarName !== null &&
+      (oldCmd.kind === "declare" || oldCmd.kind === "input")
+        ? variableEditAffected(cmds, oldId, nextVarName)
         : cmds.some((c) => c.id === oldId)
           ? [oldId]
           : [];
@@ -331,6 +336,10 @@ export default function AppShell(props: AppShellProps): ReactElement {
       filled = { ...draft, template: '"hello"' };
     } else if (draft.kind === "return" && draft.expr === "") {
       filled = { ...draft, expr: "0" };
+    } else if (draft.kind === "input" && (draft.name ?? "") === "") {
+      // A fresh name makes the read value reachable; a blank one would
+      // replay as a plain `input` whose value no later block can use.
+      filled = { ...draft, name: freshName(taken, "n") };
     }
     props.onAddCommand(target, filled);
   }
@@ -516,6 +525,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
   const runnerVisible =
     runOpen ||
     program.running ||
+    program.pendingInput !== null ||
     (program.run !== null && program.run !== shelvedRun) ||
     program.actionError !== "";
 
@@ -691,12 +701,15 @@ export default function AppShell(props: AppShellProps): ReactElement {
       <Runner
         run={program.run}
         running={program.running}
+        pendingInput={program.pendingInput}
         durationMs={program.durationMs}
         errorId={errorBlockId}
         busy={program.busy}
         canRun={fid !== null}
         onShowBlock={showBlock}
         onRun={runAll}
+        onSubmitInput={props.onProvideInput}
+        onCancelRun={props.onCancelRun}
       />
     </div>
   );
@@ -854,7 +867,11 @@ export default function AppShell(props: AppShellProps): ReactElement {
               >
                 <span
                   className="status-dot"
-                  data-state={pillState(program.running, program.run)}
+                  data-state={pillState(
+                    program.running,
+                    program.pendingInput !== null,
+                    program.run,
+                  )}
                 >
                   <i aria-hidden="true" />
                   {runnerSummary(program)}

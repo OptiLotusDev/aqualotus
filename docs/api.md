@@ -163,8 +163,8 @@ Pure, headless, unit-tested (`cargo test -p optilotus`):
     (name only; stable id untouched), `clear_package()`.
   - Command builders (expand onto existing IR; `return` is `Op::Return`):
     `declare(fid, name, ty, init?)`, `assign(fid, name, expr)`,
-    `print(fid, template)`, `input(fid, ty)`, `cast(fid, name, to, expr)`,
-    `return_(fid, expr)`, `list_commands(fid)`,
+    `print(fid, template)`, `input(fid, ty)`, `input_into(fid, name, ty)`,
+    `cast(fid, name, to, expr)`, `return_(fid, expr)`, `list_commands(fid)`,
     `set_entry(fid, entry?)`, `set_next(fid, cmd, next?)`,
     `delete_command(fid, cmd)`.
   - Branching (`Op::If`, nestable): `eval_cond(fid, expr)` evaluates an
@@ -248,6 +248,7 @@ the wire types above.
 - `optilotus_assign(fid, name, expr: string): string`
 - `optilotus_print(fid, template: string): string`
 - `optilotus_input(fid, ty: string): string`
+- `optilotus_inputInto(fid, name: string, ty: string): string`
 - `optilotus_cast(fid, name, to: string, expr: string): string`
 - `optilotus_return(fid, expr: string): string`
 - `optilotus_listCommands(fid): string`
@@ -315,6 +316,7 @@ Call sites never parse JSON — `JSON.parse` exists only inside this module:
 - `optilotus_assign(fid, name, expr): {status:"ok",id} | OptilotusError`
 - `optilotus_print(fid, template): {status:"ok",id} | OptilotusError`
 - `optilotus_input(fid, ty): {status:"ok",id} | OptilotusError`
+- `optilotus_inputInto(fid, name, ty): {status:"ok",id} | OptilotusError`
 - `optilotus_cast(fid, name, to, expr): {status:"ok",id} | OptilotusError`
 - `optilotus_return(fid, expr): {status:"ok",id} | OptilotusError`
 - `optilotus_listCommands(fid): {status:"ok",commands: CommandSummary[]} | OptilotusError`
@@ -419,6 +421,35 @@ Rules:
   the if command but leaves its body commands as orphans (they are no
   longer reachable).
 
+### Reading input into a variable
+
+`input(fid, ty)` is the historical single-command read: it consumes a
+value but binds it to a hidden `ValueId`, so no later command can use it.
+`input_into(fid, name, ty)` is the engine-side pair that makes the value
+usable: an `Input` head plus a hidden `Set` tail that stores the read
+value in `name`. Afterwards `name` behaves like a declared variable
+(`assign`/`print` can read it), and the pair is deleted as one unit.
+
+```ts
+optilotus_inputInto(0, "n", optilotus_type.int32);
+optilotus_print(0, '"{n}"');
+// listCommands -> two visible commands: input (var:"n") then print.
+// `input.next` points at the print; the hidden Set is never listed.
+```
+
+Rules:
+- The name is validated like `declare`: trimmed, no `{}"`, and unique
+  among the function's declared variables (a duplicate is a typed error).
+- `void` is rejected; an input must produce a readable value.
+- A plain `input` summary carries no `var`; `input_into` carries one, so
+  the wire format stays additive and existing programs are unchanged.
+
+In the UI, the library's **Input / Read Input** block (Variables
+category) creates this pair with a fresh variable name; the Inspector's
+*Store in variable* field renames it, and clearing that field falls back
+to the historical plain `input`. The block's Inspector also chooses the
+type.
+
 ### Resumable run workflow
 
 The resumable API runs `main` with interactive input. One active run at a
@@ -446,6 +477,29 @@ optilotus_runProgramReset();    // same as cancel
 - `optilotus_lastError()` — the last execution error as a typed object.
 - Malformed input JSON returns a typed `InvalidInputs` error (never a
   silent empty run).
+- The non-resumable `optilotus_runProgram()` runs with an empty input
+  source, so a program that reads `input` fails with `InputEof`. The UI
+  therefore drives every run through the resumable lifecycle: start,
+  prompt for each pause, then finish or cancel.
+
+### Runner behavior in the UI
+
+The Runner is a projection of that lifecycle; it invents no semantics:
+
+- **Paused run** — `useProgram` stores `pendingInput` (`command`, `ty`)
+  from `waiting_input` and the Runner shows an input field, the expected
+  type, and Cancel. Submitting calls `optilotus_runProgramProvideInput`;
+  the field clears for each new pause.
+- **Cancel** — `optilotus_runProgramCancel()` discards the active run;
+  partial output is not shown. Any projection refresh (load, undo, redo,
+  selecting another function) also cancels a paused session, because the
+  command ids it refers to may no longer exist.
+- **Returned value** — a finished `RunOkResponse` may carry `returned`
+  (the `main` result, or `null`); the Runner renders it as
+  `Tag value` (for example `Int32 42`, `String "hi"` or `Void`).
+- **Typed failure** — a bad input value fails at the read itself with
+  `InputParse`, so the Runner offers the input block; other failures keep
+  the existing id-resolution rules (hidden nodes name no block).
 
 ### Single-package limitation
 

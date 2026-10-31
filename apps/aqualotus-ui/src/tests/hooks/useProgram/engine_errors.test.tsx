@@ -145,11 +145,11 @@ describe("TASK-003 — runtime failures map to the visible block", () => {
       api().run();
     });
 
-    const error = api().snapshot.error;
-    expect(error?.kind).toBe("InputEof");
-    expect(error?.command).toBe(inputId);
-    expect(api().snapshot.errorBlockId).toBe(inputId);
-    expect(api().snapshot.errorFunctionId).toBe(0);
+    // A resumable run pauses at the read instead of failing.
+    expect(api().snapshot.run).toBeNull();
+    expect(api().snapshot.pendingInput?.command).toBe(inputId);
+    expect(api().snapshot.pendingInput?.ty).toBe("int32");
+    expect(api().snapshot.error).toBeNull();
   });
 
   it("E — a failure inside a helper resolves to the block inside the helper", async () => {

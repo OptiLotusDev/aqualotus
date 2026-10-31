@@ -190,8 +190,21 @@ vi.mock("../../lib/optilotus", () => ({
     if (ctl.runError !== null) {
       return { status: "error", ...ctl.runError };
     }
-    return { status: "ok", steps: 1, prints: 0, printed: [] };
+    return { status: "ok", steps: 1, prints: 0, printed: [], returned: null };
   },
+  optilotus_runProgramStart: () => {
+    if (ctl.runError !== null) {
+      return { status: "error", ...ctl.runError };
+    }
+    return { status: "ok", steps: 1, prints: 0, printed: [], returned: null };
+  },
+  optilotus_runProgramProvideInput: (_value: string) => {
+    if (ctl.runError !== null) {
+      return { status: "error", ...ctl.runError };
+    }
+    return { status: "ok", steps: 1, prints: 0, printed: [], returned: null };
+  },
+  optilotus_runProgramCancel: () => ({ status: "ok" }),
 }));
 
 function reset(): void {

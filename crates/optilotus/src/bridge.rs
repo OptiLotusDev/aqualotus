@@ -264,6 +264,19 @@ pub fn package_input(fid: u32, ty: &str) -> String {
     })
 }
 
+/// `input_into(fid, name, ty)` -> `{"status":"ok","id"}`.
+///
+/// Reads a typed value and stores it under `name`, so the value is
+/// reachable from later expressions (the plain `input` op binds none).
+pub fn package_input_into(fid: u32, name: &str, ty: &str) -> String {
+    with_package(
+        |pkg| match pkg.input_into(crate::ir::FunctionId(fid), name, ty) {
+            Ok(id) => to_json(&CommandIdResponse::new(id)),
+            Err(e) => to_json(&package_fail(&e)),
+        },
+    )
+}
+
 /// `cast(fid, name, to, expr)` -> `{"status":"ok","id"}`.
 pub fn package_cast(fid: u32, name: &str, to: &str, expr: &str) -> String {
     with_package(
@@ -549,6 +562,13 @@ pub fn js_package_print(fid: u32, template: &str) -> String {
 pub fn js_package_input(fid: u32, ty: &str) -> String {
     init_panic_hook();
     package_input(fid, ty)
+}
+
+/// JS: `optilotus_inputInto(fid, name, ty) -> string` (JSON)
+#[wasm_bindgen(js_name = optilotus_inputInto)]
+pub fn js_package_input_into(fid: u32, name: &str, ty: &str) -> String {
+    init_panic_hook();
+    package_input_into(fid, name, ty)
 }
 
 /// JS: `optilotus_cast(fid, name, to, expr) -> string` (JSON)

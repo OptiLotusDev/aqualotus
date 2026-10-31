@@ -362,24 +362,43 @@ export function KindFields(props: {
       );
     case "input":
       return (
-        <div className="field">
-          <span>
-            <label htmlFor="in-type">Type</label>
-          </span>
-          <select
-            id="in-type"
-            value={draft.ty}
-            onChange={(e) =>
-              onChange({ ...draft, ty: e.target.value as OptilotusType })
-            }
-          >
-            {TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </div>
+        <>
+          <div className="field">
+            <span>
+              <label htmlFor="in-input-name">Store in variable</label>
+            </span>
+            <input
+              id="in-input-name"
+              value={draft.name ?? ""}
+              onChange={(e) => onChange({ ...draft, name: e.target.value })}
+              placeholder="n (optional)"
+              autoComplete="off"
+            />
+            <div className="field-hint">
+              The read value is stored under this variable, so later blocks
+              can use it. Leave empty to keep a plain read whose value is not
+              reachable.
+            </div>
+          </div>
+          <div className="field">
+            <span>
+              <label htmlFor="in-type">Type</label>
+            </span>
+            <select
+              id="in-type"
+              value={draft.ty}
+              onChange={(e) =>
+                onChange({ ...draft, ty: e.target.value as OptilotusType })
+              }
+            >
+              {TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </div>
+        </>
       );
     case "cast":
       // Internal/editor support for programs that already contain an

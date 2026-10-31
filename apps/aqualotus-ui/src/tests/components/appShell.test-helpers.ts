@@ -36,6 +36,7 @@ export function snapshot(): ProgramSnapshot {
     selectedCommandId: null,
     run: null,
     running: false,
+    pendingInput: null,
     durationMs: null,
     busy: false,
     actionError: "",
@@ -76,6 +77,8 @@ export function shellProps(
     onClearEntry: vi.fn(),
     onClearPackage: vi.fn(),
     onRun: vi.fn(),
+    onProvideInput: vi.fn(),
+    onCancelRun: vi.fn(),
     onDismissError: vi.fn(),
   };
 }

@@ -71,6 +71,18 @@ impl CommandSpec {
             to: None,
         }
     }
+    pub fn input_into(var: &str, ty: Type) -> Self {
+        Self {
+            kind: CommandKind::Input,
+            var: Some(var.to_string()),
+            access: None,
+            ty: Some(ty),
+            init: None,
+            expr: None,
+            template: None,
+            to: None,
+        }
+    }
     pub fn cast(var: &str, to: Type, expr: &str) -> Self {
         Self {
             kind: CommandKind::Cast,

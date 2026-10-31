@@ -264,6 +264,70 @@ describe("branch-membership integrity (engine truth)", () => {
     expect(runPrints(api)).toEqual(["5", "5", "5"]);
   });
 
+  it("re-appends a replaced named input so it stays in the branch", async () => {
+    const { result } = await setup();
+    const api = (): Api => result.current;
+
+    act(() => {
+      api().addCommand(0, {
+        kind: "if",
+        condition: "true",
+        then: [],
+        else: null,
+      });
+    });
+    act(() => {
+      api().addCommand(0, { kind: "input", ty: "int32", name: "n" });
+    });
+    const ifId = api().snapshot.commands.find((c) => c.kind === "if")?.id ?? -1;
+    const inputId = api().snapshot.commands.find((c) => c.kind === "input")?.id ?? -1;
+    expect(ifId).toBeGreaterThan(0);
+    expect(inputId).toBeGreaterThan(0);
+
+    act(() => {
+      api().applyIfAppend(0, ifId, "then", inputId);
+    });
+    let listed = optilotus_listCommands(0);
+    if (listed.status !== "ok") throw new Error("list failed");
+    expect(listed.commands.find((c) => c.kind === "if")?.then_body).toContain(
+      inputId,
+    );
+
+    // Same-name type edit: delete-first (the engine rejects a duplicate
+    // declaration) and then re-append, because deleting a branch member
+    // drops its id from the branch list.
+    act(() => {
+      api().replaceCommand(0, inputId, {
+        kind: "input",
+        name: "n",
+        ty: "string",
+      });
+    });
+    expect(api().snapshot.actionError).toBe("");
+    const rebuilt = api().snapshot.commands.find((c) => c.kind === "input");
+    expect(rebuilt).toMatchObject({ var: "n", ty: "string" });
+    if (rebuilt === undefined) throw new Error("rebuilt input not created");
+    listed = optilotus_listCommands(0);
+    if (listed.status !== "ok") throw new Error("list failed");
+    expect(listed.commands.find((c) => c.kind === "if")?.then_body).toContain(
+      rebuilt.id,
+    );
+
+    // Undo restores both the old type and the branch membership.
+    act(() => {
+      api().undo();
+    });
+    expect(api().snapshot.commands.find((c) => c.kind === "input")?.ty).toBe(
+      "int32",
+    );
+    listed = optilotus_listCommands(0);
+    if (listed.status !== "ok") throw new Error("list failed");
+    const restoredId = api().snapshot.commands.find((c) => c.kind === "input")?.id;
+    expect(listed.commands.find((c) => c.kind === "if")?.then_body).toContain(
+      restoredId,
+    );
+  });
+
   it("refuses in-place cast edits and keeps the program runnable", async () => {
     const { result } = await setup();
     const api = (): Api => result.current;

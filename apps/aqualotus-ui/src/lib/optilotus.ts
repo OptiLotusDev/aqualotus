@@ -10,6 +10,7 @@ import init, {
   optilotus_getFunction as getFunction_wasm,
   optilotus_health as health_wasm,
   optilotus_input as input_wasm,
+  optilotus_inputInto as inputInto_wasm,
   optilotus_lastError as lastError_wasm,
   optilotus_listCommands as listCommands_wasm,
   optilotus_listFunctions as listFunctions_wasm,
@@ -302,6 +303,21 @@ export function optilotus_input(
 ): { status: "ok"; id: number } | OptilotusError {
   assertReady();
   return parseBridge(input_wasm(fid, ty));
+}
+
+/**
+ * Read one typed value into a new variable (`Input` -> `Set`).
+ *
+ * The plain {@link optilotus_input} binds no variable, so a run reading
+ * it can never use the value; this variant is the engine's `input_into`.
+ */
+export function optilotus_inputInto(
+  fid: number,
+  name: string,
+  ty: OptilotusType,
+): { status: "ok"; id: number } | OptilotusError {
+  assertReady();
+  return parseBridge(inputInto_wasm(fid, name, ty));
 }
 
 export function optilotus_cast(

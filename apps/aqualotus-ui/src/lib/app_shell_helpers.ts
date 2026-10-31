@@ -32,14 +32,22 @@ export function nextHelperName(
 }
 
 /** Compact runner pill dot state for the collapsed dock. */
-export function pillState(running: boolean, run: RunResult | null): string {
+export function pillState(
+  running: boolean,
+  waiting: boolean,
+  run: RunResult | null,
+): string {
   if (running) return "busy";
+  if (waiting) return "busy";
   if (run === null) return "idle";
   return run.status === "ok" ? "ready" : "error";
 }
 
 /** Compact runner pill text for the collapsed dock. */
 export function runnerSummary(program: ProgramSnapshot): string {
+  if (program.pendingInput !== null) {
+    return `Input needed · ${program.pendingInput.ty}`;
+  }
   if (program.running) return "Running…";
   const run = program.run;
   if (run === null) return "Runner";

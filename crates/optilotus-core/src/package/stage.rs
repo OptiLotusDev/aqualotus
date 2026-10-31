@@ -84,8 +84,19 @@ impl Package {
                         "cannot read a value of type void".to_string(),
                     ));
                 }
-                let (head, _tail) = self.input_group(fid, ty)?;
-                Ok((head.id, vec![head.id]))
+                if let Some(name) = spec.var.as_deref() {
+                    let var = check_var_name(name)
+                        .map_err(|e| PackageError::InvalidName(e.to_string()))?;
+                    if self.declared_type(fid, &var).is_some() {
+                        return Err(PackageError::DuplicateVariable(var));
+                    }
+                    let (head, tail) = self.input_group(fid, Some(&var), ty)?;
+                    let tail = tail.expect("input_into builds a tail");
+                    Ok((head.id, vec![head.id, tail.id]))
+                } else {
+                    let (head, _tail) = self.input_group(fid, None, ty)?;
+                    Ok((head.id, vec![head.id]))
+                }
             }
             CommandKind::Cast => {
                 let var = check_var_name(spec.var.as_deref().unwrap_or(""))
