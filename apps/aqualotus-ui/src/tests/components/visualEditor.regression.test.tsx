@@ -207,6 +207,7 @@ describe("canvas geometry regression: rendered flow glow with join", () => {
   it("travels the merge edge through the join and lights the join continuation", () => {
     const flow: FlowState = {
       runId: 1,
+      pause: null,
       edges: [
         { fid: 0, from: 1, to: 2, kind: "branch-head" },
         { fid: 0, from: 2, to: 5, kind: "merge" },

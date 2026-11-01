@@ -49,6 +49,14 @@ export interface FlowState {
   readonly edges: readonly FlowEdge[];
   /** Travel time of one connection, in milliseconds. */
   readonly linkMs: number;
+  /**
+   * The input command the run waits on right now, or `null` when no run
+   * is paused. While it is set, the travelled path ends at the connection
+   * into this input block and the indicator stops there — at the block's
+   * entry side — for as long as the pause lasts. The engine's own pause
+   * (`WaitingInput.command`) is the only source; the UI never guesses one.
+   */
+  readonly pause: number | null;
 }
 
 /**
@@ -227,12 +235,24 @@ export function candidateProven(
  * before the `if`.
  *
  * Resolution order:
- * 1. Nested `if` in either body → undecided (module limitation).
- * 2. Exactly one viable candidate (count excludes the other) → decided.
- * 3. Both viable: the proven candidate (all literal prints reappear)
+ * 1. A pause hint — the run paused at an input inside one of this `if`'s
+ *    branches, so that branch was taken (engine truth, one branch).
+ * 2. Nested `if` in either body → undecided (module limitation).
+ * 3. Exactly one viable candidate (count excludes the other) → decided.
+ * 4. Both viable: the proven candidate (all literal prints reappear)
  *    beats the unverifiable one; a tie stays undecided.
- * 4. Envelope exhausted: a literal condition the engine itself holds
+ * 5. Envelope exhausted: a literal condition the engine itself holds
  *    names the branch — not a guess, but stated truth.
+ */
+export type BranchSide = "then" | "else";
+
+/**
+ * Which branch the run took at one `if`, decided **only** from the engine's
+ * own run envelope. The resolver never evaluates a condition and never invents
+ * runtime success: every decision has to be consistent with what the
+ * engine actually printed this run. The one exception, `hint`, is engine
+ * truth of a different kind: a branch the run **paused inside** (an input
+ * command the engine is sitting at is provably inside that branch).
  */
 export function decideBranch(
   cmd: CommandSummary,
@@ -245,7 +265,14 @@ export function decideBranch(
    * Used only when the envelope cannot decide.
    */
   literalConditions?: ReadonlyMap<number, boolean>,
+  /** Which side one `if` is known to have taken, from the run's own
+   * pauses (`ifId → side`). Engine truth; it decides before any heuristic. */
+  hints?: ReadonlyMap<number, BranchSide>,
 ): "then" | "else" | null {
+  const hinted = hints?.get(cmd.id);
+  if (hinted !== undefined) {
+    return hinted;
+  }
   const candidates = [
     branchCandidate("then", cmd.then_body, byId),
     branchCandidate("else", cmd.else_body, byId),
@@ -285,6 +312,14 @@ export function firstMember(members: readonly CommandSummary[]): CommandSummary 
  * Once one `if` cannot be decided, every later `if` in the same run
  * stays undecided as well: the walk then travels the chain and the
  * `if`'s own edge to the join, never either branch.
+ *
+ * `stopCommand` makes the walk end where the engine's own lifecycle
+ * does. A resumable run stops at an input command it waits on: the
+ * travelled connections then end at the one that enters that input
+ * block — wherever it sits on the executed path (chain or decided
+ * branch) — and nothing beyond the input is travelled. The same stop
+ * terminates the walk when a paused session is cancelled or fails:
+ * the sweep ends at the block the engine actually stopped at.
  */
 export function resolveRunPath(
   cmds: readonly CommandSummary[],
@@ -292,8 +327,18 @@ export function resolveRunPath(
   fid: number,
   printed: RunPrinted,
   literalConditions?: ReadonlyMap<number, boolean>,
+  /**
+   * The command the walk stops at: the input command the run waits on
+   * (or the one the engine last reached before the session ended).
+   * The connections therefore end at the edge entering this command,
+   * and the command's own outgoing edge is never travelled. */
+  stopCommand?: number | null,
+  /** Which sides the run's own pauses proved (`ifId → side`). Engine
+   * truth that decides a branch before any envelope heuristic. */
+  hints?: ReadonlyMap<number, BranchSide>,
 ): readonly FlowEdge[] {
   if (entry === null) return [];
+  const stop = stopCommand ?? null;
   const byId = new Map<number, CommandSummary>();
   for (const cmd of cmds) byId.set(cmd.id, cmd);
 
@@ -309,6 +354,9 @@ export function resolveRunPath(
   let current: number | null = entry;
   while (current !== null && !seen.has(current)) {
     seen.add(current);
+    // The engine stops here: an input it waits on, or the command a
+    // cancelled/failed session last reached. Nothing further has run.
+    if (current === stop) break;
     const cmd = byId.get(current);
     if (cmd === undefined) break;
     const next = cmd.next;
@@ -318,7 +366,14 @@ export function resolveRunPath(
     // no `if`→successor edge to follow. Handle the branch before the
     // terminal-chain break below so a terminal `if` is not skipped.
     if (cmd.kind === "if" && decidable) {
-      const taken = decideBranch(cmd, offset, printed, byId, literalConditions);
+      const taken = decideBranch(
+        cmd,
+        offset,
+        printed,
+        byId,
+        literalConditions,
+        hints,
+      );
       if (taken !== null) {
         const members = visibleBranchBody(
           taken === "then" ? cmd.then_body : cmd.else_body,
@@ -330,6 +385,7 @@ export function resolveRunPath(
         // to the `if`'s own `next` — `Package::if_append` ends the
         // member's chain there). A terminal `if` has no join, so no
         // merge edge is drawn — there is nothing to rejoin into.
+        let stopped = false;
         if (members.length > 0) {
           const [head] = members;
           edges.push({
@@ -338,13 +394,23 @@ export function resolveRunPath(
             to: head.id,
             kind: "branch-head",
           });
-          for (let i = 0; i + 1 < members.length; i += 1) {
-            edges.push({
-              fid,
-              from: members[i].id,
-              to: members[i + 1].id,
-              kind: "chain",
-            });
+          if (head.id === stop) {
+            // The engine pauses at the branch's head: the branch wire
+            // itself carried it in; nothing of the body ran.
+            stopped = true;
+          } else {
+            for (let i = 0; i + 1 < members.length; i += 1) {
+              edges.push({
+                fid,
+                from: members[i].id,
+                to: members[i + 1].id,
+                kind: "chain",
+              });
+              if (members[i + 1].id === stop) {
+                stopped = true;
+                break;
+              }
+            }
           }
           const tail = members[members.length - 1].id;
           const join = next;
@@ -353,25 +419,33 @@ export function resolveRunPath(
           // In manual-merge mode (join on), join = cmd.next when there's a continuation,
           // or the if's own id (representing the join circle) when there's no continuation.
           // The canvas travel edges will expand this into tail→join and join→continuation.
-          if (join !== null && join !== undefined && byId.has(join)) {
-            edges.push({
-              fid,
-              from: tail,
-              to: join,
-              kind: "merge",
-            });
-          } else if (join === null || join === undefined) {
-            // Terminal if with no successor: in manual-merge mode the branch
-            // flows into the if's join circle. Use the if's own id as the target.
-            edges.push({
-              fid,
-              from: tail,
-              to: cmd.id,
-              kind: "merge",
-            });
+          if (!stopped) {
+            if (join !== null && join !== undefined && byId.has(join)) {
+              edges.push({
+                fid,
+                from: tail,
+                to: join,
+                kind: "merge",
+              });
+            } else if (join === null || join === undefined) {
+              // Terminal if with no successor: in manual-merge mode the branch
+              // flows into the if's join circle. Use the if's own id as the target.
+              edges.push({
+                fid,
+                from: tail,
+                to: cmd.id,
+                kind: "merge",
+              });
+            }
           }
         }
         offset += members.filter((m) => m.kind === "print").length;
+        if (stopped) {
+          // The engine sits inside this branch (it paused there): the
+          // walk stops where the engine stopped, and never lands at the
+          // `if`'s join as if the branch had already run out.
+          break;
+        }
       } else {
         // First undecided `if`: the rest of the run travels the chain
         // only (never both branches, never an invented branch). A terminal
@@ -385,6 +459,51 @@ export function resolveRunPath(
     current = next;
   }
   return edges;
+}
+
+/**
+ * Which sides a run's own pauses prove, per `if`.
+ *
+ * The engine pauses at an input command it waits on. That command was
+ * **reached**, so every `if` on whose branch it sits has provably taken
+ * that branch — engine truth, read from the branch body lists the
+ * engine itself reports (they carry every raw id of their members).
+ * Nothing is evaluated and no output is invented: the mapping is
+ * containment in the engine's own lists.
+ *
+ * Nested `if` bodies are searched through for completeness, but the
+ * public engine APIs reject `if` commands as branch members (see
+ * `docs/NESTED_IF_ELSE_ENGINE_LIMITATION.md`), so a pause directly owned
+ * by one `if` is the shape the engine can produce.
+ */
+export function branchHintsForPause(
+  cmds: readonly CommandSummary[],
+  pauseCommand: number,
+): ReadonlyMap<number, BranchSide> {
+  const byId = new Map<number, CommandSummary>();
+  for (const cmd of cmds) byId.set(cmd.id, cmd);
+  const hints = new Map<number, BranchSide>();
+  const inBody = (body: readonly number[] | null | undefined): boolean => {
+    if (body === null || body === undefined) return false;
+    for (const id of body) {
+      if (id === pauseCommand) return true;
+      // Walk nested branch bodies (the engine rejects them through its
+      // public APIs, but containment stays truthful where they exist).
+      const nested = byId.get(id);
+      if (nested !== undefined && nested.kind === "if") {
+        if (inBody(nested.then_body) || inBody(nested.else_body)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+  for (const cmd of cmds) {
+    if (cmd.kind !== "if") continue;
+    if (inBody(cmd.then_body)) hints.set(cmd.id, "then");
+    else if (inBody(cmd.else_body)) hints.set(cmd.id, "else");
+  }
+  return hints;
 }
 
 /**

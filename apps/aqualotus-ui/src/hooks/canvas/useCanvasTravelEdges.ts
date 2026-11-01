@@ -10,6 +10,13 @@ import type { FlowState } from "../../lib/flow";
 export interface TravelEdge {
   readonly key: string;
   readonly selected: boolean;
+  /**
+   * `true` on the one connection the run is paused at: the indicator
+   * holds at this edge's end — the input block's entry side — until the
+   * wait ends. Derived from `flow.pause` (the engine's own status), so
+   * it stays `false` for every connection of an unpaved run.
+   */
+  readonly pause: boolean;
 }
 
 interface UseCanvasTravelEdgesArgs {
@@ -41,25 +48,46 @@ export function useCanvasTravelEdges(args: UseCanvasTravelEdgesArgs): readonly T
     }
     const travelSeen = new Set<string>();
     const out: TravelEdge[] = [];
-    const push = (key: string, selected: boolean): void => {
-      if (travelSeen.has(key)) return;
+    const pauseCommand = flow.pause;
+    // The travelled connection the pause sits on: its drawn end is the
+    // input block's entry side. A merge kind draws through two segments
+    // (tail rail + join wire); the hold goes on the last one that ends
+    // at the connection's destination — the join wire when the run has
+    // a continuation, the tail rail itself when it does not.
+    let pauseKey: string | null = null;
+    const push = (key: string, selected: boolean, isPause: boolean): void => {
+      if (travelSeen.has(key)) {
+        if (isPause) pauseKey = key;
+        return;
+      }
       travelSeen.add(key);
-      out.push({ key, selected });
+      out.push({ key, selected, pause: false });
+      if (isPause) pauseKey = key;
     };
     flow.edges.forEach((edge) => {
       const selected =
         edge.from === selectedCommandId && edge.fid === selectedFunctionId;
+      const pauseHere = pauseCommand !== null && edge.to === pauseCommand;
       if (edge.kind === "merge") {
-        push(`${edge.fid}:merge:${edge.from}`, selected);
-        const joinOut = joinOutAfter.get(edge.from);
-        if (joinOut !== undefined) push(joinOut, selected);
+        const joinsAfter = joinOutAfter.get(edge.from);
+        if (joinsAfter !== undefined) {
+          // The run continues past the join: the tail rail feeds the join
+          // circle, the join wire carries on into the destination.
+          push(`${edge.fid}:merge:${edge.from}`, selected, false);
+          push(joinsAfter, selected, pauseHere);
+        } else {
+          // The connection ends where it lands: the tail rail feeds the
+          // destination directly (classic merge, or a join circle with
+          // no continuation).
+          push(`${edge.fid}:merge:${edge.from}`, selected, pauseHere);
+        }
         return;
       }
       if (edge.kind === "branch-head") {
         // Branch head edge: match by from/to to find the correct branch edge key
         const branchEdge = branchEdgesByEnds.get(`${edge.fid}:${edge.from}:${edge.to}`);
         if (branchEdge !== undefined) {
-          push(branchEdge.key, selected);
+          push(branchEdge.key, selected, pauseHere);
         }
         return;
       }
@@ -67,8 +95,9 @@ export function useCanvasTravelEdges(args: UseCanvasTravelEdgesArgs): readonly T
       const chainKey = `${edge.fid}:${edge.from}`;
       const drawn = byKey.get(chainKey);
       if (drawn === undefined) return;
-      push(drawn.key, selected);
+      push(drawn.key, selected, pauseHere);
     });
-    return out;
+    if (pauseKey === null) return out;
+    return out.map((e) => (e.key === pauseKey ? { ...e, pause: true } : e));
   }, [edges, flow, selectedCommandId, selectedFunctionId]);
 }

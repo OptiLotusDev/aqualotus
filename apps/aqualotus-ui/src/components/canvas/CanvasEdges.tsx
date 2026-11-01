@@ -94,6 +94,11 @@ export default function CanvasEdges(
     worldH,
   } = props;
 
+  // The connection the run is paused at: the indicator holds at its end
+  // (the input block's entry side) for the whole wait.
+  const pauseKey =
+    travelEdges.find((edge) => edge.pause === true)?.key ?? null;
+
   const svgContent = (
     <>
       <defs>
@@ -118,6 +123,7 @@ export default function CanvasEdges(
         linkMs={linkMs}
         runId={runId}
         reduced={reduced}
+        pauseKey={pauseKey}
       />
       {previewElement}
     </>

@@ -234,6 +234,7 @@ describe("VisualEditor interactions", () => {
     const props = baseProps();
     const flow: FlowState = {
       runId: 1,
+      pause: null,
       edges: [{ fid: 0, from: 1, to: 2, kind: "chain" }],
       linkMs: 300,
     };

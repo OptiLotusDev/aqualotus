@@ -371,3 +371,259 @@ describe("useFlowGlow", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 });
+
+describe("useFlowGlow — waiting on input", () => {
+  /** declare → input → print: the plain waiting chain. */
+  function inputCommands(): ProgramSnapshot["commands"] {
+    return [
+      { id: 1, kind: "declare", next: 2, var: "n", ty: "int32", expr: "41" },
+      { id: 2, kind: "input", next: 3, ty: "int32" },
+      { id: 3, kind: "print", next: null, template: '"{n}"' },
+    ] as ProgramSnapshot["commands"];
+  }
+
+  /** The same commands, mid-`if` with the input as the branch's member. */
+  function branchedInputCommands(): ProgramSnapshot["commands"] {
+    return [
+      { id: 1, kind: "declare", next: 2, var: "n", ty: "int32", expr: "41" },
+      { id: 2, kind: "if", next: 5, then_body: [3], else_body: [] },
+      { id: 3, kind: "input", next: 5, ty: "int32" },
+      { id: 5, kind: "print", next: null, template: '"{n}"' },
+    ] as ProgramSnapshot["commands"];
+  }
+
+  /** Two `if`s in a row, each holding an input in its branch. */
+  function twiceBranchedInputCommands(): ProgramSnapshot["commands"] {
+    return [
+      { id: 1, kind: "declare", next: 2, var: "n", ty: "int32", expr: "41" },
+      { id: 2, kind: "if", next: 8, then_body: [3], else_body: [] },
+      { id: 3, kind: "input", next: 8, ty: "int32" },
+      { id: 8, kind: "if", next: 11, then_body: [9], else_body: [] },
+      { id: 9, kind: "input", next: 11, ty: "int32" },
+      { id: 11, kind: "print", next: null, template: '"{n}"' },
+    ] as ProgramSnapshot["commands"];
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.mocked(optilotus_if_condition).mockImplementation(() => ({
+      status: "error",
+      kind: "PackageError",
+      command: null,
+      message: "no literal condition",
+    }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("ends the travel at the connection entering the input the run waits on", () => {
+    const { result, rerender } = renderHook(
+      ({ program }: { program: ProgramSnapshot }) => useFlowGlow(program),
+      { initialProps: { program: snapshot(inputCommands()) } },
+    );
+    act(() => {
+      result.current.startFlow();
+    });
+    // The run started; then the engine paused at the input block 2.
+    rerender({
+      program: {
+        ...snapshot(inputCommands()),
+        pendingInput: { command: 2, ty: "int32" },
+      },
+    });
+    // The travelled connections end at the one that enters the input —
+    // nothing behind it has run.
+    expect(result.current.flow?.pause).toBe(2);
+    expect(result.current.flow?.edges).toEqual([
+      { fid: 0, from: 1, to: 2, kind: "chain" },
+    ]);
+    // While the engine waits, nothing is wound down: the sweep stays
+    // paused exactly as long as the engine is.
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("travels nothing when the run waits at the chain head", () => {
+    const { result, rerender } = renderHook(
+      ({ program }: { program: ProgramSnapshot }) => useFlowGlow(program),
+      { initialProps: { program: snapshot(inputCommands()) } },
+    );
+    act(() => {
+      result.current.startFlow();
+    });
+    rerender({
+      program: {
+        ...snapshot(inputCommands()),
+        pendingInput: { command: 1, ty: "int32" },
+      },
+    });
+    // The head never reached its successor: no connection has run.
+    expect(result.current.flow).toBeNull();
+  });
+
+  it("a pause inside an `if` branch proves that branch, and resuming continues", () => {
+    const commands = branchedInputCommands();
+    const { result, rerender } = renderHook(
+      ({ program }: { program: ProgramSnapshot }) => useFlowGlow(program),
+      { initialProps: { program: snapshot(commands) } },
+    );
+    act(() => {
+      result.current.startFlow();
+    });
+    // The engine run through the branch and sat down at its input
+    // (block 3): its own pause proves the `then` side — the empty
+    // window while waiting proves nothing.
+    rerender({
+      program: {
+        ...snapshot(commands),
+        pendingInput: { command: 3, ty: "int32" },
+      },
+    });
+    expect(result.current.flow?.pause).toBe(3);
+    expect(result.current.flow?.edges).toEqual([
+      { fid: 0, from: 1, to: 2, kind: "chain" },
+      { fid: 0, from: 2, to: 3, kind: "branch-head" },
+    ]);
+    expect(vi.getTimerCount()).toBe(0);
+    // Valid input: the run went on and finished. The branch stays
+    // decided by the same pause proof — the sweep continues over the
+    // merge and the continuation with the same prefix.
+    rerender({
+      program: { ...snapshot(commands), run: okRun(["42"]) },
+    });
+    expect(result.current.flow?.pause).toBeNull();
+    expect(result.current.flow?.edges).toEqual([
+      { fid: 0, from: 1, to: 2, kind: "chain" },
+      { fid: 0, from: 2, to: 3, kind: "branch-head" },
+      { fid: 0, from: 3, to: 5, kind: "merge" },
+      { fid: 0, from: 2, to: 5, kind: "chain" },
+    ]);
+    // The resumed sweep is a complete sweep: it winds down on its own.
+    act(() => {
+      vi.advanceTimersByTime(2100);
+    });
+    expect(result.current.flow).toBeNull();
+  });
+
+  it("keeps the branch proofs of every pause of one run", () => {
+    const commands = twiceBranchedInputCommands();
+    const { result, rerender } = renderHook(
+      ({ program }: { program: ProgramSnapshot }) => useFlowGlow(program),
+      { initialProps: { program: snapshot(commands) } },
+    );
+    act(() => {
+      result.current.startFlow();
+    });
+    // First wait: the input of the first `if`'s branch.
+    rerender({
+      program: {
+        ...snapshot(commands),
+        pendingInput: { command: 3, ty: "int32" },
+      },
+    });
+    expect(result.current.flow?.edges).toEqual([
+      { fid: 0, from: 1, to: 2, kind: "chain" },
+      { fid: 0, from: 2, to: 3, kind: "branch-head" },
+    ]);
+    // Valid input 1: the run resumed and sat down at the *next*
+    // branch's input in the very same update.
+    rerender({
+      program: {
+        ...snapshot(commands),
+        pendingInput: { command: 9, ty: "int32" },
+      },
+    });
+    // The first branch is still decided by its own pause (window is
+    // empty again while waiting), and the second one is now proven by
+    // its own: the walk ends at the wire into the second input.
+    expect(result.current.flow?.pause).toBe(9);
+    expect(result.current.flow?.edges).toEqual([
+      { fid: 0, from: 1, to: 2, kind: "chain" },
+      { fid: 0, from: 2, to: 3, kind: "branch-head" },
+      { fid: 0, from: 3, to: 8, kind: "merge" },
+      { fid: 0, from: 2, to: 8, kind: "chain" },
+      { fid: 0, from: 8, to: 9, kind: "branch-head" },
+    ]);
+    // Valid input 2: the run finished. Both pauses' proofs decide
+    // their branches — the full executed path travels.
+    rerender({
+      program: { ...snapshot(commands), run: okRun(["42"]) },
+    });
+    expect(result.current.flow?.edges).toEqual([
+      { fid: 0, from: 1, to: 2, kind: "chain" },
+      { fid: 0, from: 2, to: 3, kind: "branch-head" },
+      { fid: 0, from: 3, to: 8, kind: "merge" },
+      { fid: 0, from: 2, to: 8, kind: "chain" },
+      { fid: 0, from: 8, to: 9, kind: "branch-head" },
+      { fid: 0, from: 9, to: 11, kind: "merge" },
+      { fid: 0, from: 8, to: 11, kind: "chain" },
+    ]);
+  });
+
+  it("a failed input ends at the same block the sweep held at", () => {
+    const { result, rerender } = renderHook(
+      ({ program }: { program: ProgramSnapshot }) => useFlowGlow(program),
+      { initialProps: { program: snapshot(inputCommands()) } },
+    );
+    act(() => {
+      result.current.startFlow();
+    });
+    rerender({
+      program: {
+        ...snapshot(inputCommands()),
+        pendingInput: { command: 2, ty: "int32" },
+      },
+    });
+    expect(result.current.flow?.edges).toEqual([
+      { fid: 0, from: 1, to: 2, kind: "chain" },
+    ]);
+    // The submission failed to parse: the engine blames the input
+    // block itself, the wait is gone, and the sweep keeps its stop.
+    rerender({
+      program: {
+        ...snapshot(inputCommands()),
+        error: {
+          status: "error",
+          kind: "InputParse",
+          command: 2,
+          message: "not a number",
+        },
+        errorBlockId: 2,
+      },
+    });
+    expect(result.current.flow?.pause).toBeNull();
+    expect(result.current.flow?.edges).toEqual([
+      { fid: 0, from: 1, to: 2, kind: "chain" },
+    ]);
+  });
+
+  it("a cancelled or cleared session stops at the input the engine reached", () => {
+    const { result, rerender } = renderHook(
+      ({ program }: { program: ProgramSnapshot }) => useFlowGlow(program),
+      { initialProps: { program: snapshot(inputCommands()) } },
+    );
+    act(() => {
+      result.current.startFlow();
+    });
+    rerender({
+      program: {
+        ...snapshot(inputCommands()),
+        pendingInput: { command: 2, ty: "int32" },
+      },
+    });
+    // The user cancelled: the wait ended with no run result and no
+    // error — the sweep still ends at the block the engine had
+    // actually reached.
+    rerender({ program: { ...snapshot(inputCommands()) } });
+    expect(result.current.flow?.pause).toBeNull();
+    expect(result.current.flow?.edges).toEqual([
+      { fid: 0, from: 1, to: 2, kind: "chain" },
+    ]);
+    // …and the freeze winds down on its own afterwards.
+    act(() => {
+      vi.advanceTimersByTime(1550);
+    });
+    expect(result.current.flow).toBeNull();
+  });
+});

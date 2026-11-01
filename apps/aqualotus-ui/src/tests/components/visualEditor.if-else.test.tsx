@@ -542,6 +542,7 @@ describe("VisualEditor vertical If/Else", () => {
   it("travels a merge edge through the join's tail rail and continuation", () => {
     const flow: FlowState = {
       runId: 1,
+      pause: null,
       edges: [
         { fid: 0, from: 1, to: 2, kind: "branch-head" },
         { fid: 0, from: 10, to: 5, kind: "merge" },
@@ -575,6 +576,73 @@ describe("VisualEditor vertical If/Else", () => {
         ".flow-travel circle.flow-dot",
       ).length,
     ).toBe(2);
+  });
+
+  it("holds the merge pause at the drawn end the connection lands on", () => {
+    vi.useFakeTimers();
+    try {
+      // The run waits at block 5 (the merge's destination): however the
+      // connection is drawn, the hold sits on its last segment — the
+      // one that ends at the block's entry side.
+      const flow: FlowState = {
+        runId: 1,
+        pause: 5,
+        edges: [
+          { fid: 0, from: 1, to: 2, kind: "branch-head" },
+          { fid: 0, from: 10, to: 5, kind: "merge" },
+        ],
+        linkMs: 300,
+      };
+      const withJoin = render(
+        <VisualEditor
+          {...baseProps()}
+          commandsByFunction={{ 0: IF_BRANCH_COMMANDS, 1: HELPER_COMMANDS }}
+          layoutStore={IF_BRANCH_LAYOUT}
+          mergeJoins={{ 1: { on: true, pos: null } }}
+          flow={flow}
+        />,
+      );
+      const joined = withJoin.container.querySelectorAll(
+        ".flow-travel circle.flow-dot",
+      );
+      expect(joined.length).toBe(3);
+      // The tail rail travels past, and the hold continues on the join
+      // wire — the segment that actually enters block 5.
+      act(() => {
+        vi.advanceTimersByTime(1200);
+      });
+      expect((joined[0] as SVGCircleElement).style.opacity).toBe("0");
+      expect((joined[1] as SVGCircleElement).style.opacity).toBe("0");
+      expect((joined[2] as SVGCircleElement).style.opacity).toBe("1");
+      expect(Number((joined[2] as SVGCircleElement).getAttribute("cx"))).toBe(
+        100,
+      );
+
+      // Classic merge, no join circle: the tail rail itself ends at the
+      // destination, so the hold rides it.
+      const withoutJoin = render(
+        <VisualEditor
+          {...baseProps()}
+          commandsByFunction={{ 0: IF_BRANCH_COMMANDS, 1: HELPER_COMMANDS }}
+          layoutStore={IF_BRANCH_LAYOUT}
+          flow={flow}
+        />,
+      );
+      const plain = withoutJoin.container.querySelectorAll(
+        ".flow-travel circle.flow-dot",
+      );
+      expect(plain.length).toBe(2);
+      act(() => {
+        vi.advanceTimersByTime(900);
+      });
+      expect((plain[0] as SVGCircleElement).style.opacity).toBe("0");
+      expect((plain[1] as SVGCircleElement).style.opacity).toBe("1");
+      expect(Number((plain[1] as SVGCircleElement).getAttribute("cx"))).toBe(
+        100,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("previews a join-sourced wire from the join circle's own out port", () => {

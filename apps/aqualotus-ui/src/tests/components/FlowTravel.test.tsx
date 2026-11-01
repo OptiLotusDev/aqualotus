@@ -14,11 +14,13 @@ const LINK_MS = 300;
 const PATH_LEN = 100;
 
 interface HarnessProps {
-  readonly edges: { key: string; selected: boolean }[];
+  readonly edges: { key: string; selected: boolean; pause?: boolean }[];
   readonly paths: ReadonlyMap<string, SVGPathElement>;
   readonly linkMs?: number;
   readonly runId?: number;
   readonly reduced?: boolean;
+  /** The key of the paused connection (`null` while nothing waits). */
+  readonly pauseKey?: string | null;
 }
 
 /** A connection path the indicator can ride. */
@@ -35,7 +37,14 @@ function pathsOf(keys: readonly string[]): Map<string, SVGPathElement> {
 
 /** The indicator of the given connections. */
 function Harness(props: HarnessProps): ReactElement {
-  const { edges, paths, linkMs = LINK_MS, runId = 1, reduced = false } = props;
+  const {
+    edges,
+    paths,
+    linkMs = LINK_MS,
+    runId = 1,
+    reduced = false,
+    pauseKey = null,
+  } = props;
   return (
     <svg>
       <FlowTravel
@@ -44,6 +53,7 @@ function Harness(props: HarnessProps): ReactElement {
         linkMs={linkMs}
         runId={runId}
         reduced={reduced}
+        pauseKey={pauseKey}
       />
     </svg>
   );
@@ -232,5 +242,210 @@ describe("FlowTravel", () => {
     expect(path?.getAttribute("stroke")).toBeNull();
     expect(path?.getAttribute("stroke-width")).toBeNull();
     expect(container.querySelectorAll("path").length).toBe(0);
+  });
+
+  it("holds at the paused connection's end while the run waits for input", () => {
+    const { container } = render(
+      <Harness
+        edges={[
+          { key: "e1", selected: false, pause: true },
+          { key: "e2", selected: false },
+        ]}
+        paths={pathsOf(["e1", "e2"])}
+        pauseKey="e1"
+      />,
+    );
+    const held = head(container, 0);
+    const later = head(container, 1);
+    // The connection travels until its end…
+    advance(LINK_MS / 2);
+    expect(getOpacity(held)).toBe("1");
+    // …and the indicator stops there — the input block's entry side —
+    // however many frames pass while the run waits.
+    advance(LINK_MS * 3);
+    expect(getOpacity(held)).toBe("1");
+    expect(Number(held.getAttribute("cx"))).toBe(PATH_LEN);
+    // Nothing past the input moves while the run waits.
+    expect(getOpacity(later)).toBe("0");
+    expect(Number(later.getAttribute("cx") ?? "0")).toBe(0);
+    // Still there, unmoved, after waiting longer still.
+    advance(LINK_MS * 4);
+    expect(getOpacity(held)).toBe("1");
+    expect(Number(held.getAttribute("cx"))).toBe(PATH_LEN);
+  });
+
+  it("resumes from the hold: the next connection travels without a restart", () => {
+    const { container, rerender } = render(
+      <Harness
+        edges={[
+          { key: "e1", selected: false, pause: true },
+          { key: "e2", selected: false },
+        ]}
+        paths={pathsOf(["e1", "e2"])}
+        pauseKey="e1"
+      />,
+    );
+    advance(LINK_MS * 2);
+    // The valid input arrived: the wait ended with the same run.
+    rerender(
+      <Harness
+        edges={[
+          { key: "e1", selected: false },
+          { key: "e2", selected: false },
+        ]}
+        paths={pathsOf(["e1", "e2"])}
+        pauseKey={null}
+      />,
+    );
+    // The held connection completes its fade the way every finished
+    // link does…
+    advance(16);
+    expect(getOpacity(head(container, 0))).toBe("0");
+    // …and the next connection is already underway, right after the
+    // hold: the sweep continued instead of starting over.
+    const second = head(container, 1);
+    expect(getOpacity(second)).toBe("1");
+    const resumed = Number(second.getAttribute("cx"));
+    expect(resumed).toBeLessThan(PATH_LEN / 2);
+    // It moves forward in the same rhythm, never back and never a
+    // restart from the sweep's top.
+    advance(16);
+    const underway = Number(second.getAttribute("cx"));
+    expect(underway).toBeGreaterThan(resumed);
+    expect(underway).toBeLessThan(PATH_LEN / 2);
+    // …keeps its own rhythm to the destination.
+    advance(LINK_MS);
+    expect(getOpacity(second)).toBe("0");
+  });
+
+  it("holds again at a further input of the same run (two waits)", () => {
+    const { container, rerender } = render(
+      <Harness
+        edges={[
+          { key: "e1", selected: false, pause: true },
+          { key: "e2", selected: false },
+          { key: "e3", selected: false },
+        ]}
+        paths={pathsOf(["e1", "e2", "e3"])}
+        pauseKey="e1"
+      />,
+    );
+    advance(LINK_MS * 2);
+    // The user's input resumed the run and the engine immediately
+    // paused again — one batched update moves the hold to e3.
+    rerender(
+      <Harness
+        edges={[
+          { key: "e1", selected: false },
+          { key: "e2", selected: false },
+          { key: "e3", selected: false, pause: true },
+        ]}
+        paths={pathsOf(["e1", "e2", "e3"])}
+        pauseKey="e3"
+      />,
+    );
+    advance(16);
+    // The middle connection travels away.
+    expect(getOpacity(head(container, 0))).toBe("0");
+    expect(getOpacity(head(container, 1))).toBe("1");
+    // …and the hold continues at the further input's end.
+    advance(LINK_MS * 2);
+    const third = head(container, 2);
+    expect(getOpacity(third)).toBe("1");
+    expect(Number(third.getAttribute("cx"))).toBe(PATH_LEN);
+    expect(getOpacity(head(container, 1))).toBe("0");
+  });
+
+  it("fades the held dot once when the run fails past the input", () => {
+    const { container, rerender } = render(
+      <Harness
+        edges={[
+          { key: "e1", selected: false, pause: true },
+          { key: "e2", selected: false },
+        ]}
+        paths={pathsOf(["e1", "e2"])}
+        pauseKey="e1"
+      />,
+    );
+    advance(LINK_MS * 2);
+    // The failed submission: the wait ends and the sweep is truncated
+    // to the connection that entered the input.
+    rerender(
+      <Harness
+        edges={[{ key: "e1", selected: false }]}
+        paths={pathsOf(["e1"])}
+        pauseKey={null}
+      />,
+    );
+    advance(16);
+    const held = head(container, 0);
+    // No hold survives the failure: the indicator fades as a finished
+    // link and nothing stays lit for a run that no longer exists.
+    expect(getOpacity(held)).toBe("0");
+    advance(LINK_MS * 2);
+    expect(getOpacity(held)).toBe("0");
+  });
+
+  it("restarts the sweep on a new run instead of realigning after a hold", () => {
+    const { container, rerender } = render(
+      <Harness
+        edges={[
+          { key: "e1", selected: false, pause: true },
+          { key: "e2", selected: false },
+        ]}
+        paths={pathsOf(["e1", "e2"])}
+        pauseKey="e1"
+      />,
+    );
+    advance(LINK_MS * 2);
+    // A new run travels its own sweep from the top.
+    rerender(
+      <Harness
+        edges={[
+          { key: "e1", selected: false },
+          { key: "e2", selected: false },
+        ]}
+        paths={pathsOf(["e1", "e2"])}
+        runId={2}
+        pauseKey={null}
+      />,
+    );
+    advance(16);
+    const first = head(container, 0);
+    expect(getOpacity(first)).toBe("1");
+    expect(Number(first.getAttribute("cx"))).toBeLessThan(PATH_LEN / 2);
+  });
+
+  it("re-asserts the held dot when the geometry is redrawn during the wait", () => {
+    const { container, rerender } = render(
+      <Harness
+        edges={[
+          { key: "e1", selected: false, pause: true },
+          { key: "e2", selected: false },
+        ]}
+        paths={pathsOf(["e1", "e2"])}
+        pauseKey="e1"
+      />,
+    );
+    advance(LINK_MS * 2);
+    // The canvas redraws its connections (an edit elsewhere, a drag)
+    // while the run keeps waiting.
+    rerender(
+      <Harness
+        edges={[
+          { key: "e1", selected: false, pause: true },
+          { key: "e2", selected: false },
+        ]}
+        paths={pathsOf(["e1", "e2"])}
+        pauseKey="e1"
+      />,
+    );
+    advance(16);
+    // The held indicator survives the redraw: still at the wait's end,
+    // still opaque, on the freshly drawn geometry.
+    const held = head(container, 0);
+    expect(getOpacity(held)).toBe("1");
+    expect(Number(held.getAttribute("cx"))).toBe(PATH_LEN);
+    expect(getOpacity(head(container, 1))).toBe("0");
   });
 });

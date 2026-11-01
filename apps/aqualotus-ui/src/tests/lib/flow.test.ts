@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { BranchCandidate } from "../../lib/flow";
+import type { BranchCandidate, BranchSide } from "../../lib/flow";
 import {
   branchCandidate,
+  branchHintsForPause,
   candidateProven,
   candidateViable,
   chainPrintCount,
@@ -34,7 +35,7 @@ function cmds(...entries: readonly CmdSeed[]): readonly CommandSummary[] {
 
 function state(edges: FlowState["edges"]): FlowState {
   const timings = flowTimings(edges.length);
-  return { runId: 1, edges, ...timings };
+  return { runId: 1, edges, pause: null, ...timings };
 }
 
 describe("resolveRunPath", () => {
@@ -345,6 +346,173 @@ describe("resolveRunPath", () => {
   });
 });
 
+describe("resolveRunPath stop command", () => {
+  it("ends the walk at the edge entering the command it stops at", () => {
+    // The engine waits at (or last reached) the input block 2: the
+    // connections travel up to the one that enters it, and nothing
+    // after it exists yet.
+    const graph = cmds(
+      { id: 1, kind: "declare", next: 2 },
+      { id: 2, kind: "input", next: 3 },
+      { id: 3, kind: "print", next: null },
+    );
+    const edges = resolveRunPath(graph, 1, 0, [], undefined, 2);
+    expect(edges).toEqual([{ fid: 0, from: 1, to: 2, kind: "chain" }]);
+    expect(edges[edges.length - 1]?.to).toBe(2);
+  });
+
+  it("stops the same way once the session ended (cancel/clear)", () => {
+    // The engine no longer waits, but it last reached the input: the
+    // sweep still ends at the connection that entered it — it travels
+    // no execution that did not happen.
+    const graph = cmds(
+      { id: 1, kind: "declare", next: 2 },
+      { id: 2, kind: "input", next: 3 },
+      { id: 3, kind: "print", next: null },
+    );
+    expect(resolveRunPath(graph, 1, 0, [], undefined, 2)).toEqual([
+      { fid: 0, from: 1, to: 2, kind: "chain" },
+    ]);
+  });
+
+  it("leaves nothing to travel when the stop is the chain head", () => {
+    const graph = cmds(
+      { id: 1, kind: "input", next: 2 },
+      { id: 2, kind: "print", next: null },
+    );
+    expect(resolveRunPath(graph, 1, 0, [], undefined, 1)).toEqual([]);
+  });
+
+  it("stops at the branch wire into a paused branch head", () => {
+    // The engine sits inside the `then` branch (the hint proves it) at
+    // its head: the connection that carried it in is the branch wire,
+    // and no merge or continuation exists yet.
+    const graph = cmds(
+      { id: 1, kind: "declare", next: 2 },
+      { id: 2, kind: "if", next: 5, then_body: [3], else_body: [] },
+      { id: 3, kind: "input", next: 5 },
+      { id: 5, kind: "print", next: null },
+    );
+    const edges = resolveRunPath(
+      graph,
+      1,
+      0,
+      [],
+      undefined,
+      3,
+      new Map<number, BranchSide>([[2, "then"]]),
+    );
+    expect(edges).toEqual([
+      { fid: 0, from: 1, to: 2, kind: "chain" },
+      { fid: 0, from: 2, to: 3, kind: "branch-head" },
+    ]);
+  });
+
+  it("stops at the column link into a paused mid-branch member", () => {
+    const graph = cmds(
+      { id: 1, kind: "declare", next: 2 },
+      { id: 2, kind: "if", next: 6, then_body: [3, 4], else_body: [] },
+      { id: 3, kind: "print", next: null, template: '"a"' },
+      { id: 4, kind: "input", next: 6 },
+      { id: 6, kind: "print", next: null },
+    );
+    const edges = resolveRunPath(
+      graph,
+      1,
+      0,
+      [],
+      undefined,
+      4,
+      new Map<number, BranchSide>([[2, "then"]]),
+    );
+    expect(edges).toEqual([
+      { fid: 0, from: 1, to: 2, kind: "chain" },
+      { fid: 0, from: 2, to: 3, kind: "branch-head" },
+      { fid: 0, from: 3, to: 4, kind: "chain" },
+    ]);
+  });
+
+  it("stops at the connection the merge delivered into a paused join", () => {
+    // The branch ran and merged into the join, where the next input
+    // waits: the walk ends there — the input's own outgoing edge, the
+    // continuation, never travelled.
+    const graph = cmds(
+      { id: 1, kind: "declare", next: 2 },
+      { id: 2, kind: "if", next: 5, then_body: [3], else_body: [] },
+      { id: 3, kind: "print", next: null, template: '"a"' },
+      { id: 5, kind: "input", next: 6 },
+      { id: 6, kind: "print", next: null },
+    );
+    const edges = resolveRunPath(
+      graph,
+      1,
+      0,
+      [],
+      undefined,
+      5,
+      new Map<number, BranchSide>([[2, "then"]]),
+    );
+    expect(edges[edges.length - 1]?.to).toBe(5);
+    expect(edges).toContainEqual({ fid: 0, from: 3, to: 5, kind: "merge" });
+    expect(edges).not.toContainEqual({ fid: 0, from: 5, to: 6, kind: "chain" });
+  });
+});
+
+describe("branchHintsForPause", () => {
+  it("names each if whose branch holds the paused input", () => {
+    const graph = cmds(
+      { id: 1, kind: "if", next: 9, then_body: [2], else_body: [] },
+      { id: 2, kind: "input", next: 9 },
+      { id: 5, kind: "if", next: null, then_body: [6], else_body: [] },
+      { id: 6, kind: "print", next: null },
+      { id: 9, kind: "print", next: null },
+    );
+    const hints = branchHintsForPause(graph, 2);
+    expect(hints.get(1)).toBe("then");
+    // An `if` the pause does not sit inside is never named.
+    expect(hints.has(5)).toBe(false);
+  });
+
+  it("names the else side the same way", () => {
+    const graph = cmds(
+      { id: 1, kind: "if", next: 9, then_body: [], else_body: [2] },
+      { id: 2, kind: "input", next: 9 },
+      { id: 9, kind: "print", next: null },
+    );
+    const hints = branchHintsForPause(graph, 2);
+    expect(hints.get(1)).toBe("else");
+    expect(hints.size).toBe(1);
+  });
+
+  it("walks nested branch bodies for containment", () => {
+    // The engine rejects nested ifs through its public APIs, but where
+    // lists exist the containment is truthful: the outer if knows its
+    // branch holds the input.
+    const graph = cmds(
+      { id: 1, kind: "if", next: null, then_body: [2], else_body: [] },
+      { id: 2, kind: "if", next: null, then_body: [3], else_body: undefined },
+      { id: 3, kind: "input", next: null },
+    );
+    const hints = branchHintsForPause(graph, 3);
+    expect(hints.get(1)).toBe("then");
+    expect(hints.get(2)).toBe("then");
+  });
+
+  it("returns nothing for an input no branch owns", () => {
+    const graph = cmds(
+      { id: 1, kind: "if", next: 5, then_body: [2], else_body: [] },
+      { id: 2, kind: "print", next: 5 },
+      { id: 4, kind: "input", next: 5 },
+      { id: 5, kind: "print", next: null },
+    );
+    // The input sits on the chain, not inside a branch: no `if` is
+    // proven by it.
+    expect(branchHintsForPause(graph, 4).size).toBe(0);
+    // An id the engine could not have produced either.
+    expect(branchHintsForPause(graph, 99).size).toBe(0);
+  });
+});
+
 describe("visibleBranchBody", () => {
   const byId = new Map<number, CommandSummary>([
     [3, { id: 3, kind: "print", next: null, template: '"x"' }],
@@ -547,6 +715,38 @@ describe("decideBranch", () => {
     expect(
       decideBranch(outer, 0, ["a", "x"], byIdNested, conditions),
     ).toBe(null);
+  });
+
+  it("the run's own pause hint decides before any envelope heuristic", () => {
+    // The window alone would prove ELSE (its literal print shows up at
+    // the exact position). The run's pause sat inside THEN — the engine
+    // is sitting in that branch — which is engine truth of its own and
+    // outvotes the window's guesswork.
+    const c = cmd(2, [3], [4], 5);
+    expect(
+      decideBranch(
+        c,
+        0,
+        ["b", "x"],
+        byId,
+        undefined,
+        new Map<number, BranchSide>([[2, "then"]]),
+      ),
+    ).toBe("then");
+  });
+
+  it("a hint belonging to another if never decides this one", () => {
+    const c = cmd(2, [3], [4], 5);
+    expect(
+      decideBranch(
+        c,
+        0,
+        ["b", "x"],
+        byId,
+        undefined,
+        new Map<number, BranchSide>([[7, "then"]]),
+      ),
+    ).toBe("else");
   });
 });
 

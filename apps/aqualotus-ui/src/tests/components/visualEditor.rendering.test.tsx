@@ -297,6 +297,7 @@ describe("VisualEditor rendering", () => {
   it("travels the executed chain along its own connections", () => {
     const flow: FlowState = {
       runId: 1,
+      pause: null,
       edges: [
         { fid: 0, from: 1, to: 2, kind: "chain" },
         { fid: 0, from: 2, to: 3, kind: "chain" },
@@ -317,6 +318,7 @@ describe("VisualEditor rendering", () => {
   it("restarts the travel on a new run instead of stacking loops", () => {
     const flow: FlowState = {
       runId: 1,
+      pause: null,
       edges: [{ fid: 0, from: 1, to: 2, kind: "chain" }],
       linkMs: 300,
     };
