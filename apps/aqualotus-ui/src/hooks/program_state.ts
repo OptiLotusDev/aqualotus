@@ -50,6 +50,22 @@ export interface ProgramSnapshot {
   readonly run: RunResult | null;
   readonly running: boolean;
   /**
+   * The console transcript for the current or last run: every printed
+   * line the engine has reported, in execution order.
+   *
+   * The wire exposes output only on the final `ok` envelope today — the
+   * `waiting_input` and `error` envelopes carry none (probe evidence in
+   * `docs/INCREMENTAL_CONSOLE_OUTPUT_LIMITATION.md`). This field is
+   * therefore a possibly-truncated window of the session's real output,
+   * and it grows only when the engine hands lines over. The transitions
+   * in {@link applyRunStatus} are deliberately written so an engine
+   * change that starts printing lines on `waiting_input` (or on the
+   * error envelope) lands here with no further UI work: a status that
+   * carries output replaces the window (the engine's array is the
+   * accumulated truth); a status that carries none leaves it untouched.
+   */
+  readonly runPrinted: readonly string[];
+  /**
    * The paused resumable run: the input command it waits on and the
    * type it expects. `null` when no run waits for input.
    */
@@ -104,6 +120,7 @@ export const EMPTY: ProgramSnapshot = {
   selectedCommandId: null,
   run: null,
   running: false,
+  runPrinted: [],
   pendingInput: null,
   durationMs: null,
   busy: false,
@@ -223,7 +240,22 @@ export function castingValidationError(message: string): OptilotusError {
 }
 
 
-/** Apply a resumable run status to the snapshot. */
+/** Apply a resumable run status to the snapshot.
+ *
+ * The console transcript ({@link ProgramSnapshot.runPrinted}) follows
+ * one rule per status family, so the console can never log a line the
+ * engine did not report and can never lose one it did:
+ *
+ * - `waiting_input`: the pause envelope carries no output, so the
+ *   transcript stays exactly as it is — nothing is appended (the engine
+ *   reported none) and nothing is cleared (a pause must never hide what
+ *   the console already shows).
+ * - `error`: a failure never erases the console. Every line reported
+ *   before the failure stays visible above the error notice.
+ * - `ok`: the finished envelope carries the session's accumulated
+ *   printed array. It replaces the window whole — stacking it onto the
+ *   previous window would log lines twice.
+ */
 export function applyRunStatus(
   snapshot: ProgramSnapshot,
   status: RunStatus,
@@ -255,5 +287,6 @@ export function applyRunStatus(
     run: status,
     durationMs,
     recoveryVar: null,
+    runPrinted: status.printed,
   };
 }

@@ -245,6 +245,10 @@ export function useProgram(
               run: null,
               pendingInput: null,
               durationMs: null,
+              // The refreshed program is not the one the old run
+              // executed: its console output cannot survive the refresh
+              // (same lifecycle as `run` above).
+              runPrinted: [],
             }),
           );
       } catch (e: unknown) {
@@ -285,6 +289,7 @@ export function useProgram(
         selectedCommandId: null,
         run: null,
         pendingInput: null,
+        runPrinted: [],
       }));
       load(id);
     },

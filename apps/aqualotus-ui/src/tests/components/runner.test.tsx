@@ -156,4 +156,90 @@ describe("Runner", () => {
     await user.click(screen.getByRole("button", { name: "Show block #3" }));
     expect(onShowBlock).toHaveBeenCalledWith(3);
   });
+
+  it("keeps the console above the prompt while the run waits for input", () => {
+    render(
+      <Runner
+        {...runnerProps()}
+        printed={["hello"]}
+        pendingInput={{ command: 5, ty: "int32" }}
+        onSubmitInput={vi.fn()}
+        onCancelRun={vi.fn()}
+      />,
+    );
+    const transcript = screen.getByTestId("runner-transcript");
+    expect(transcript.textContent).toContain("> hello");
+    // The prompt is mounted below the console, not over it.
+    expect(transcript.nextElementSibling?.getAttribute("data-testid")).toBe(
+      "runner-input",
+    );
+    // The console replaces the idle notice: the panel is a live output.
+    expect(screen.queryByTestId("runner-empty")).toBeNull();
+    expect(screen.getByText("Waiting for input")).toBeDefined();
+  });
+
+  it("keeps the console above the running notice between segments", () => {
+    render(<Runner {...runnerProps()} printed={["hello"]} running={true} />);
+    expect(screen.getByTestId("runner-transcript").textContent).toContain(
+      "> hello",
+    );
+    expect(screen.getByTestId("runner-running")).toBeDefined();
+    expect(screen.getByText("Running…")).toBeDefined();
+  });
+
+  it("keeps the console when the run fails, with the error below it", () => {
+    render(
+      <Runner
+        {...runnerProps()}
+        printed={["hello"]}
+        run={{
+          status: "error",
+          kind: "InputParse",
+          command: 5,
+          message: 'input parse error at 5: invalid int32 input "abc"',
+          detail: 'invalid int32 input "abc"',
+        }}
+      />,
+    );
+    expect(screen.getByTestId("runner-transcript").textContent).toContain(
+      "> hello",
+    );
+    const error = screen.getByTestId("runner-error");
+    expect(error.textContent).toContain("InputParse");
+    // The failure never replaces the printed lines: the console block
+    // sits in front of the error notice.
+    expect(
+      error.previousElementSibling?.getAttribute("data-testid"),
+    ).toBe("runner-transcript");
+  });
+
+  it("renders the engine's reported output exactly once", () => {
+    const { container } = render(
+      <Runner
+        {...runnerProps()}
+        run={{ status: "ok", steps: 2, prints: 2, printed: ["hello", "hello2"], returned: null }}
+        printed={["hello", "hello2"]}
+      />,
+    );
+    // One transcript block — the strongest duplication guard is
+    // structural: no second output surface may exist beside it.
+    const blocks = container.querySelectorAll('[data-testid="runner-transcript"]');
+    expect(blocks.length).toBe(1);
+    const lines = (blocks[0].textContent ?? "").split("\n");
+    expect(lines).toEqual(["> hello", "> hello2"]);
+    // The finished envelope's own count still renders as the meta line
+    // ("Prints 2") without re-rendering the lines themselves.
+    expect(container.textContent).toContain("hello2");
+  });
+
+  it("falls back to the finished result's own lines when no transcript is owned", () => {
+    render(
+      <Runner
+        {...runnerProps()}
+        run={{ status: "ok", steps: 6, prints: 1, printed: ["42"], returned: null }}
+      />,
+    );
+    expect(screen.getByTestId("runner-transcript").textContent).toBe("> 42");
+    expect(screen.getByTestId("runner-success")).toBeDefined();
+  });
 });

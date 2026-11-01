@@ -36,6 +36,9 @@ export function run(ctx: ProgramMutationContext): void {
       pendingInput: null,
       run: null,
       durationMs: null,
+      // A new run starts a fresh console: no line, prompt or error of a
+      // previous execution may survive into this one.
+      runPrinted: [],
     }));
     const started =
       typeof performance !== "undefined" ? performance.now() : 0;
@@ -105,6 +108,7 @@ export function clearRun(ctx: ProgramMutationContext): void {
     run: null,
     durationMs: null,
     pendingInput: null,
+    runPrinted: [],
   }));
 }
 

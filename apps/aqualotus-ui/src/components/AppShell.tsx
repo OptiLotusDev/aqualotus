@@ -703,6 +703,7 @@ export default function AppShell(props: AppShellProps): ReactElement {
         running={program.running}
         pendingInput={program.pendingInput}
         durationMs={program.durationMs}
+        printed={program.runPrinted}
         errorId={errorBlockId}
         busy={program.busy}
         canRun={fid !== null}

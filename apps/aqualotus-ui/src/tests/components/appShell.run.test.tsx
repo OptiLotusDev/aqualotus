@@ -75,4 +75,32 @@ describe("AppShell run action", () => {
     // Still one indicator per connection: no duplicate animation loops.
     expect(container.querySelectorAll("circle.flow-dot").length).toBe(1);
   });
+
+  it("opens the console the moment a new run is in flight", () => {
+    const props = shellProps({ running: true, run: null, pendingInput: null });
+    const { container } = render(<AppShell {...props} />);
+    expect(
+      container.querySelector('section[aria-label="Runner"]'),
+    ).not.toBeNull();
+  });
+
+  it("keeps the console open with a live transcript while a run waits for input", () => {
+    const props = shellProps({
+      running: false,
+      pendingInput: { command: 2, ty: "int32" },
+      runPrinted: ["hello"],
+    });
+    const { container } = render(<AppShell {...props} />);
+    expect(
+      container.querySelector('section[aria-label="Runner"]'),
+    ).not.toBeNull();
+    // Whatever the engine reported so far stays visible above the
+    // pending prompt.
+    const transcript = container.querySelector('[data-testid="runner-transcript"]');
+    expect(transcript).not.toBeNull();
+    expect(transcript?.textContent ?? "").toContain("> hello");
+    expect(
+      container.querySelector('[data-testid="runner-input"]'),
+    ).not.toBeNull();
+  });
 });

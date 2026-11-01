@@ -37,6 +37,14 @@ interface RunnerProps {
   readonly onSubmitInput?: (value: string) => void;
   /** Abandon the paused run (its output is not produced). */
   readonly onCancelRun?: () => void;
+  /**
+   * The console transcript the engine has reported for the live or last
+   * run, in order. The AppShell passes it from the snapshot; a Runner
+   * without it (standalone) falls back to the final `ok` result's own
+   * printed lines, so the component never shows no output when it has
+   * some.
+   */
+  readonly printed?: readonly string[];
 }
 
 function formatDuration(ms: number): string {
@@ -115,6 +123,13 @@ function InputPrompt(props: {
  * icon + text (never color alone); stale output is impossible because
  * every program refresh clears the result upstream. Empty, running,
  * success, and failure states each render explicitly.
+ *
+ * The panel behaves as one persistent console: the transcript stays
+ * mounted with every line the engine has reported, in execution order,
+ * through running segments, input pauses, and terminal states — the
+ * Input prompt and errors appear below it and never replace it. Output
+ * renders exactly once (the transcript is the only printed-out surface,
+ * so a finished `run.printed` cannot duplicate it).
  */
 export default function Runner(props: RunnerProps): ReactElement {
   const {
@@ -129,8 +144,17 @@ export default function Runner(props: RunnerProps): ReactElement {
     onRun,
     onSubmitInput,
     onCancelRun,
+    printed,
   } = props;
   const waiting = pendingInput !== undefined && pendingInput !== null;
+  // One console, one source of lines: the snapshot transcript when the
+  // parent owns it, the finished envelope's own array as fallback.
+  const transcript: readonly string[] =
+    printed !== undefined
+      ? printed
+      : run !== null && run.status === "ok"
+        ? run.printed
+        : [];
   const state = waiting
     ? "busy"
     : running
@@ -197,6 +221,19 @@ export default function Runner(props: RunnerProps): ReactElement {
       </div>
 
       <div style={{ marginTop: 12 }}>
+        {/* The console. Every reported line stays mounted here through
+            running segments and input pauses; the prompt and the errors
+            below append to it and never replace it. */}
+        {transcript.length > 0 ? (
+          <pre
+            className="output-pre"
+            data-testid="runner-transcript"
+            aria-live="polite"
+            aria-label="Program output"
+          >
+            {transcript.map((line) => `> ${line}`).join("\n")}
+          </pre>
+        ) : null}
         {waiting ? (
           <InputPrompt
             key={pendingInput.command}
@@ -212,7 +249,7 @@ export default function Runner(props: RunnerProps): ReactElement {
             <span>Executing main…</span>
           </div>
         ) : null}
-        {run === null && !running && !waiting ? (
+        {run === null && !running && !waiting && transcript.length === 0 ? (
           <div className="notice" data-testid="runner-empty">Run the program to see output here.</div>
         ) : null}
         {run !== null && run.status === "ok" && !running && !waiting ? (
@@ -230,15 +267,11 @@ export default function Runner(props: RunnerProps): ReactElement {
                 </span>
               ) : null}
             </div>
-            {run.printed.length === 0 ? (
+            {transcript.length === 0 ? (
               <div className="notice notice-ok">
                 Run completed — no printed output.
               </div>
-            ) : (
-              <pre className="output-pre" aria-live="polite" aria-label="Program output">
-                {run.printed.map((line) => `> ${line}`).join("\n")}
-              </pre>
-            )}
+            ) : null}
           </div>
         ) : null}
         {run !== null && run.status === "error" && !running && !waiting ? (
