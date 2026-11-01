@@ -28,15 +28,12 @@ import {
   optilotus_listCommands,
   optilotus_listFunctions,
   optilotus_runProgramCancel,
-  optilotus_runProgramProvideInput,
-  optilotus_runProgramStart,
   optilotus_setEntry,
 } from "../lib/optilotus";
 import { HistoryIdMap, type HistoryEntry } from "../lib/history";
 import type { ProgramSnapshot } from "./program_state";
 import {
   EMPTY,
-  applyRunStatus,
   clearFailure,
   failCommand,
   failThrown,
@@ -70,7 +67,13 @@ import {
   deleteCommand as deleteCommandOp,
 } from "./program_commands";
 import { replaceCommand as replaceCommandOp } from "./program_replace";
-import { dismissError as dismissErrorOp } from "./program_execution";
+import {
+  cancelRun as cancelRunOp,
+  clearRun as clearRunOp,
+  dismissError as dismissErrorOp,
+  provideInput as provideInputOp,
+  run as runOp,
+} from "./program_execution";
 import { clearPackage as clearPackageOp } from "./program_package";
 import type { ProgramMutationContext } from "./program_ops";
 
@@ -357,6 +360,7 @@ export function useProgram(
     selectedIdRef,
     pastRef,
     futureRef,
+    sessionActiveRef,
     syncTops,
     pushHistory,
     load,
@@ -387,7 +391,7 @@ export function useProgram(
     ) => appendIntoBranchOp(ctxRef.current!, fid, ifId, branch, targetId, record),
   }), [
     snapshot, setSnapshot, remapRef, plannedRef, selectedIdRef,
-    pastRef, futureRef, syncTops, pushHistory, load,
+    pastRef, futureRef, sessionActiveRef, syncTops, pushHistory, load,
   ]);
 
   // Publish the latest ctx so callbacks (which capture ctxRef, not ctx)
@@ -558,80 +562,16 @@ export function useProgram(
 
   const clearPackage = useCallback((): void => clearPackageOp(ctxRef.current!), []);
 
-  const run = useCallback((): void => {
-    try {
-      if (sessionActiveRef.current) {
-        optilotus_runProgramCancel();
-        sessionActiveRef.current = false;
-      }
-      setSnapshot((prev) => ({
-        ...clearFailure(prev),
-        running: true,
-        pendingInput: null,
-        run: null,
-        durationMs: null,
-      }));
-      const started =
-        typeof performance !== "undefined" ? performance.now() : 0;
-      const result = optilotus_runProgramStart();
-      const durationMs =
-        typeof performance !== "undefined"
-          ? Math.max(0, performance.now() - started)
-          : 0;
-      sessionActiveRef.current = result.status === "waiting_input";
-      setSnapshot((prev) => applyRunStatus(prev, result, durationMs));
-    } catch (e: unknown) {
-      sessionActiveRef.current = false;
-      setSnapshot((prev) => failThrown(prev, e));
-    }
-  }, []);
+  const run = useCallback((): void => runOp(ctxRef.current!), []);
 
-  const provideInput = useCallback((value: string): void => {
-    if (!sessionActiveRef.current) return;
-    try {
-      setSnapshot((prev) => ({
-        ...clearFailure(prev),
-        running: true,
-      }));
-      const started =
-        typeof performance !== "undefined" ? performance.now() : 0;
-      const result = optilotus_runProgramProvideInput(value);
-      const durationMs =
-        typeof performance !== "undefined"
-          ? Math.max(0, performance.now() - started)
-          : 0;
-      sessionActiveRef.current = result.status === "waiting_input";
-      setSnapshot((prev) => applyRunStatus(prev, result, durationMs));
-    } catch (e: unknown) {
-      sessionActiveRef.current = false;
-      setSnapshot((prev) => failThrown(prev, e));
-    }
-  }, []);
+  const provideInput = useCallback(
+    (value: string): void => provideInputOp(ctxRef.current!, value),
+    [],
+  );
 
-  const cancelRun = useCallback((): void => {
-    if (sessionActiveRef.current) {
-      optilotus_runProgramCancel();
-      sessionActiveRef.current = false;
-    }
-    setSnapshot((prev) => ({
-      ...prev,
-      running: false,
-      pendingInput: null,
-    }));
-  }, []);
+  const cancelRun = useCallback((): void => cancelRunOp(ctxRef.current!), []);
 
-  const clearRun = useCallback((): void => {
-    if (sessionActiveRef.current) {
-      optilotus_runProgramCancel();
-      sessionActiveRef.current = false;
-    }
-    setSnapshot((prev) => ({
-      ...prev,
-      run: null,
-      durationMs: null,
-      pendingInput: null,
-    }));
-  }, []);
+  const clearRun = useCallback((): void => clearRunOp(ctxRef.current!), []);
 
   const dismissError = useCallback((): void => dismissErrorOp(ctxRef.current!), []);
 

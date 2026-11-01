@@ -1,4 +1,8 @@
-import type { Dispatch, SetStateAction, MutableRefObject } from "react";
+import type {
+  Dispatch,
+  MutableRefObject,
+  SetStateAction,
+} from "react";
 import type {
   CommandId,
   FunctionId,
@@ -23,6 +27,13 @@ export interface ProgramMutationContext {
   readonly selectedIdRef: MutableRefObject<FunctionId | null>;
   readonly pastRef: MutableRefObject<HistoryEntry[]>;
   readonly futureRef: MutableRefObject<HistoryEntry[]>;
+  /**
+   * `true` while the engine holds a paused (resumable) session for the
+   * projection. Created and owned by `useProgram` (React lifecycle: the
+   * hook cancels the session on refresh); the execution operations in
+   * `program_execution.ts` only read and set it.
+   */
+  readonly sessionActiveRef: MutableRefObject<boolean>;
   readonly syncTops: () => void;
   readonly pushHistory: (entry: Omit<HistoryEntry, "seq">) => void;
   readonly load: (selectedId: FunctionId | null) => void;
