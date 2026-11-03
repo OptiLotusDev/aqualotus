@@ -260,7 +260,10 @@ fn templates_evaluate_arithmetic_expressions() {
     assert_eq!(render_template("\"{x} / {y}\"", &v).unwrap(), "10 / 5");
     assert_eq!(render_template("\"{x} % {y}\"", &v).unwrap(), "10 % 5");
     // Parenthesized expressions.
-    assert_eq!(render_template("\"{x} + {y} * {y}\"", &v).unwrap(), "10 + 5 * 5");
+    assert_eq!(
+        render_template("\"{x} + {y} * {y}\"", &v).unwrap(),
+        "10 + 5 * 5"
+    );
     // Negative results.
     let v = vars(vec![
         ("x".to_string(), Value::Int32(3)),

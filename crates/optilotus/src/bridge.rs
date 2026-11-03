@@ -641,8 +641,12 @@ fn run_status_json(status: crate::run_resumable::RunStatus) -> String {
     use crate::run_resumable::RunStatus;
     let debug = DEBUG_MODE.with(|cell| *cell.borrow());
     match status {
-        RunStatus::WaitingInput { command, ty } => {
-            let mut response = WaitingInputResponse::new(command, ty);
+        RunStatus::WaitingInput {
+            command,
+            ty,
+            printed,
+        } => {
+            let mut response = WaitingInputResponse::new(command, ty).with_printed(printed);
             if debug {
                 response.peek = Some(true);
             }
@@ -655,9 +659,18 @@ fn run_status_json(status: crate::run_resumable::RunStatus) -> String {
             returned,
         } => to_json(&RunOkResponse::new(steps, prints, printed, returned).with_debug(debug)),
         RunStatus::Error(e) => {
-            // record for lastError query
             crate::bridge::record_error(e.clone());
-            to_json(&exec_error_json(&e))
+            let printed = RUN.with(|cell| {
+                cell.borrow()
+                    .as_ref()
+                    .map(|r| r.sink.lines.clone())
+                    .unwrap_or_default()
+            });
+            let mut resp = exec_error_json(&e);
+            if !printed.is_empty() {
+                resp = resp.with_printed(printed);
+            }
+            to_json(&resp)
         }
     }
 }
@@ -791,10 +804,13 @@ pub fn run_program_peek_pending() -> String {
     RUN.with(|cell| {
         if let Some(run) = cell.borrow().as_ref() {
             match run.peek_pending() {
-                Some(p) => to_json(&WaitingInputResponse::new(p.command, p.ty)),
+                Some(p) => to_json(
+                    &WaitingInputResponse::new(p.command, p.ty)
+                        .with_printed(run.sink.lines.clone()),
+                ),
                 None => {
                     if let Some(err) = &run.error {
-                        to_json(&exec_error_json(err))
+                        to_json(&exec_error_json(err).with_printed(run.sink.lines.clone()))
                     } else if run.frames.is_empty() {
                         to_json(&RunOkResponse::new(
                             run.global_steps,
@@ -824,7 +840,19 @@ pub fn run_program_reset() -> String {
 /// Query the last recorded error. Returns `{"status":"idle"}` if none.
 pub fn run_program_last_error() -> String {
     LAST_ERROR.with(|cell| match &*cell.borrow() {
-        Some(err) => to_json(&exec_error_json(err)),
+        Some(err) => {
+            let printed = RUN.with(|cell| {
+                cell.borrow()
+                    .as_ref()
+                    .map(|r| r.sink.lines.clone())
+                    .unwrap_or_default()
+            });
+            let mut resp = exec_error_json(err);
+            if !printed.is_empty() {
+                resp = resp.with_printed(printed);
+            }
+            to_json(&resp)
+        }
         None => to_json(&IdleResponse::default()),
     })
 }

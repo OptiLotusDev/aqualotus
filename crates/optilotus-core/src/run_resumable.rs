@@ -25,6 +25,7 @@ pub enum RunStatus {
     WaitingInput {
         command: CommandId,
         ty: Type,
+        printed: Vec<String>,
     },
     Finished {
         steps: usize,
@@ -115,6 +116,7 @@ impl RunSession {
             return RunStatus::WaitingInput {
                 command: p.command,
                 ty: p.ty,
+                printed: self.sink.lines.clone(),
             };
         }
         if let Some(err) = &self.error {
@@ -132,6 +134,7 @@ impl RunSession {
         RunStatus::WaitingInput {
             command: CommandId(0),
             ty: Type::Void,
+            printed: self.sink.lines.clone(),
         }
     }
 

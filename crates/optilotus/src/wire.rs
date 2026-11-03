@@ -74,6 +74,10 @@ pub struct ErrorResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub function: Option<String>,
+    /// Accumulated printed lines of the failed/paused run, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
+    pub printed: Option<Vec<String>>,
 }
 
 impl ErrorResponse {
@@ -91,6 +95,7 @@ impl ErrorResponse {
             limit: None,
             var: None,
             function: None,
+            printed: None,
         }
     }
 
@@ -112,12 +117,19 @@ impl ErrorResponse {
             limit: None,
             var: None,
             function: None,
+            printed: None,
         }
     }
 
     /// Attach kind-specific detail.
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
+        self
+    }
+
+    /// Attach accumulated printed lines.
+    pub fn with_printed(mut self, printed: Vec<String>) -> Self {
+        self.printed = Some(printed);
         self
     }
 
@@ -406,6 +418,9 @@ pub struct WaitingInputResponse {
     pub ty: Type,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts-bindings", ts(optional))]
+    pub printed: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub peek: Option<bool>,
 }
 
@@ -415,8 +430,15 @@ impl WaitingInputResponse {
             status: STATUS_WAITING_INPUT,
             command: command.0,
             ty,
+            printed: None,
             peek: None,
         }
+    }
+
+    /// Attach the accumulated printed lines of the paused session.
+    pub fn with_printed(mut self, printed: Vec<String>) -> Self {
+        self.printed = Some(printed);
+        self
     }
 }
 

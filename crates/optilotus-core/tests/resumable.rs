@@ -33,7 +33,8 @@ fn pause_at_input_then_resume_and_complete() {
         status,
         run_resumable::RunStatus::WaitingInput {
             command: CommandId(1),
-            ty: Type::Int32
+            ty: Type::Int32,
+            printed: _,
         }
     ));
     let status = run_resumable::provide_input("42");

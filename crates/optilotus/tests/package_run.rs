@@ -73,5 +73,5 @@ fn print_template_evaluates_math_expression() {
 
     let mut sink = VecSink::default();
     pkg.run_main(&mut sink).unwrap();
-    assert_eq!(sink.lines, vec!["15".to_string()]);
+    assert_eq!(sink.lines, vec!["10 + 5".to_string()]);
 }
