@@ -49,7 +49,7 @@ One type per response shape. Each carries a `status` discriminant.
 | `FunctionInfoResponse` | `{status:"ok", id, name, isMain, entry, commandCount}` | `getFunction` |
 | `ListCommandsResponse` | `{status:"ok", commands: CommandSummary[]}` | `listCommands` |
 | `RunOkResponse` | `{status:"ok", steps, prints, printed, returned}` | `runProgram` and friends |
-| `WaitingInputResponse` | `{status:"waiting_input", command, ty}` | resumable run |
+| `WaitingInputResponse` | `{status:"waiting_input", command, ty, printed?}` | resumable run |
 | `ErrorResponse` | see below | every failure |
 
 ### Error envelope
@@ -166,7 +166,7 @@ Pure, headless, unit-tested (`cargo test -p optilotus`):
     `print(fid, template)`, `input(fid, ty)`, `input_into(fid, name, ty)`,
     `cast(fid, name, to, expr)`, `return_(fid, expr)`, `list_commands(fid)`,
     `set_entry(fid, entry?)`, `set_next(fid, cmd, next?)`,
-    `delete_command(fid, cmd)`.
+    `delete_command(fid, cmd)`, `set_location(fid, cmd, x?, y?)`.
   - Branching (`Op::If`, nestable): `eval_cond(fid, expr)` evaluates an
     expression into a hidden `ValueId` for use as a condition;
     `if_(fid, condition, then_body, else_body?)` owns ordered child
@@ -254,6 +254,7 @@ the wire types above.
 - `optilotus_listCommands(fid): string`
 - `optilotus_setEntry(fid, cmd?: number): string` (`null`/omitted clears)
 - `optilotus_setNext(fid, cmd, next?: number): string`
+- `optilotus_setLocation(fid, cmd, x?, y?): string` (opaque canvas metadata)
 - `optilotus_deleteCommand(fid, cmd): string`
 
 **Run**
@@ -322,6 +323,7 @@ Call sites never parse JSON — `JSON.parse` exists only inside this module:
 - `optilotus_listCommands(fid): {status:"ok",commands: CommandSummary[]} | OptilotusError`
 - `optilotus_setEntry(fid, cmd: number | null): {status:"ok"} | OptilotusError`
 - `optilotus_setNext(fid, cmd, next?): {status:"ok"} | OptilotusError`
+- `optilotus_setLocation(fid, cmd, x?, y?): {status:"ok"} | OptilotusError`
 - `optilotus_deleteCommand(fid, cmd): {status:"ok",deleted} | OptilotusError`
 - `optilotus_if(fid, condition, thenBody: CommandSpec[], elseBody?): {status:"ok",id} | OptilotusError`
 - `optilotus_runProgram(): RunResult` — runs `main` by id only.
@@ -339,7 +341,8 @@ Call sites never parse JSON — `JSON.parse` exists only inside this module:
 
 `CommandSummary` kind `"if"` carries optional `condition`, `then_body`,
 `else_body` fields; kind `"declare"` carries an optional `access`
-(`public` | `protected` | `private`).
+(`public` | `protected` | `private`). All kinds carry optional `x`, `y`
+canvas coordinates (opaque UI metadata).
 
 ## Package API (the only API)
 
@@ -510,21 +513,32 @@ two runs, or two packages cannot coexist through the bridge. For native
 
 ### Expression evaluation in templates
 
-When a print template is a single quoted string containing `{variable}`
-references and arithmetic operators, the interpolated result is evaluated
-as an arithmetic expression before printing:
+Print templates are quoted string literals joined by `+`. A quoted piece
+that contains `{variable}` interpolation is evaluated as an arithmetic
+expression when the interpolated result is a valid one; literal-only
+pieces (e.g. `"2 + 3"`) stay literal. Brace-delimited expressions are
+also supported: `{2 + 3}`.
 
 ```ts
 optilotus_declare(0, "x", optilotus_type.int32, "10");
 optilotus_declare(0, "y", optilotus_type.int32, "5");
 optilotus_print(0, '"{x} + {y}"');
 // prints "15" (not "10 + 5")
+
+optilotus_print(0, '"2 + 3"');
+// prints "2 + 3" (literal, no interpolation)
+
+optilotus_print(0, '"2 + 3 = " + {2 + 3}');
+// prints "2 + 3 = 5"
 ```
 
 Rules:
-- The entire quoted string must be a valid arithmetic expression after
-  interpolation. If it is not (e.g. `"Sum: {x} + {y}"`), the literal
-  interpolated string is printed.
+- Interpolation (`{variable}`) inside a quoted piece enables evaluation
+  of the interpolated result. Pieces without interpolation stay literal.
+- Brace-delimited expressions (`{2 + 3}`) are evaluated directly.
+- `+` between pieces is string concatenation, not arithmetic.
+- If evaluation fails (text around the expression, unknown variable),
+  the literal interpolated string is printed.
 - All arithmetic operators are supported: `+`, `-`, `*`, `/`, `%`.
 - Parentheses and unary minus work as expected.
 - Variables must be declared before use; unknown variables are a typed error.
