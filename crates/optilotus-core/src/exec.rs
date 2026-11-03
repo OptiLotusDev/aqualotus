@@ -155,9 +155,15 @@ pub fn run_command(
             // Strings are templates ("\"hi {name}\" + \"!\""); every other
             // value prints via its Display form.
             let text = match input {
-                Value::String(template) => {
-                    render_template(template, vars).map_err(|e| map_expr_fail(e, command.id))?
-                }
+                Value::String(template) => match render_template(template, vars) {
+                    Ok(t) => t,
+                    Err(_) => match eval_expr(template, vars) {
+                        Ok(v) => v.to_string(),
+                        Err(e) => {
+                            return Err(map_expr_fail(e, command.id));
+                        }
+                    },
+                },
                 other => print_text(other),
             };
             sink.print(&text);

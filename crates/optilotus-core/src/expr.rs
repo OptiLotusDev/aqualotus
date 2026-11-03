@@ -828,17 +828,7 @@ impl<'a> TemplateParser<'a> {
                 }
             }
         }
-        // After interpolation, try evaluating the result as an arithmetic
-        // expression.  If it succeeds and produces a non-string value, use
-        // that; otherwise fall back to the literal interpolated string.
-        match eval_expr(&interpolated, vars) {
-            Ok(value) if !matches!(value, Value::String(_)) => {
-                out.push_str(&value.to_string());
-            }
-            _ => {
-                out.push_str(&interpolated);
-            }
-        }
+        out.push_str(&interpolated);
         Ok(())
     }
 
