@@ -41,7 +41,12 @@ fn main() {
     for _ in 0..30 {
         pkg.clear_package();
     }
-    report("clear_package x30", t.elapsed().as_micros(), ALLOC_COUNT.load(Ordering::Relaxed), ALLOC_BYTES.load(Ordering::Relaxed));
+    report(
+        "clear_package x30",
+        t.elapsed().as_micros(),
+        ALLOC_COUNT.load(Ordering::Relaxed),
+        ALLOC_BYTES.load(Ordering::Relaxed),
+    );
 
     // undo/redo
     let mut pkg = Package::new();
@@ -56,7 +61,12 @@ fn main() {
     for _ in 0..30 {
         pkg.redo();
     }
-    report("undo_redo_clear x30", t.elapsed().as_micros(), ALLOC_COUNT.load(Ordering::Relaxed), ALLOC_BYTES.load(Ordering::Relaxed));
+    report(
+        "undo_redo_clear x30",
+        t.elapsed().as_micros(),
+        ALLOC_COUNT.load(Ordering::Relaxed),
+        ALLOC_BYTES.load(Ordering::Relaxed),
+    );
 
     // nested if
     let mut pkg = Package::new();
@@ -69,10 +79,17 @@ fn main() {
         let c = pkg
             .if_with_expr(MAIN_ID, "{x} == 0", &[CommandSpec::print("\"z\"")], None)
             .unwrap();
-        pkg.if_append(MAIN_ID, b, optilotus_core::package::IfSide::Then, c).unwrap();
-        pkg.if_append(MAIN_ID, a, optilotus_core::package::IfSide::Then, b).unwrap();
+        pkg.if_append(MAIN_ID, b, optilotus_core::package::IfSide::Then, c)
+            .unwrap();
+        pkg.if_append(MAIN_ID, a, optilotus_core::package::IfSide::Then, b)
+            .unwrap();
     }
-    report("nested_if x5", t.elapsed().as_micros(), ALLOC_COUNT.load(Ordering::Relaxed), ALLOC_BYTES.load(Ordering::Relaxed));
+    report(
+        "nested_if x5",
+        t.elapsed().as_micros(),
+        ALLOC_COUNT.load(Ordering::Relaxed),
+        ALLOC_BYTES.load(Ordering::Relaxed),
+    );
 
     // expr eval
     use std::collections::HashMap;
@@ -84,5 +101,10 @@ fn main() {
     for _ in 0..10_000 {
         let _ = optilotus_core::expr::eval_expr("{x} + {y} * {y}", &vars);
     }
-    report("expr_eval x10000", t.elapsed().as_micros(), ALLOC_COUNT.load(Ordering::Relaxed), ALLOC_BYTES.load(Ordering::Relaxed));
+    report(
+        "expr_eval x10000",
+        t.elapsed().as_micros(),
+        ALLOC_COUNT.load(Ordering::Relaxed),
+        ALLOC_BYTES.load(Ordering::Relaxed),
+    );
 }
