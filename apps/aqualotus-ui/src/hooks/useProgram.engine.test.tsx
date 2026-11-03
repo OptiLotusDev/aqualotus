@@ -2588,20 +2588,17 @@ describe("The vertical If/Else body — engine-run branch bodies", () => {
     expect(innerIfId).toBeDefined();
     if (outerIfId === undefined || innerIfId === undefined) return;
 
-    // The engine has no `if` inside a branch: it must reject the
-    // wiring, the UI must surface that refusal, and nothing may be
-    // fabricated instead (no fake nesting, no silently swallowed
-    // member).
+    // Nesting an `if` in a branch is now supported by the engine.
     act(() => {
-      expect(api().applyIfAppend(0, outerIfId, "then", innerIfId)).toBe(false);
+      expect(api().applyIfAppend(0, outerIfId, "then", innerIfId)).toBe(true);
     });
-    expect(api().snapshot.actionError).not.toBe("");
+    expect(api().snapshot.actionError).toBe("");
 
     const listed = optilotus_listCommands(0);
     expect(listed.status).toBe("ok");
     if (listed.status !== "ok") return;
     const body = listed.commands.find((c) => c.id === outerIfId);
-    expect(body?.then_body ?? []).not.toContain(innerIfId);
+    expect(body?.then_body ?? []).toContain(innerIfId);
     // The rejected block still exists on the canvas as itself.
     expect(
       api().snapshot.commands.some((c) => c.id === innerIfId),
