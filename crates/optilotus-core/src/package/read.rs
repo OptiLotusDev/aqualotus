@@ -7,6 +7,7 @@ use crate::package::error::PackageError;
 use crate::package::kind::CommandKind;
 
 use crate::package::registry::Package;
+use crate::session::Commit;
 
 impl Package {
     pub fn list_commands(&self, fid: FunctionId) -> Result<Vec<CommandSummary>, PackageError> {
@@ -201,8 +202,14 @@ impl Package {
                 return Err(PackageError::UnknownCommand(id));
             }
         }
+        let old_entry = self.functions.get(&fid).and_then(|f| f.entry);
         let func = self.function_mut(fid)?;
         func.entry = entry;
+        self.record(Commit::EntryChanged {
+            fid,
+            old_entry,
+            new_entry: entry,
+        });
         Ok(())
     }
 
@@ -230,6 +237,45 @@ impl Package {
             .find(|c| c.id == tail)
             .ok_or(PackageError::UnknownCommand(tail))?;
         tail_cmd.next = next;
+        Ok(())
+    }
+
+    /// Set the optional canvas location (x, y) of a user command. The
+    /// engine stores it as opaque metadata; it does not affect execution.
+    pub fn set_location(
+        &mut self,
+        fid: FunctionId,
+        command: CommandId,
+        x: Option<i32>,
+        y: Option<i32>,
+    ) -> Result<(), PackageError> {
+        let meta = self
+            .meta
+            .get(&fid)
+            .ok_or(PackageError::UnknownFunction(fid))?;
+        if !meta.contains_key(&command) {
+            return Err(PackageError::UnknownCommand(command));
+        }
+        let (old_x, old_y) = self
+            .meta
+            .get(&fid)
+            .and_then(|m| m.get(&command))
+            .map(|s| (s.x, s.y))
+            .unwrap_or((None, None));
+        if let Some(m) = self.meta.get_mut(&fid) {
+            if let Some(summary) = m.get_mut(&command) {
+                summary.x = x;
+                summary.y = y;
+            }
+        }
+        self.record(Commit::LocationChanged {
+            fid,
+            id: command,
+            old_x,
+            old_y,
+            new_x: x,
+            new_y: y,
+        });
         Ok(())
     }
 }

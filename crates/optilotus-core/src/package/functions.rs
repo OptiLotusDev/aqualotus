@@ -5,10 +5,13 @@ use crate::package::error::PackageError;
 use crate::package::summary::{FunctionInfo, FunctionSummary};
 use crate::types::Type;
 
+use crate::package::command_summary::CommandSummary;
 use crate::package::kind::CommandKind;
 use crate::package::registry::Package;
+use crate::package::registry::PackageSnapshot;
 use crate::package::registry::{MAIN_ID, MAIN_NAME};
 use crate::package::validation;
+use crate::session::Commit;
 
 impl Package {
     fn validate_function_name(&self, raw: &str) -> Result<String, PackageError> {
@@ -38,13 +41,21 @@ impl Package {
             id,
             Function {
                 id,
-                name: clean,
+                name: clean.clone(),
                 entry: None,
                 commands: Vec::new(),
             },
         );
         self.meta.insert(id, HashMap::new());
         self.order.push(id);
+        self.record(Commit::FunctionCreated {
+            fid: id,
+            name: clean.clone(),
+            function: self.functions.get(&id).expect("exists").clone(),
+            meta: Vec::new(),
+            order: self.order.clone(),
+            next_function_id: self.next_function_id,
+        });
         Ok(id)
     }
 
@@ -69,11 +80,34 @@ impl Package {
         if id == MAIN_ID {
             return Err(PackageError::MainProtected);
         }
-        if self.functions.remove(&id).is_none() {
-            return Err(PackageError::UnknownFunction(id));
-        }
+        let function = self
+            .functions
+            .get(&id)
+            .cloned()
+            .ok_or(PackageError::UnknownFunction(id))?;
+        let meta_vec: Vec<(CommandId, CommandSummary)> = self
+            .meta
+            .get(&id)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        let order_before = self.order.clone();
+        let nfid = self.next_function_id;
+        let ncid = self.next_command_id;
+        let nvid = self.next_value_id;
+        self.functions.remove(&id);
         self.meta.remove(&id);
         self.order.retain(|kept| *kept != id);
+        self.record(Commit::FunctionDeleted {
+            fid: id,
+            function,
+            meta: meta_vec,
+            order: order_before,
+            next_function_id: nfid,
+            next_command_id: ncid,
+            next_value_id: nvid,
+        });
         Ok(())
     }
 
@@ -104,12 +138,20 @@ impl Package {
         if clean != current_name && self.functions.values().any(|f| f.name == clean) {
             return Err(PackageError::DuplicateName(clean));
         }
-        self.functions.get_mut(&id).expect("exists").name = clean;
+        let old_name = current_name.clone();
+        self.functions.get_mut(&id).expect("exists").name = clean.clone();
+        self.record(Commit::FunctionRenamed {
+            fid: id,
+            old_name,
+            new_name: clean,
+        });
         Ok(())
     }
 
     /// Wipe all but re-create an empty `main`.
     pub fn clear_package(&mut self) {
+        let snapshot = PackageSnapshot::new(self.clone());
+        self.record(Commit::PackageCleared { snapshot });
         self.functions.clear();
         self.order.clear();
         self.meta.clear();

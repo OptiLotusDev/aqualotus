@@ -4,6 +4,8 @@ use crate::package::error::PackageError;
 use crate::package::kind::CommandKind;
 
 use crate::package::registry::Package;
+use crate::package::registry::PackageSnapshot;
+use crate::session::Commit;
 
 impl Package {
     pub fn delete_command(
@@ -11,6 +13,7 @@ impl Package {
         fid: FunctionId,
         command: CommandId,
     ) -> Result<(), PackageError> {
+        let before = PackageSnapshot::new(self.clone());
         let tail = self.pair_tail(fid, command)?;
         let func = self
             .functions
@@ -117,6 +120,8 @@ impl Package {
             }
             meta.remove(&command);
         }
+        let after = PackageSnapshot::new(self.clone());
+        self.record(Commit::CommandDeleted { before, after });
         Ok(())
     }
 }

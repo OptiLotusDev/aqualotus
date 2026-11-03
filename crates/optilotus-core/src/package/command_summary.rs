@@ -39,6 +39,13 @@ pub struct CommandSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts-bindings", ts(optional))]
     pub else_body: Option<Vec<CommandId>>,
+    /// Optional canvas location (UI-owned; engine treats it as opaque metadata).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
+    pub x: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
+    pub y: Option<i32>,
 }
 
 impl CommandSummary {
@@ -57,6 +64,8 @@ impl CommandSummary {
             condition: None,
             then_body: None,
             else_body: None,
+            x: None,
+            y: None,
         }
     }
 }

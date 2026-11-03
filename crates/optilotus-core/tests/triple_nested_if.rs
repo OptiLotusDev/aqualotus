@@ -1,10 +1,11 @@
-use optilotus_core::{CommandSpec, Package, VecSink, MAIN_ID};
 use optilotus_core::package::IfSide;
+use optilotus_core::{CommandSpec, Package, VecSink, MAIN_ID};
 
 fn build_with(x: i32) -> Package {
     // Rebuild by calling build then patching declare? Easier: declare with x value.
     let mut pkg = Package::new();
-    pkg.declare(MAIN_ID, "x", "int32", Some(&x.to_string())).unwrap();
+    pkg.declare(MAIN_ID, "x", "int32", Some(&x.to_string()))
+        .unwrap();
 
     let zero_if = pkg
         .if_with_expr(
@@ -77,11 +78,8 @@ fn triple_nested_if_all_paths() {
     for (x, expected) in cases {
         let pkg = build_with(x);
         let mut sink = VecSink::default();
-        pkg.run_main(&mut sink).unwrap_or_else(|e| panic!("x={x}: {e:?}"));
-        assert_eq!(
-            sink.lines,
-            vec![expected.to_string()],
-            "x={x}"
-        );
+        pkg.run_main(&mut sink)
+            .unwrap_or_else(|e| panic!("x={x}: {e:?}"));
+        assert_eq!(sink.lines, vec![expected.to_string()], "x={x}");
     }
 }

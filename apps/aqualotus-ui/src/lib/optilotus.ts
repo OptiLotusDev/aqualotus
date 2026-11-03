@@ -29,6 +29,7 @@ import init, {
   optilotus_runProgramStatus as runProgramStatus_wasm,
   optilotus_runProgramWithInputs as runProgramWithInputs_wasm,
   optilotus_setEntry as setEntry_wasm,
+  optilotus_setLocation as setLocation_wasm,
   optilotus_setNext as setNext_wasm,
   optilotus_undo as undo_wasm,
   optilotus_version as version_wasm,
@@ -345,6 +346,16 @@ export function optilotus_setEntry(
 ): { status: "ok" } | OptilotusError {
   assertReady();
   return parseBridge(setEntry_wasm(fid, cmd));
+}
+
+export function optilotus_setLocation(
+  fid: number,
+  cmd: number,
+  x: number | null,
+  y: number | null,
+): { status: "ok" } | OptilotusError {
+  assertReady();
+  return parseBridge(setLocation_wasm(fid, cmd, x, y));
 }
 
 export function optilotus_setNext(

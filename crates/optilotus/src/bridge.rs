@@ -313,6 +313,16 @@ pub fn package_set_entry(fid: u32, cmd: Option<u32>) -> String {
     })
 }
 
+/// `set_location(fid, cmd, x?, y?)` — store optional canvas coordinates.
+pub fn package_set_location(fid: u32, cmd: u32, x: Option<i32>, y: Option<i32>) -> String {
+    with_package(|pkg| {
+        match pkg.set_location(crate::ir::FunctionId(fid), crate::ir::CommandId(cmd), x, y) {
+            Ok(()) => to_json(&OkResponse::default()),
+            Err(e) => to_json(&package_fail(&e)),
+        }
+    })
+}
+
 /// `set_next(fid, cmd, next?)` — `next=null` clears the edge.
 pub fn package_set_next(fid: u32, cmd: u32, next: Option<u32>) -> String {
     with_package(|pkg| {
@@ -597,6 +607,13 @@ pub fn js_package_list_commands(fid: u32) -> String {
 pub fn js_package_set_entry(fid: u32, cmd: Option<u32>) -> String {
     init_panic_hook();
     package_set_entry(fid, cmd)
+}
+
+/// JS: `optilotus_setLocation(fid, cmd, x?, y?) -> string` (JSON)
+#[wasm_bindgen(js_name = optilotus_setLocation)]
+pub fn js_package_set_location(fid: u32, cmd: u32, x: Option<i32>, y: Option<i32>) -> String {
+    init_panic_hook();
+    package_set_location(fid, cmd, x, y)
 }
 
 /// JS: `optilotus_setNext(fid, cmd, next?) -> string` (JSON)

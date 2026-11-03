@@ -181,13 +181,10 @@ impl Package {
             };
             // `Op::Return` stays rejected in branches; `Op::If` is allowed
             // so nested ifs (else-if shape) can be appended.
-            match incoming.op {
-                Op::Return { .. } => {
-                    return Err(PackageError::InvalidCommand(
-                        "return cannot join an `if` branch".to_string(),
-                    ))
-                }
-                _ => {}
+            if let Op::Return { .. } = incoming.op {
+                return Err(PackageError::InvalidCommand(
+                    "return cannot join an `if` branch".to_string(),
+                ));
             }
             // The command may not sit in a branch of any other `if`.
             for other_cmd in &function.commands {
@@ -454,10 +451,7 @@ impl Package {
             let old_compute_id = function
                 .commands
                 .iter()
-                .find(|c| {
-                    c.outputs.contains(&old_condition)
-                        && matches!(c.op, Op::Compute { .. })
-                })
+                .find(|c| c.outputs.contains(&old_condition) && matches!(c.op, Op::Compute { .. }))
                 .map(|c| c.id);
             if let Some(old_id) = old_compute_id {
                 if old_id != compute_id {
