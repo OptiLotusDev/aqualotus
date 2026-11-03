@@ -4,6 +4,7 @@ use crate::ir::{Command, CommandId, Function, FunctionId};
 use crate::package::command_summary::CommandSummary;
 use crate::package::kind::CommandKind;
 use crate::package::registry::{Package, PackageSnapshot};
+use crate::package::registry::{MAIN_ID, MAIN_NAME};
 
 /***
  * One history commit — the material needed to undo and redo a single
@@ -172,7 +173,24 @@ impl Commit {
                 *pkg = after.package.clone();
             }
             Commit::PackageCleared { .. } => {
-                pkg.clear_package();
+                // Redo the clear without recording a new commit.
+                pkg.functions.clear();
+                pkg.order.clear();
+                pkg.meta.clear();
+                pkg.functions.insert(
+                    MAIN_ID,
+                    Function {
+                        id: MAIN_ID,
+                        name: MAIN_NAME.to_string(),
+                        entry: None,
+                        commands: Vec::new(),
+                    },
+                );
+                pkg.meta.insert(MAIN_ID, std::collections::HashMap::new());
+                pkg.order.push(MAIN_ID);
+                pkg.next_function_id = 1;
+                pkg.next_command_id = 1;
+                pkg.next_value_id = 1;
             }
         }
     }
@@ -246,6 +264,8 @@ impl Commit {
                 next_command_id,
                 next_value_id,
             } => {
+                let undo = std::mem::take(&mut pkg.undo_stack);
+                let redo = std::mem::take(&mut pkg.redo_stack);
                 pkg.functions.insert(*fid, function.clone());
                 let m = pkg.meta.entry(*fid).or_default();
                 for (id, summary) in meta {
@@ -255,12 +275,18 @@ impl Commit {
                 pkg.next_function_id = *next_function_id;
                 pkg.next_command_id = *next_command_id;
                 pkg.next_value_id = *next_value_id;
+                pkg.undo_stack = undo;
+                pkg.redo_stack = redo;
             }
             Commit::CommandDeleted { before, .. } => {
                 *pkg = before.package.clone();
             }
             Commit::PackageCleared { snapshot } => {
+                let undo = std::mem::take(&mut pkg.undo_stack);
+                let redo = std::mem::take(&mut pkg.redo_stack);
                 *pkg = snapshot.package.clone();
+                pkg.undo_stack = undo;
+                pkg.redo_stack = redo;
             }
         }
     }
