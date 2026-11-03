@@ -8,6 +8,7 @@ This file tells human teammates and AI agents what each document in `docs/` is f
 - **`design-principles.md`** — Normative design rules (e.g. honest functions, invariants). Constraints that all implementation must satisfy. Read before writing language, runtime, or UI logic.
 - **`api.md`** — Optilotus bridge API reference (wire format, generated types, Rust core, WASM exports, TS bridge, UI state owners). Read before touching the UI ↔ runtime boundary.
 - **`bridge-guide.md`** — Task recipes for changing the boundary: add a command kind, change a response shape, keep the wire format compatible. Read alongside `api.md` when actually editing the boundary.
+- **`dev-notes.md`** — Recent engine/frontend changes, migration notes, and API additions (location, undo/redo, incremental console output, template expressions).
 - **`proposal.md`** — Project presentation / graduation proposal. Background, motivation, and scope for stakeholders. Context only; not a build spec.
 
 ## Reading order for agents

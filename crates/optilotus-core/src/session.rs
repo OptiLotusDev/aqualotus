@@ -4,6 +4,7 @@ use crate::ir::{Command, CommandId, Function, FunctionId};
 use crate::package::command_summary::CommandSummary;
 use crate::package::kind::CommandKind;
 use crate::package::registry::{Package, PackageSnapshot};
+use crate::package::registry::{MAIN_ID, MAIN_NAME};
 
 /***
  * One history commit — the material needed to undo and redo a single
@@ -47,13 +48,28 @@ pub enum Commit {
         new_entry: Option<CommandId>,
     },
 
+    LocationChanged {
+        fid: FunctionId,
+        id: CommandId,
+        old_x: Option<i32>,
+        old_y: Option<i32>,
+        new_x: Option<i32>,
+        new_y: Option<i32>,
+    },
+
     FunctionDeleted {
         fid: FunctionId,
         function: Function,
         meta: Vec<(CommandId, CommandSummary)>,
+        order: Vec<FunctionId>,
         next_function_id: u32,
         next_command_id: u32,
         next_value_id: u32,
+    },
+
+    CommandDeleted {
+        before: PackageSnapshot,
+        after: PackageSnapshot,
     },
 
     PackageCleared {
@@ -79,8 +95,10 @@ impl Commit {
                 format!("rename {} to {}", old_name, new_name)
             }
             Commit::EntryChanged { .. } => "change entry".to_string(),
+            Commit::LocationChanged { .. } => "change location".to_string(),
             Commit::FunctionDeleted { .. } => "delete function".to_string(),
             Commit::PackageCleared { .. } => "clear package".to_string(),
+            Commit::CommandDeleted { .. } => "delete command".to_string(),
         }
     }
     /// Apply forward (redo direction).
@@ -93,25 +111,87 @@ impl Commit {
                 summary,
                 ..
             } => {
-                // Re-add commands
                 if let Some(func) = pkg.functions.get_mut(fid) {
                     for cmd in commands {
                         func.commands.push(cmd.clone());
                     }
                 }
-                // Re-link
                 let _ = pkg.link_chain(*fid, *head_id);
-                // Re-insert meta
                 if let Some(meta) = pkg.meta.get_mut(fid) {
                     meta.insert(*head_id, summary.clone());
                 }
             }
-            Commit::PackageCleared { snapshot } => {
-                // Restore from snapshot
-                *pkg = snapshot.package.clone();
+            Commit::FunctionCreated {
+                fid,
+                name,
+                function,
+                meta,
+                order,
+                next_function_id,
+            } => {
+                pkg.functions.insert(*fid, function.clone());
+                let m = pkg.meta.entry(*fid).or_default();
+                for (id, summary) in meta {
+                    m.insert(*id, summary.clone());
+                }
+                pkg.order = order.clone();
+                pkg.next_function_id = *next_function_id;
+                if let Some(f) = pkg.functions.get_mut(fid) {
+                    f.name = name.clone();
+                }
             }
-            // Other variants: no-op for now (TODO)
-            _ => {}
+            Commit::FunctionRenamed { fid, new_name, .. } => {
+                if let Some(f) = pkg.functions.get_mut(fid) {
+                    f.name = new_name.clone();
+                }
+            }
+            Commit::EntryChanged { fid, new_entry, .. } => {
+                if let Some(f) = pkg.functions.get_mut(fid) {
+                    f.entry = *new_entry;
+                }
+            }
+            Commit::LocationChanged {
+                fid,
+                id,
+                new_x,
+                new_y,
+                ..
+            } => {
+                if let Some(meta) = pkg.meta.get_mut(fid) {
+                    if let Some(summary) = meta.get_mut(id) {
+                        summary.x = *new_x;
+                        summary.y = *new_y;
+                    }
+                }
+            }
+            Commit::FunctionDeleted { fid, .. } => {
+                pkg.functions.remove(fid);
+                pkg.meta.remove(fid);
+                pkg.order.retain(|k| k != fid);
+            }
+            Commit::CommandDeleted { after, .. } => {
+                *pkg = after.package.clone();
+            }
+            Commit::PackageCleared { .. } => {
+                // Redo the clear without recording a new commit.
+                pkg.functions.clear();
+                pkg.order.clear();
+                pkg.meta.clear();
+                pkg.functions.insert(
+                    MAIN_ID,
+                    Function {
+                        id: MAIN_ID,
+                        name: MAIN_NAME.to_string(),
+                        entry: None,
+                        commands: Vec::new(),
+                    },
+                );
+                pkg.meta.insert(MAIN_ID, std::collections::HashMap::new());
+                pkg.order.push(MAIN_ID);
+                pkg.next_function_id = 1;
+                pkg.next_command_id = 1;
+                pkg.next_value_id = 1;
+            }
         }
     }
 
@@ -125,9 +205,7 @@ impl Commit {
                 old_entry,
                 ..
             } => {
-                // Remove added commands
                 if let Some(func) = pkg.functions.get_mut(fid) {
-                    // Clear next pointers that pointed to removed commands
                     let removed_ids: std::collections::HashSet<_> =
                         commands.iter().map(|c| c.id).collect();
                     for cmd in func.commands.iter_mut() {
@@ -142,17 +220,74 @@ impl Commit {
                     }
                     func.entry = *old_entry;
                 }
-                // Remove meta
                 if let Some(meta) = pkg.meta.get_mut(fid) {
                     meta.remove(head_id);
                 }
             }
-            Commit::PackageCleared { snapshot } => {
-                // Restore from snapshot (same as forward for clear)
-                *pkg = snapshot.package.clone();
+            Commit::FunctionCreated { fid, .. } => {
+                pkg.functions.remove(fid);
+                pkg.meta.remove(fid);
+                pkg.order.retain(|k| k != fid);
+                // restore allocator to pre-creation
+                pkg.next_function_id = fid.0;
             }
-            // Other variants: no-op for now (TODO)
-            _ => {}
+            Commit::FunctionRenamed { fid, old_name, .. } => {
+                if let Some(f) = pkg.functions.get_mut(fid) {
+                    f.name = old_name.clone();
+                }
+            }
+            Commit::EntryChanged { fid, old_entry, .. } => {
+                if let Some(f) = pkg.functions.get_mut(fid) {
+                    f.entry = *old_entry;
+                }
+            }
+            Commit::LocationChanged {
+                fid,
+                id,
+                old_x,
+                old_y,
+                ..
+            } => {
+                if let Some(meta) = pkg.meta.get_mut(fid) {
+                    if let Some(summary) = meta.get_mut(id) {
+                        summary.x = *old_x;
+                        summary.y = *old_y;
+                    }
+                }
+            }
+            Commit::FunctionDeleted {
+                fid,
+                function,
+                meta,
+                order,
+                next_function_id,
+                next_command_id,
+                next_value_id,
+            } => {
+                let undo = std::mem::take(&mut pkg.undo_stack);
+                let redo = std::mem::take(&mut pkg.redo_stack);
+                pkg.functions.insert(*fid, function.clone());
+                let m = pkg.meta.entry(*fid).or_default();
+                for (id, summary) in meta {
+                    m.insert(*id, summary.clone());
+                }
+                pkg.order = order.clone();
+                pkg.next_function_id = *next_function_id;
+                pkg.next_command_id = *next_command_id;
+                pkg.next_value_id = *next_value_id;
+                pkg.undo_stack = undo;
+                pkg.redo_stack = redo;
+            }
+            Commit::CommandDeleted { before, .. } => {
+                *pkg = before.package.clone();
+            }
+            Commit::PackageCleared { snapshot } => {
+                let undo = std::mem::take(&mut pkg.undo_stack);
+                let redo = std::mem::take(&mut pkg.redo_stack);
+                *pkg = snapshot.package.clone();
+                pkg.undo_stack = undo;
+                pkg.redo_stack = redo;
+            }
         }
     }
 }

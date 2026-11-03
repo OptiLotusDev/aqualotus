@@ -128,8 +128,7 @@ fn if_with_arithmetic_template_evaluates() {
     let mut pkg = Package::new();
     pkg.declare(MAIN_ID, "a", "int32", Some("7")).unwrap();
     pkg.declare(MAIN_ID, "b", "int32", Some("3")).unwrap();
-    // A template that is a valid arithmetic expression after interpolation
-    // gets evaluated: "7 + 3" -> "10".
+    // A quoted template with variable interpolation evaluates: "7 + 3" -> "10".
     let then_specs = vec![CommandSpec::print("\"{a} + {b}\"")];
     pkg.if_with_expr(MAIN_ID, "{a} > {b}", &then_specs, None)
         .unwrap();

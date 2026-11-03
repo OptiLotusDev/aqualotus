@@ -110,6 +110,7 @@ fn resumable_run_pauses_then_returns_the_read_value() {
         RunStatus::WaitingInput {
             command: read,
             ty: Type::Int32,
+            printed: vec![],
         }
     );
 

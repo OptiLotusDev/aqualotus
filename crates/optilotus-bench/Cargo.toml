@@ -1,0 +1,11 @@
+[package]
+name = "optilotus-bench"
+version = "0.6.0"
+edition = "2021"
+
+[dependencies]
+optilotus-core = { path = "../optilotus-core" }
+
+[[bin]]
+name = "optilotus-bench"
+path = "src/main.rs"

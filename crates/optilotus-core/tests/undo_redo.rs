@@ -24,6 +24,8 @@ fn test_commit_enum_variants() {
             condition: None,
             then_body: None,
             else_body: None,
+            x: None,
+            y: None,
         },
         old_entry: None,
     };
@@ -63,6 +65,7 @@ fn test_commit_enum_variants() {
             commands: vec![],
         },
         meta: vec![],
+        order: vec![FunctionId(1)],
         next_function_id: 2,
         next_command_id: 1,
         next_value_id: 1,

@@ -100,7 +100,81 @@ fn summary_ids_stay_resolvable_when_wiring() {
     assert_eq!(sink.lines, vec!["A", "B"]);
 }
 
-/// A deleted branch member must disappear from the branch lists: the
+/// Nested if in an `else` branch (else-if shape) creates and runs.
+#[test]
+fn nested_if_in_else_creates_and_runs() {
+    let mut pkg = Package::new();
+    pkg.declare(MAIN_ID, "x", "int32", Some("3")).unwrap();
+    let outer = pkg.if_with_expr(MAIN_ID, "{x} > 5", &[], None).unwrap();
+    let inner = pkg.if_with_expr(MAIN_ID, "false", &[], None).unwrap();
+    let p = pkg.print(MAIN_ID, "\"inner-else-ran\"").unwrap();
+    pkg.if_append(MAIN_ID, inner, IfSide::Else, p).unwrap();
+    pkg.if_append(MAIN_ID, outer, IfSide::Else, inner).unwrap();
+
+    let mut sink = VecSink::default();
+    pkg.run_main(&mut sink).unwrap();
+    assert_eq!(sink.lines, vec!["inner-else-ran".to_string()]);
+}
+
+/// Nested if in a `then` branch creates and runs.
+#[test]
+fn nested_if_in_then_creates_and_runs() {
+    let mut pkg = Package::new();
+    pkg.declare(MAIN_ID, "x", "int32", Some("10")).unwrap();
+    let outer = pkg.if_with_expr(MAIN_ID, "{x} > 5", &[], None).unwrap();
+    let inner = pkg.if_with_expr(MAIN_ID, "true", &[], None).unwrap();
+    let p = pkg.print(MAIN_ID, "\"inner-then-ran\"").unwrap();
+    pkg.if_append(MAIN_ID, inner, IfSide::Then, p).unwrap();
+    pkg.if_append(MAIN_ID, outer, IfSide::Then, inner).unwrap();
+
+    let mut sink = VecSink::default();
+    pkg.run_main(&mut sink).unwrap();
+    assert_eq!(sink.lines, vec!["inner-then-ran".to_string()]);
+}
+
+/// Moving the entry command into a branch updates `function.entry`.
+#[test]
+fn move_entry_command_into_branch_updates_entry_and_runs() {
+    let mut pkg = Package::new();
+    let cmd = pkg.print(MAIN_ID, "\"moved\"").unwrap();
+    pkg.set_entry(MAIN_ID, Some(cmd)).unwrap();
+    let if_id = pkg.if_with_expr(MAIN_ID, "false", &[], None).unwrap();
+
+    pkg.if_append(MAIN_ID, if_id, IfSide::Else, cmd).unwrap();
+
+    let mut sink = VecSink::default();
+    pkg.run_main(&mut sink).unwrap();
+    assert_eq!(sink.lines, vec!["moved".to_string()]);
+}
+
+/// Setting the condition twice leaves the latest compute in place and runs.
+#[test]
+fn set_condition_twice_chain_shape() {
+    let mut pkg = Package::new();
+    pkg.declare(MAIN_ID, "x", "int32", Some("10")).unwrap();
+    let if_id = pkg.if_with_expr(MAIN_ID, "{x} > 3", &[], None).unwrap();
+    pkg.if_set_condition(MAIN_ID, if_id, "false").unwrap();
+    pkg.if_set_condition(MAIN_ID, if_id, "true").unwrap();
+
+    assert_eq!(pkg.if_condition(MAIN_ID, if_id).unwrap(), "true");
+
+    let mut sink = VecSink::default();
+    pkg.run_main(&mut sink).unwrap();
+}
+
+/// `raw_group` does not absorb a hidden condition compute following a print.
+#[test]
+fn raw_group_does_not_absorb_condition_compute() {
+    let mut pkg = Package::new();
+    pkg.declare(MAIN_ID, "x", "int32", Some("10")).unwrap();
+    let if_id = pkg.if_with_expr(MAIN_ID, "{x} > 3", &[], None).unwrap();
+    let p = pkg.print(MAIN_ID, "\"hi\"").unwrap();
+    pkg.if_append(MAIN_ID, if_id, IfSide::Then, p).unwrap();
+
+    let mut sink = VecSink::default();
+    pkg.run_main(&mut sink).unwrap();
+    assert_eq!(sink.lines, vec!["hi".to_string()]);
+}
 /// executor's membership walk would never crash on a stale id.
 #[test]
 fn delete_branch_member_clears_membership() {

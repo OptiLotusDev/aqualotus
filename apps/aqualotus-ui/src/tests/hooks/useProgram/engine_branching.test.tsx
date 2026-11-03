@@ -697,9 +697,8 @@ describe("The vertical If/Else body — engine-run branch bodies", () => {
     expect(nestedId).toBeDefined();
     if (nestedId === undefined) return;
     act(() => {
-      expect(api().applyIfAppend(0, outerId, "then", nestedId)).toBe(false);
+      expect(api().applyIfAppend(0, outerId, "then", nestedId)).toBe(true);
     });
-    expect(api().snapshot.actionError).toContain("cannot join an `if` branch");
 
     connectAll(api, 0);
     act(() => {

@@ -762,7 +762,13 @@ impl<'a> TemplateParser<'a> {
             Some('"') => self.parse_quoted(vars, out),
             Some('{') => {
                 let name = self.parse_ref()?;
-                let value = vars.get(&name).ok_or(ExprFail::UnknownVariable(name))?;
+                let value = if let Some(v) = vars.get(&name) {
+                    v.clone()
+                } else if name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                    return Err(ExprFail::UnknownVariable(name));
+                } else {
+                    eval_expr(&name, vars)?
+                };
                 out.push_str(&value.to_string());
                 Ok(())
             }
@@ -784,6 +790,7 @@ impl<'a> TemplateParser<'a> {
         let open = self.pos;
         self.bump(); // consume opening quote
         let mut interpolated = String::new();
+        let mut has_interpolation = false;
         loop {
             match self.peek() {
                 None => {
@@ -819,8 +826,17 @@ impl<'a> TemplateParser<'a> {
                 }
                 Some('{') => {
                     let name = self.parse_ref()?;
-                    let value = vars.get(&name).ok_or(ExprFail::UnknownVariable(name))?;
+                    let value = if let Some(v) = vars.get(&name) {
+                        v.clone()
+                    } else if name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                        return Err(ExprFail::UnknownVariable(name));
+                    } else {
+                        // Allow a brace-delimited arithmetic expression
+                        // (e.g. "{2 + 3}") in addition to variable names.
+                        eval_expr(&name, vars)?
+                    };
                     interpolated.push_str(&value.to_string());
+                    has_interpolation = true;
                 }
                 Some(c) => {
                     interpolated.push(c);
@@ -828,16 +844,20 @@ impl<'a> TemplateParser<'a> {
                 }
             }
         }
-        // After interpolation, try evaluating the result as an arithmetic
-        // expression.  If it succeeds and produces a non-string value, use
-        // that; otherwise fall back to the literal interpolated string.
-        match eval_expr(&interpolated, vars) {
-            Ok(value) if !matches!(value, Value::String(_)) => {
-                out.push_str(&value.to_string());
+        // Only evaluate the interpolated result as arithmetic when the
+        // template actually contained a `{variable}` interpolation.
+        // Literal-only strings (e.g. "2 + 3") stay literal.
+        if has_interpolation {
+            match eval_expr(&interpolated, vars) {
+                Ok(value) if !matches!(value, Value::String(_)) => {
+                    out.push_str(&value.to_string());
+                }
+                _ => {
+                    out.push_str(&interpolated);
+                }
             }
-            _ => {
-                out.push_str(&interpolated);
-            }
+        } else {
+            out.push_str(&interpolated);
         }
         Ok(())
     }

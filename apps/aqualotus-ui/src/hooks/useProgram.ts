@@ -108,6 +108,7 @@ export function useProgram(
   ) => boolean;
   ifConditionText: (fid: FunctionId, ifId: CommandId) => string | null;
   clearEntry: (fid: FunctionId) => void;
+  setEntry: (fid: FunctionId, cmd: CommandId) => void;
   clearPackage: () => void;
   run: () => void;
   /** Feed a line to the paused run; no-op when nothing waits. */
@@ -565,6 +566,62 @@ export function useProgram(
     [load, pushHistory],
   );
 
+  const setEntry = useCallback(
+    (fid: FunctionId, cmd: CommandId): void => {
+      try {
+        const info = optilotus_getFunction(fid);
+        if (isOptilotusError(info)) {
+          setSnapshot((prev) => failCommand(prev, info));
+          return;
+        }
+        const prevEntry =
+          info.entry !== undefined ? (info.entry ?? null) : null;
+        setSnapshot((prev) => ({
+          ...clearFailure(prev),
+          busy: true,
+          recoveryVar: null,
+        }));
+        const set = optilotus_setEntry(fid, cmd);
+        if (isOptilotusError(set)) {
+          setSnapshot((prev) => failCommand(prev, set));
+          return;
+        }
+        load(fid);
+        pushHistory({
+          label: "Set entry point",
+          undo: () => {
+            setSnapshot((prev) => ({ ...prev, busy: true }));
+            const restored =
+              prevEntry === null
+                ? optilotus_setEntry(fid, null)
+                : optilotus_setEntry(fid, prevEntry);
+            if (isOptilotusError(restored)) {
+              setSnapshot((prev) => failCommand(prev, restored));
+              load(fid);
+              return false;
+            }
+            load(fid);
+            return true;
+          },
+          redo: () => {
+            setSnapshot((prev) => ({ ...prev, busy: true }));
+            const again = optilotus_setEntry(fid, cmd);
+            if (isOptilotusError(again)) {
+              setSnapshot((prev) => failCommand(prev, again));
+              load(fid);
+              return false;
+            }
+            load(fid);
+            return true;
+          },
+        });
+      } catch (e: unknown) {
+        setSnapshot((prev) => failThrown(prev, e));
+      }
+    },
+    [load, pushHistory],
+  );
+
   const clearPackage = useCallback((): void => clearPackageOp(ctxRef.current!), []);
 
   const run = useCallback((): void => runOp(ctxRef.current!), []);
@@ -596,6 +653,7 @@ export function useProgram(
     applyIfAppend,
     ifConditionText,
     clearEntry,
+    setEntry,
     clearPackage,
     run,
     provideInput,

@@ -300,7 +300,7 @@ fn templates_expression_with_text_falls_back_to_string() {
         "Hello Bob!"
     );
     // Literal-only expressions with no vars still evaluate.
-    assert_eq!(render_template("\"10 + 5\"", &v).unwrap(), "15");
+    assert_eq!(render_template("\"10 + 5\"", &v).unwrap(), "10 + 5");
 }
 
 #[test]

@@ -601,17 +601,15 @@ describe("If/Else append defences (bridge envelopes)", () => {
     const member = ok(optilotus_print(0, '"m"'), "member");
     ok(optilotus_if_append(0, inner.id, "then", member.id), "inner member");
 
+    // Nesting an `if` in a branch is now supported by the engine.
     expect(
       optilotus_if_append(0, outer.id, "then", inner.id),
-    ).toMatchObject({
-      status: "error",
-      message: "if and return cannot join an `if` branch",
-    });
+    ).toMatchObject({ status: "ok" });
     expect(
       optilotus_if_append(0, inner.id, "then", ret.id),
     ).toMatchObject({
       status: "error",
-      message: "if and return cannot join an `if` branch",
+      message: "return cannot join an `if` branch",
     });
     // A member of another `if` cannot be adopted: it already runs in
     // that if's branch walk.

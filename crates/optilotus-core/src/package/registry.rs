@@ -131,7 +131,12 @@ pub struct PackageSnapshot {
 impl PackageSnapshot {
     pub const CURRENT_VERSION: u32 = 1;
 
-    pub fn new(package: Package) -> Self {
+    pub fn new(mut package: Package) -> Self {
+        // Never persist the undo/redo history inside a snapshot, otherwise
+        // snapshots nest recursively and grow exponentially (each clear
+        // would copy every earlier backup).
+        package.undo_stack.clear();
+        package.redo_stack.clear();
         Self {
             version: Self::CURRENT_VERSION,
             package,

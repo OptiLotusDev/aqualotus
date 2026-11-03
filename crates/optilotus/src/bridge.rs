@@ -313,6 +313,16 @@ pub fn package_set_entry(fid: u32, cmd: Option<u32>) -> String {
     })
 }
 
+/// `set_location(fid, cmd, x?, y?)` — store optional canvas coordinates.
+pub fn package_set_location(fid: u32, cmd: u32, x: Option<i32>, y: Option<i32>) -> String {
+    with_package(|pkg| {
+        match pkg.set_location(crate::ir::FunctionId(fid), crate::ir::CommandId(cmd), x, y) {
+            Ok(()) => to_json(&OkResponse::default()),
+            Err(e) => to_json(&package_fail(&e)),
+        }
+    })
+}
+
 /// `set_next(fid, cmd, next?)` — `next=null` clears the edge.
 pub fn package_set_next(fid: u32, cmd: u32, next: Option<u32>) -> String {
     with_package(|pkg| {
@@ -599,6 +609,13 @@ pub fn js_package_set_entry(fid: u32, cmd: Option<u32>) -> String {
     package_set_entry(fid, cmd)
 }
 
+/// JS: `optilotus_setLocation(fid, cmd, x?, y?) -> string` (JSON)
+#[wasm_bindgen(js_name = optilotus_setLocation)]
+pub fn js_package_set_location(fid: u32, cmd: u32, x: Option<i32>, y: Option<i32>) -> String {
+    init_panic_hook();
+    package_set_location(fid, cmd, x, y)
+}
+
 /// JS: `optilotus_setNext(fid, cmd, next?) -> string` (JSON)
 #[wasm_bindgen(js_name = optilotus_setNext)]
 pub fn js_package_set_next(fid: u32, cmd: u32, next: Option<u32>) -> String {
@@ -624,8 +641,12 @@ fn run_status_json(status: crate::run_resumable::RunStatus) -> String {
     use crate::run_resumable::RunStatus;
     let debug = DEBUG_MODE.with(|cell| *cell.borrow());
     match status {
-        RunStatus::WaitingInput { command, ty } => {
-            let mut response = WaitingInputResponse::new(command, ty);
+        RunStatus::WaitingInput {
+            command,
+            ty,
+            printed,
+        } => {
+            let mut response = WaitingInputResponse::new(command, ty).with_printed(printed);
             if debug {
                 response.peek = Some(true);
             }
@@ -637,10 +658,13 @@ fn run_status_json(status: crate::run_resumable::RunStatus) -> String {
             printed,
             returned,
         } => to_json(&RunOkResponse::new(steps, prints, printed, returned).with_debug(debug)),
-        RunStatus::Error(e) => {
-            // record for lastError query
-            crate::bridge::record_error(e.clone());
-            to_json(&exec_error_json(&e))
+        RunStatus::Error { error, printed } => {
+            crate::bridge::record_error(error.clone());
+            let mut resp = exec_error_json(&error);
+            if !printed.is_empty() {
+                resp = resp.with_printed(printed.clone());
+            }
+            to_json(&resp)
         }
     }
 }
@@ -774,10 +798,13 @@ pub fn run_program_peek_pending() -> String {
     RUN.with(|cell| {
         if let Some(run) = cell.borrow().as_ref() {
             match run.peek_pending() {
-                Some(p) => to_json(&WaitingInputResponse::new(p.command, p.ty)),
+                Some(p) => to_json(
+                    &WaitingInputResponse::new(p.command, p.ty)
+                        .with_printed(run.sink.lines.clone()),
+                ),
                 None => {
                     if let Some(err) = &run.error {
-                        to_json(&exec_error_json(err))
+                        to_json(&exec_error_json(err).with_printed(run.sink.lines.clone()))
                     } else if run.frames.is_empty() {
                         to_json(&RunOkResponse::new(
                             run.global_steps,
@@ -807,7 +834,19 @@ pub fn run_program_reset() -> String {
 /// Query the last recorded error. Returns `{"status":"idle"}` if none.
 pub fn run_program_last_error() -> String {
     LAST_ERROR.with(|cell| match &*cell.borrow() {
-        Some(err) => to_json(&exec_error_json(err)),
+        Some(err) => {
+            let printed = RUN.with(|cell| {
+                cell.borrow()
+                    .as_ref()
+                    .map(|r| r.sink.lines.clone())
+                    .unwrap_or_default()
+            });
+            let mut resp = exec_error_json(err);
+            if !printed.is_empty() {
+                resp = resp.with_printed(printed);
+            }
+            to_json(&resp)
+        }
         None => to_json(&IdleResponse::default()),
     })
 }
@@ -850,7 +889,10 @@ pub fn run_program_provide_input_typed(value_json: &str) -> String {
                 None => {
                     let e = ExecError::InvalidState;
                     run.error = Some(e.clone());
-                    return run_status_json(RunStatus::Error(e));
+                    return run_status_json(RunStatus::Error {
+                        error: e,
+                        printed: run.sink.lines.clone(),
+                    });
                 }
             };
             let parsed: serde_json::Value = match serde_json::from_str(value_json) {
@@ -861,7 +903,10 @@ pub fn run_program_provide_input_typed(value_json: &str) -> String {
                         detail: "invalid JSON input".to_string(),
                     };
                     run.error = Some(e.clone());
-                    return run_status_json(RunStatus::Error(e));
+                    return run_status_json(RunStatus::Error {
+                        error: e,
+                        printed: run.sink.lines.clone(),
+                    });
                 }
             };
             match coerce_json_to_value(&parsed, pending.ty) {
@@ -875,7 +920,10 @@ pub fn run_program_provide_input_typed(value_json: &str) -> String {
                         detail,
                     };
                     run.error = Some(e.clone());
-                    run_status_json(RunStatus::Error(e))
+                    run_status_json(RunStatus::Error {
+                        error: e,
+                        printed: run.sink.lines.clone(),
+                    })
                 }
             }
         } else {

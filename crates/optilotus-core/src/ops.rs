@@ -343,7 +343,7 @@ pub fn cast_value(value: &Value, to: Type) -> Result<Value, String> {
                 Type::Uint128 => u128::try_from(n)
                     .map(Value::Uint128)
                     .map_err(|_| format!("overflow casting {value:?} to uint128")),
-                _ => unreachable!(),
+                _ => Err(format!("cannot cast {:?} to {:?}", value.ty(), to)),
             }
         }
     }
