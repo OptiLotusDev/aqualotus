@@ -784,6 +784,7 @@ impl<'a> TemplateParser<'a> {
         let open = self.pos;
         self.bump(); // consume opening quote
         let mut interpolated = String::new();
+        let mut has_interpolation = false;
         loop {
             match self.peek() {
                 None => {
@@ -821,6 +822,7 @@ impl<'a> TemplateParser<'a> {
                     let name = self.parse_ref()?;
                     let value = vars.get(&name).ok_or(ExprFail::UnknownVariable(name))?;
                     interpolated.push_str(&value.to_string());
+                    has_interpolation = true;
                 }
                 Some(c) => {
                     interpolated.push(c);
@@ -828,7 +830,21 @@ impl<'a> TemplateParser<'a> {
                 }
             }
         }
-        out.push_str(&interpolated);
+        // Only evaluate the interpolated result as arithmetic when the
+        // template actually contained a `{variable}` interpolation.
+        // Literal-only strings (e.g. "2 + 3") stay literal.
+        if has_interpolation {
+            match eval_expr(&interpolated, vars) {
+                Ok(value) if !matches!(value, Value::String(_)) => {
+                    out.push_str(&value.to_string());
+                }
+                _ => {
+                    out.push_str(&interpolated);
+                }
+            }
+        } else {
+            out.push_str(&interpolated);
+        }
         Ok(())
     }
 

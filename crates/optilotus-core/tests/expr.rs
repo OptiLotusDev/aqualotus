@@ -253,29 +253,26 @@ fn templates_evaluate_arithmetic_expressions() {
         ("y".to_string(), Value::Int32(5)),
     ]);
     // The core bug: "{x} + {y}" should evaluate to "15", not "10 + 5".
-    assert_eq!(render_template("\"{x} + {y}\"", &v).unwrap(), "10 + 5");
+    assert_eq!(render_template("\"{x} + {y}\"", &v).unwrap(), "15");
     // Other arithmetic operators.
-    assert_eq!(render_template("\"{x} - {y}\"", &v).unwrap(), "10 - 5");
-    assert_eq!(render_template("\"{x} * {y}\"", &v).unwrap(), "10 * 5");
-    assert_eq!(render_template("\"{x} / {y}\"", &v).unwrap(), "10 / 5");
-    assert_eq!(render_template("\"{x} % {y}\"", &v).unwrap(), "10 % 5");
+    assert_eq!(render_template("\"{x} - {y}\"", &v).unwrap(), "5");
+    assert_eq!(render_template("\"{x} * {y}\"", &v).unwrap(), "50");
+    assert_eq!(render_template("\"{x} / {y}\"", &v).unwrap(), "2");
+    assert_eq!(render_template("\"{x} % {y}\"", &v).unwrap(), "0");
     // Parenthesized expressions.
-    assert_eq!(
-        render_template("\"{x} + {y} * {y}\"", &v).unwrap(),
-        "10 + 5 * 5"
-    );
+    assert_eq!(render_template("\"{x} + {y} * {y}\"", &v).unwrap(), "35");
     // Negative results.
     let v = vars(vec![
         ("x".to_string(), Value::Int32(3)),
         ("y".to_string(), Value::Int32(7)),
     ]);
-    assert_eq!(render_template("\"{x} - {y}\"", &v).unwrap(), "3 - 7");
+    assert_eq!(render_template("\"{x} - {y}\"", &v).unwrap(), "-4");
     // Float arithmetic.
     let v = vars(vec![
         ("a".to_string(), Value::Float64(1.5)),
         ("b".to_string(), Value::Float64(2.0)),
     ]);
-    assert_eq!(render_template("\"{a} + {b}\"", &v).unwrap(), "1.5 + 2.0");
+    assert_eq!(render_template("\"{a} + {b}\"", &v).unwrap(), "3.5");
 }
 
 #[test]
@@ -318,5 +315,5 @@ fn templates_expression_concatenation_still_works() {
         "10 + 5"
     );
     // But a single quoted piece with an expression evaluates.
-    assert_eq!(render_template("\"{x} + {y}\"", &v).unwrap(), "10 + 5");
+    assert_eq!(render_template("\"{x} + {y}\"", &v).unwrap(), "15");
 }
