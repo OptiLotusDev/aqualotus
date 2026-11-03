@@ -762,7 +762,13 @@ impl<'a> TemplateParser<'a> {
             Some('"') => self.parse_quoted(vars, out),
             Some('{') => {
                 let name = self.parse_ref()?;
-                let value = vars.get(&name).ok_or(ExprFail::UnknownVariable(name))?;
+                let value = if let Some(v) = vars.get(&name) {
+                    v.clone()
+                } else if name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                    return Err(ExprFail::UnknownVariable(name));
+                } else {
+                    eval_expr(&name, vars)?
+                };
                 out.push_str(&value.to_string());
                 Ok(())
             }
@@ -820,7 +826,15 @@ impl<'a> TemplateParser<'a> {
                 }
                 Some('{') => {
                     let name = self.parse_ref()?;
-                    let value = vars.get(&name).ok_or(ExprFail::UnknownVariable(name))?;
+                    let value = if let Some(v) = vars.get(&name) {
+                        v.clone()
+                    } else if name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                        return Err(ExprFail::UnknownVariable(name));
+                    } else {
+                        // Allow a brace-delimited arithmetic expression
+                        // (e.g. "{2 + 3}") in addition to variable names.
+                        eval_expr(&name, vars)?
+                    };
                     interpolated.push_str(&value.to_string());
                     has_interpolation = true;
                 }
