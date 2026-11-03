@@ -33,7 +33,10 @@ pub enum RunStatus {
         printed: Vec<String>,
         returned: Option<Value>,
     },
-    Error(ExecError),
+    Error {
+        error: ExecError,
+        printed: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -120,7 +123,10 @@ impl RunSession {
             };
         }
         if let Some(err) = &self.error {
-            return RunStatus::Error(err.clone());
+            return RunStatus::Error {
+                error: err.clone(),
+                printed: self.sink.lines.clone(),
+            };
         }
         if self.frames.is_empty() {
             return RunStatus::Finished {
@@ -144,7 +150,10 @@ impl RunSession {
             None => {
                 let e = ExecError::InvalidState;
                 self.error = Some(e.clone());
-                return RunStatus::Error(e);
+                return RunStatus::Error {
+                    error: e,
+                    printed: self.sink.lines.clone(),
+                };
             }
         };
         match parse_input_line(value, pending.ty) {
@@ -168,7 +177,10 @@ impl RunSession {
                     detail,
                 };
                 self.error = Some(e.clone());
-                RunStatus::Error(e)
+                RunStatus::Error {
+                    error: e,
+                    printed: self.sink.lines.clone(),
+                }
             }
         }
     }
@@ -515,7 +527,10 @@ pub fn provide_input(value: &str) -> RunStatus {
             run.provide_input(value)
         } else {
             let e = ExecError::InvalidState;
-            RunStatus::Error(e)
+            RunStatus::Error {
+                error: e,
+                printed: vec![],
+            }
         }
     })
 }
@@ -531,7 +546,10 @@ pub fn status() -> RunStatus {
         if let Some(run) = cell.borrow().as_ref() {
             run.status()
         } else {
-            RunStatus::Error(ExecError::InvalidState)
+            RunStatus::Error {
+                error: ExecError::InvalidState,
+                printed: vec![],
+            }
         }
     })
 }

@@ -116,7 +116,10 @@ fn provide_input_rejects_bad_parse() {
     let status = run_resumable::provide_input("abc");
     assert!(matches!(
         status,
-        run_resumable::RunStatus::Error(optilotus::ExecError::InputParse { .. })
+        run_resumable::RunStatus::Error {
+            error: optilotus::ExecError::InputParse { .. },
+            printed: _
+        }
     ));
 }
 
@@ -142,7 +145,10 @@ fn provide_input_without_pending_is_invalid_state() {
     let status = run_resumable::provide_input("anything");
     assert!(matches!(
         status,
-        run_resumable::RunStatus::Error(optilotus::ExecError::InvalidState)
+        run_resumable::RunStatus::Error {
+            error: optilotus::ExecError::InvalidState,
+            printed: _
+        }
     ));
 }
 
@@ -342,10 +348,10 @@ fn cancel_clears_state() {
     let _ = run_resumable::start(program);
     run_resumable::cancel();
     let st = run_resumable::status();
-    assert!(matches!(st, run_resumable::RunStatus::Error(_)));
+    assert!(matches!(st, run_resumable::RunStatus::Error { .. }));
     // Providing input with no active run is an error.
     let st = run_resumable::provide_input("1");
-    assert!(matches!(st, run_resumable::RunStatus::Error(_)));
+    assert!(matches!(st, run_resumable::RunStatus::Error { .. }));
     // A fresh start works after cancel.
     let program = Program {
         version: 1,
@@ -357,7 +363,7 @@ fn cancel_clears_state() {
     run_resumable::cancel();
     assert!(matches!(
         run_resumable::status(),
-        run_resumable::RunStatus::Error(_)
+        run_resumable::RunStatus::Error { .. }
     ));
 }
 
@@ -417,7 +423,7 @@ fn reset_clears_active_run() {
     let _ = run_resumable::start(program);
     run_resumable::reset();
     let st = run_resumable::status();
-    assert!(matches!(st, run_resumable::RunStatus::Error(_)));
+    assert!(matches!(st, run_resumable::RunStatus::Error { .. }));
     // Fresh start works after reset.
     let program = Program {
         version: 1,

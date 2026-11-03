@@ -658,17 +658,11 @@ fn run_status_json(status: crate::run_resumable::RunStatus) -> String {
             printed,
             returned,
         } => to_json(&RunOkResponse::new(steps, prints, printed, returned).with_debug(debug)),
-        RunStatus::Error(e) => {
-            crate::bridge::record_error(e.clone());
-            let printed = RUN.with(|cell| {
-                cell.borrow()
-                    .as_ref()
-                    .map(|r| r.sink.lines.clone())
-                    .unwrap_or_default()
-            });
-            let mut resp = exec_error_json(&e);
+        RunStatus::Error { error, printed } => {
+            crate::bridge::record_error(error.clone());
+            let mut resp = exec_error_json(&error);
             if !printed.is_empty() {
-                resp = resp.with_printed(printed);
+                resp = resp.with_printed(printed.clone());
             }
             to_json(&resp)
         }
@@ -895,7 +889,10 @@ pub fn run_program_provide_input_typed(value_json: &str) -> String {
                 None => {
                     let e = ExecError::InvalidState;
                     run.error = Some(e.clone());
-                    return run_status_json(RunStatus::Error(e));
+                    return run_status_json(RunStatus::Error {
+                        error: e,
+                        printed: run.sink.lines.clone(),
+                    });
                 }
             };
             let parsed: serde_json::Value = match serde_json::from_str(value_json) {
@@ -906,7 +903,10 @@ pub fn run_program_provide_input_typed(value_json: &str) -> String {
                         detail: "invalid JSON input".to_string(),
                     };
                     run.error = Some(e.clone());
-                    return run_status_json(RunStatus::Error(e));
+                    return run_status_json(RunStatus::Error {
+                        error: e,
+                        printed: run.sink.lines.clone(),
+                    });
                 }
             };
             match coerce_json_to_value(&parsed, pending.ty) {
@@ -920,7 +920,10 @@ pub fn run_program_provide_input_typed(value_json: &str) -> String {
                         detail,
                     };
                     run.error = Some(e.clone());
-                    run_status_json(RunStatus::Error(e))
+                    run_status_json(RunStatus::Error {
+                        error: e,
+                        printed: run.sink.lines.clone(),
+                    })
                 }
             }
         } else {
