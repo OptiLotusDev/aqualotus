@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use crate::ir::{CommandId, FunctionId};
+use crate::ops::Op;
 use crate::package::command_summary::CommandSummary;
 use crate::package::error::PackageError;
 use crate::package::kind::CommandKind;
@@ -97,6 +98,25 @@ impl Package {
                 .next;
             match next {
                 Some(n) if !meta.contains_key(&n) => {
+                    // Do not absorb hidden condition computes belonging to an
+                    // `if`: they are meta-less but are not part of this user
+                    // command's staged group.
+                    let cmd = func.find_command(n);
+                    let is_cond_compute = cmd
+                        .map(|c| {
+                            matches!(c.op, Op::Compute { .. })
+                                && func.commands.iter().any(|ic| {
+                                    if let Op::If { condition, .. } = &ic.op {
+                                        c.outputs.contains(condition)
+                                    } else {
+                                        false
+                                    }
+                                })
+                        })
+                        .unwrap_or(false);
+                    if is_cond_compute {
+                        break;
+                    }
                     ids.push(n);
                     current = n;
                 }

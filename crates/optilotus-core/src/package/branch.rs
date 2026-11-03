@@ -106,7 +106,35 @@ impl Package {
         // executor checks membership), the moved group ends its chain at
         // its last raw node, and its chain successor is read from there.
         let (tail_id, old_next, incoming_group) = {
-            let incoming_group = self.raw_group(fid, new_id)?;
+            // When moving an `Op::If`, its hidden condition compute (the
+            // meta-less `Op::Compute` immediately preceding it that
+            // produces its condition value) must travel with it and run
+            // first in the branch; otherwise the nested if executes with a
+            // dangling condition.
+            let cond_compute = if let Some(func) = self.functions.get(&fid) {
+                if let Some(cmd) = func.find_command(new_id) {
+                    if let Op::If { condition, .. } = &cmd.op {
+                        func.commands
+                            .iter()
+                            .find(|c| {
+                                c.next == Some(new_id)
+                                    && matches!(c.op, Op::Compute { .. })
+                                    && c.outputs.contains(condition)
+                            })
+                            .map(|c| c.id)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            let mut incoming_group = self.raw_group(fid, new_id)?;
+            if let Some(cc) = cond_compute {
+                incoming_group.insert(0, cc);
+            }
             let incoming_tail = *incoming_group
                 .last()
                 .expect("raw_group always returns at least the head");
@@ -151,12 +179,12 @@ impl Package {
             let Some(incoming) = function.find_command(new_id) else {
                 return Err(PackageError::UnknownCommand(new_id));
             };
-            // Engine parity with `stage_group`: branches take plain
-            // compute commands only.
+            // `Op::Return` stays rejected in branches; `Op::If` is allowed
+            // so nested ifs (else-if shape) can be appended.
             match incoming.op {
-                Op::If { .. } | Op::Return { .. } => {
+                Op::Return { .. } => {
                     return Err(PackageError::InvalidCommand(
-                        "if and return cannot join an `if` branch".to_string(),
+                        "return cannot join an `if` branch".to_string(),
                     ))
                 }
                 _ => {}
@@ -201,8 +229,18 @@ impl Package {
             // chains: every predecessor pointing at it adopts its old
             // `next`, so a move never tears a gap into the old chain.
             for prev in function.commands.iter_mut() {
-                if prev.next == Some(new_id) {
-                    prev.next = old_next;
+                if incoming_group.contains(&prev.id) {
+                    continue;
+                }
+                for &member in &incoming_group {
+                    if prev.next == Some(member) {
+                        prev.next = old_next;
+                    }
+                }
+            }
+            if let Some(entry) = function.entry {
+                if incoming_group.contains(&entry) {
+                    function.entry = old_next;
                 }
             }
             // The branch tail exits back to the join, so the appended
@@ -269,7 +307,10 @@ impl Package {
             let tail_cmd = function
                 .find_command_mut(t)
                 .ok_or(PackageError::UnknownCommand(t))?;
-            tail_cmd.next = Some(new_id);
+            let group_head = *incoming_group
+                .first()
+                .expect("raw_group always returns at least the head");
+            tail_cmd.next = Some(group_head);
         }
 
         // Phase 4: refresh the `if`'s summary in the meta map so the UI
@@ -362,6 +403,23 @@ impl Package {
                 ));
             }
         }
+        let old_condition = {
+            let function = self
+                .functions
+                .get(&fid)
+                .ok_or(PackageError::UnknownFunction(fid))?;
+            let command = function
+                .find_command(cmd_id)
+                .ok_or(PackageError::UnknownCommand(cmd_id))?;
+            match &command.op {
+                Op::If { condition, .. } => *condition,
+                _ => {
+                    return Err(PackageError::InvalidCommand(
+                        "expected an `if` command".to_string(),
+                    ))
+                }
+            }
+        };
         // Build the new condition compute without linking it, then splice
         // it directly in front of the `if` head: the `if` reads the
         // value at execution time, so the hidden compute must run just
@@ -389,6 +447,38 @@ impl Package {
             }
             if function.entry == Some(cmd_id) {
                 function.entry = Some(compute_id);
+            }
+            // Orphan the previous condition compute: move its predecessors
+            // onto the new compute and detach it from the live chain so the
+            // stale node no longer runs in front of the `if`.
+            let old_compute_id = function
+                .commands
+                .iter()
+                .find(|c| {
+                    c.outputs.contains(&old_condition)
+                        && matches!(c.op, Op::Compute { .. })
+                })
+                .map(|c| c.id);
+            if let Some(old_id) = old_compute_id {
+                if old_id != compute_id {
+                    let preds_old: Vec<CommandId> = function
+                        .commands
+                        .iter()
+                        .filter(|c| c.next == Some(old_id))
+                        .map(|c| c.id)
+                        .collect();
+                    for prev in preds_old {
+                        if let Some(p) = function.find_command_mut(prev) {
+                            p.next = Some(compute_id);
+                        }
+                    }
+                    if function.entry == Some(old_id) {
+                        function.entry = Some(compute_id);
+                    }
+                    if let Some(c) = function.find_command_mut(old_id) {
+                        c.next = None;
+                    }
+                }
             }
             if let Some(c) = function.find_command_mut(compute_id) {
                 c.next = Some(cmd_id);
