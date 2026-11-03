@@ -16,6 +16,7 @@
     "tauri:build": "npm --prefix apps/aqualotus-ui run tauri:build",
     "mobile:sync": "npm --prefix apps/aqualotus-ui run mobile:sync",
     "mobile:android": "npm --prefix apps/aqualotus-ui run mobile:android",
-    "mobile:ios": "npm --prefix apps/aqualotus-ui run mobile:ios"
+    "mobile:ios": "npm --prefix apps/aqualotus-ui run mobile:ios",
+    "bench:rust": "cargo run -p optilotus-bench --release"
   }
 }
